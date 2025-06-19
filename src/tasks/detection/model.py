@@ -7,7 +7,7 @@ import torch.nn.functional as F
 import pytorch_lightning as pl
 from torchmetrics.detection import MeanAveragePrecision
 from transformers import AutoModelForObjectDetection, AutoConfig, PreTrainedModel
-from .adapters import get_output_adapter, DETROutputAdapter
+from .adapters import get_adapter, DETROutputAdapter
 
 @dataclass
 class DetectionModelConfig:
@@ -26,6 +26,7 @@ class DetectionModelConfig:
     task_type: str = "detection"
     class_names: Optional[List[str]] = None
     model_kwargs: Optional[Dict[str, Any]] = None
+    image_size: int = 640
 
 class DetectionModel(pl.LightningModule):
     """Base detection model that can work with any Hugging Face object detection model."""
@@ -43,8 +44,11 @@ class DetectionModel(pl.LightningModule):
         # Initialize metrics
         self._init_metrics()
         
-        # Initialize output adapter
-        self.output_adapter = get_output_adapter(config.model_name)
+        # Initialize output adapter with image size from config
+        self.output_adapter = get_adapter(
+            config.model_name,
+            image_size=config.image_size if hasattr(config, 'image_size') else 640
+        )
     
     def _init_model(self) -> None:
         """Initialize the model architecture."""
@@ -68,26 +72,24 @@ class DetectionModel(pl.LightningModule):
             self.model.config.confidence_threshold = self.config.confidence_threshold
             self.model.config.iou_threshold = self.config.iou_threshold
             self.model.config.max_detections = self.config.max_detections
+            
+            # Save model config for checkpointing
+            self.model_config = model_config
         except Exception as e:
             raise RuntimeError(f"Failed to initialize model: {str(e)}")
     
     def _init_metrics(self) -> None:
         """Initialize metrics for training, validation, and testing."""
-        self.train_map = MeanAveragePrecision(
-            box_format="xyxy",
-            iou_type="bbox",
-            class_metrics=True
-        )
-        self.val_map = MeanAveragePrecision(
-            box_format="xyxy",
-            iou_type="bbox",
-            class_metrics=True
-        )
-        self.test_map = MeanAveragePrecision(
-            box_format="xyxy",
-            iou_type="bbox",
-            class_metrics=True
-        )
+        # MeanAveragePrecision expects absolute pixel coordinates
+        metric_kwargs = {
+            "box_format": "xyxy",
+            "iou_type": "bbox",
+            "class_metrics": True
+        }
+        
+        self.train_map = MeanAveragePrecision(**metric_kwargs)
+        self.val_map = MeanAveragePrecision(**metric_kwargs)
+        self.test_map = MeanAveragePrecision(**metric_kwargs)
     
     def forward(
         self,
@@ -113,33 +115,40 @@ class DetectionModel(pl.LightningModule):
         if pixel_values.dim() != 4:
             raise ValueError(f"Expected 4D input tensor, got {pixel_values.dim()}D")
         
-        # Adapt targets if needed
-        if labels is not None:
-            labels = self.output_adapter.adapt_targets(labels)
+        # No need to adapt targets - they're already in the correct format from the data adapter
             
         outputs = self.model(
             pixel_values=pixel_values,
             pixel_mask=pixel_mask,
             labels=labels
         )
-        return self.output_adapter.adapt_output(outputs)
+        
+        # Extract and adapt outputs
+        adapted_outputs = self.output_adapter.adapt_output(outputs)
+        
+        # Ensure loss_dict exists
+        if "loss_dict" not in adapted_outputs:
+            adapted_outputs["loss_dict"] = {}
+        
+        return adapted_outputs
     
-    def _format_predictions(self, outputs: Dict[str, Any]) -> List[Dict[str, torch.Tensor]]:
+    def _format_predictions(self, outputs: Dict[str, Any], batch: Optional[Dict[str, Any]] = None) -> List[Dict[str, torch.Tensor]]:
         """Format model outputs for metric computation.
         
         Args:
             outputs: Model outputs dictionary
+            batch: Optional batch dictionary for getting target sizes
             
         Returns:
             List of prediction dictionaries for each image
         """
-        return self.output_adapter.format_predictions(outputs)
+        return self.output_adapter.format_predictions(outputs, batch)
     
     def _format_targets(self, batch: Dict[str, torch.Tensor]) -> List[Dict[str, torch.Tensor]]:
         """Format batch targets for metric computation.
         
         Args:
-            batch: Batch dictionary containing targets
+            batch: Dictionary containing targets
             
         Returns:
             List of target dictionaries for each image
@@ -152,21 +161,31 @@ class DetectionModel(pl.LightningModule):
         self.log(name, value, **kwargs)
     
     def training_step(self, batch: Dict[str, torch.Tensor], batch_idx: int) -> torch.Tensor:
-        """Training step."""
+        """Training step.
+        
+        Args:
+            batch: Dictionary containing:
+                - pixel_values: Batch of images
+                - labels: List of target dictionaries
+            batch_idx: Batch index
+            
+        Returns:
+            Loss tensor
+        """
+        # Forward pass
         outputs = self(
             pixel_values=batch["pixel_values"],
-            pixel_mask=batch.get("pixel_mask"),
             labels=batch["labels"]
         )
         
         # Format predictions and targets for metrics
-        preds = self._format_predictions(outputs)
+        preds = self._format_predictions(outputs, batch)
         targets = self._format_targets(batch)
         
         # Update metrics
         self.train_map.update(preds=preds, target=targets)
         
-        # Log metrics using PyTorch Lightning's logging
+        # Log metrics
         self.log("train_loss", outputs["loss"], on_step=True, on_epoch=True, prog_bar=True)
         for k, v in outputs["loss_dict"].items():
             self.log(f"train_{k}", v, on_step=True, on_epoch=True)
@@ -202,17 +221,19 @@ class DetectionModel(pl.LightningModule):
         """Validation step.
         
         Args:
-            batch: Batch of data
+            batch: Dictionary containing:
+                - pixel_values: Batch of images
+                - labels: List of target dictionaries
             batch_idx: Batch index
         """
+        # Forward pass
         outputs = self(
             pixel_values=batch["pixel_values"],
-            pixel_mask=batch.get("pixel_mask"),
             labels=batch["labels"]
         )
         
         # Format predictions and targets for metrics
-        preds = self._format_predictions(outputs)
+        preds = self._format_predictions(outputs, batch)
         targets = self._format_targets(batch)
         
         # Update metrics
@@ -220,6 +241,8 @@ class DetectionModel(pl.LightningModule):
         
         # Log metrics
         self.log("val_loss", outputs["loss"], on_step=True, on_epoch=True, prog_bar=True)
+        for k, v in outputs["loss_dict"].items():
+            self.log(f"val_{k}", v, on_step=True, on_epoch=True)
     
     def on_validation_epoch_end(self) -> None:
         """Calculate and log mAP metrics at the end of validation epoch."""
@@ -250,17 +273,19 @@ class DetectionModel(pl.LightningModule):
         """Test step.
         
         Args:
-            batch: Batch of data
+            batch: Dictionary containing:
+                - pixel_values: Batch of images
+                - labels: List of target dictionaries
             batch_idx: Batch index
         """
+        # Forward pass
         outputs = self(
             pixel_values=batch["pixel_values"],
-            pixel_mask=batch.get("pixel_mask"),
             labels=batch["labels"]
         )
         
         # Format predictions and targets for metrics
-        preds = self._format_predictions(outputs)
+        preds = self._format_predictions(outputs, batch)
         targets = self._format_targets(batch)
         
         # Update metrics
@@ -298,27 +323,80 @@ class DetectionModel(pl.LightningModule):
     
     def configure_optimizers(self):
         """Configure optimizers and learning rate schedulers."""
-        optimizer = torch.optim.AdamW(
-            self.parameters(),
-            lr=self.config.learning_rate,
-            weight_decay=self.config.weight_decay
-        )
+        # Get optimizer parameters from config
+        optimizer_params = {
+            "lr": self.config.learning_rate,
+            "weight_decay": self.config.weight_decay
+        }
         
+        # Check if model has a backbone (common in vision models)
+        if hasattr(self.model, 'backbone'):
+            # Separate parameters for backbone and other parts
+            backbone_params = []
+            other_params = []
+            
+            for name, param in self.named_parameters():
+                if "backbone" in name:
+                    backbone_params.append(param)
+                else:
+                    other_params.append(param)
+            
+            # Create parameter groups with different learning rates
+            param_groups = [
+                {
+                    "params": backbone_params,
+                    "lr": self.config.learning_rate * 0.1,  # Lower learning rate for backbone
+                    "weight_decay": self.config.weight_decay
+                },
+                {
+                    "params": other_params,
+                    "lr": self.config.learning_rate,  # Higher learning rate for task-specific parts
+                    "weight_decay": self.config.weight_decay
+                }
+            ]
+            
+            # Create optimizer with parameter groups
+            optimizer = torch.optim.AdamW(param_groups)
+        else:
+            # If no backbone, use standard optimizer
+            optimizer = torch.optim.AdamW(self.parameters(), **optimizer_params)
+        
+        # Configure scheduler with warmup
         if self.config.scheduler == "cosine":
-            scheduler_params = self.config.scheduler_params or {
-                "T_max": self.config.epochs,
-                "eta_min": 1e-6
-            }
-            scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
+            # Calculate total steps and warmup steps
+            total_steps = self.config.epochs * len(self.trainer.datamodule.train_dataloader())
+            warmup_steps = int(total_steps * 0.1)  # 10% of total steps for warmup
+            
+            # Create warmup scheduler
+            warmup_scheduler = torch.optim.lr_scheduler.LinearLR(
                 optimizer,
-                **scheduler_params
+                start_factor=0.1,
+                end_factor=1.0,
+                total_iters=warmup_steps
             )
+            
+            # Create cosine scheduler
+            cosine_scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
+                optimizer,
+                T_max=total_steps - warmup_steps,
+                eta_min=1e-6
+            )
+            
+            # Combine schedulers
+            scheduler = torch.optim.lr_scheduler.SequentialLR(
+                optimizer,
+                schedulers=[warmup_scheduler, cosine_scheduler],
+                milestones=[warmup_steps]
+            )
+            
             return {
                 "optimizer": optimizer,
                 "lr_scheduler": {
                     "scheduler": scheduler,
-                    "interval": "epoch"
-                }
+                    "interval": "step",  # Update learning rate every step
+                    "frequency": 1
+                },
+                "gradient_clip_val": 0.1  # Add gradient clipping
             }
         return optimizer
     
@@ -364,8 +442,14 @@ class DetectionModel(pl.LightningModule):
         Args:
             checkpoint: Dictionary to save state to
         """
-        checkpoint["model_config"] = self.config.__dict__
+        checkpoint["model_config"] = self.model_config.to_dict()
         checkpoint["class_names"] = self.config.class_names
+        checkpoint["optimizer_params"] = {
+            "learning_rate": self.config.learning_rate,
+            "weight_decay": self.config.weight_decay,
+            "scheduler": self.config.scheduler,
+            "scheduler_params": self.config.scheduler_params
+        }
     
     def on_load_checkpoint(self, checkpoint: Dict[str, Any]) -> None:
         """Load additional state from checkpoint.
@@ -374,6 +458,12 @@ class DetectionModel(pl.LightningModule):
             checkpoint: Dictionary to load state from
         """
         if "model_config" in checkpoint:
-            self.config = DetectionModelConfig(**checkpoint["model_config"])
+            self.model_config = AutoConfig.from_dict(checkpoint["model_config"])
         if "class_names" in checkpoint:
-            self.config.class_names = checkpoint["class_names"] 
+            self.config.class_names = checkpoint["class_names"]
+        if "optimizer_params" in checkpoint:
+            params = checkpoint["optimizer_params"]
+            self.config.learning_rate = params["learning_rate"]
+            self.config.weight_decay = params["weight_decay"]
+            self.config.scheduler = params["scheduler"]
+            self.config.scheduler_params = params["scheduler_params"] 

@@ -1,263 +1,217 @@
 from abc import ABC, abstractmethod
-from typing import Dict, Any, Optional, List
+from typing import Dict, Any, Optional, List, Tuple
 import torch
+from transformers import AutoImageProcessor
+from transformers.models.detr.modeling_detr import DetrObjectDetectionOutput
+from pycocotools.coco import COCO
+from pycocotools.cocoeval import COCOeval
+import numpy as np
+from PIL import Image
+import torchvision.transforms.functional as F
 
-class OutputAdapter(ABC):
-    """Base class for model output adapters."""
+class BaseAdapter(ABC):
+    """Base class for model-specific data adapters."""
     
     @abstractmethod
-    def adapt_output(self, outputs: Dict[str, Any]) -> Dict[str, Any]:
-        """Adapt model outputs to standard format.
+    def __call__(self, image: Image.Image, target: Dict) -> Tuple[torch.Tensor, Dict]:
+        """Process a single sample.
         
         Args:
-            outputs: Raw model outputs
+            image: A PIL image
+            target: A dictionary containing 'boxes' and 'labels'
             
         Returns:
-            Adapted outputs in standard format
-        """
-        pass
-    
-    @abstractmethod
-    def adapt_targets(self, targets: Dict[str, Any]) -> Dict[str, Any]:
-        """Adapt targets to model-specific format.
-        
-        Args:
-            targets: Standard format targets
-            
-        Returns:
-            Adapted targets in model-specific format
-        """
-        pass
-    
-    @abstractmethod
-    def format_predictions(self, outputs: Dict[str, Any]) -> List[Dict[str, torch.Tensor]]:
-        """Format model outputs for metric computation.
-        
-        Args:
-            outputs: Model outputs dictionary
-            
-        Returns:
-            List of prediction dictionaries for each image
-        """
-        pass
-    
-    @abstractmethod
-    def format_targets(self, targets: Dict[str, torch.Tensor]) -> List[Dict[str, torch.Tensor]]:
-        """Format targets for metric computation.
-        
-        Args:
-            targets: Standard format targets
-            
-        Returns:
-            List of target dictionaries for each image
+            A tuple containing the processed image tensor and target dictionary
         """
         pass
 
-class DETROutputAdapter(OutputAdapter):
+class NoOpAdapter(BaseAdapter):
+    """A "No-Operation" adapter.
+    - Converts image to a tensor
+    - Keeps targets in the standard [x1, y1, x2, y2] absolute pixel format
+    - Suitable for models like torchvision's Faster R-CNN
+    """
+    def __call__(self, image: Image.Image, target: Dict) -> Tuple[torch.Tensor, Dict]:
+        target["class_labels"] = target["labels"]  # Rename for consistency
+        return F.to_tensor(image), target
+
+class DETRAdapter(BaseAdapter):
+    """Adapter for DETR-like models (DETR, YOLOS, etc.).
+    - Converts image to a tensor
+    - Converts bounding boxes from [x1, y1, x2, y2] absolute pixels to
+      [cx, cy, w, h] normalized format
+    - Handles image resizing according to DETR guidelines
+    """
+    def __init__(self, model_name: str, image_size: int = 800):
+        self.image_size = image_size
+        self.processor = AutoImageProcessor.from_pretrained(
+            model_name,
+            size={"height": image_size, "width": image_size},
+            do_resize=True,
+            do_rescale=True,
+            do_normalize=True,
+            do_pad=True
+        )
+    
+    def __call__(self, image: Image.Image, target: Dict) -> Tuple[torch.Tensor, Dict]:
+        # Get original image size
+        w, h = image.size
+        
+        # Convert boxes from [x1, y1, x2, y2] to [cx, cy, w, h]
+        boxes_xyxy = target["boxes"]
+        if boxes_xyxy.shape[0] == 0:
+            # Handle cases with no annotations
+            boxes_cxcwh = torch.zeros((0, 4), dtype=torch.float32)
+        else:
+            # Convert to center format
+            boxes_cxcwh = self._xyxy_to_cxcwh(boxes_xyxy)
+        
+        # Normalize boxes by original image size
+        boxes_cxcwh_normalized = boxes_cxcwh / torch.tensor([w, h, w, h], dtype=torch.float32)
+        
+        # Update target dictionary
+        adapted_target = {
+            "boxes": boxes_cxcwh_normalized,
+            "class_labels": target["labels"],
+            "image_id": target["image_id"],
+            "orig_size": torch.tensor([h, w]),
+            "size": torch.tensor([h, w])  # Original size before processing
+        }
+        
+        # Use processor for complete image preprocessing (resize, pad, normalize)
+        processed = self.processor(
+            image,
+            return_tensors="pt",
+            do_resize=True,  # Let processor handle resizing
+            do_rescale=True,
+            do_normalize=True,
+            do_pad=True  # Enable padding to ensure consistent size
+        )
+        
+        return processed.pixel_values.squeeze(0), adapted_target
+    
+    @staticmethod
+    def _xyxy_to_cxcwh(boxes_xyxy: torch.Tensor) -> torch.Tensor:
+        """Converts [x1, y1, x2, y2] to [center_x, center_y, width, height]"""
+        x1, y1, x2, y2 = boxes_xyxy.unbind(1)
+        b = [(x1 + x2) / 2, (y1 + y2) / 2, (x2 - x1), (y2 - y1)]
+        return torch.stack(b, dim=-1)
+
+class DETROutputAdapter:
     """Adapter for DETR model outputs."""
     
+    def __init__(self, model_name: str, image_size: int = 800):
+        self.image_size = image_size
+        self.processor = AutoImageProcessor.from_pretrained(
+            model_name,
+            size={"height": image_size, "width": image_size}
+        )
+    
     def adapt_output(self, outputs: Dict[str, Any]) -> Dict[str, Any]:
-        """Adapt DETR outputs to standard format.
-        
-        Args:
-            outputs: Raw DETR outputs
-            
-        Returns:
-            Adapted outputs in standard format
-        """
-        # Convert center format boxes to corner format
-        pred_boxes = outputs.pred_boxes
-        if pred_boxes is not None:
-            # Convert from [center_x, center_y, width, height] to [x0, y0, x1, y1]
-            pred_boxes = self._center_to_corner(pred_boxes)
+        """Adapt DETR outputs to standard format."""
+        loss = getattr(outputs, "loss", None)
+        if loss is None and isinstance(outputs, dict):
+            loss = outputs.get("loss")
         
         return {
-            "loss": outputs.loss,
-            "pred_boxes": pred_boxes,
+            "loss": loss,
+            "pred_boxes": outputs.pred_boxes,
             "pred_logits": outputs.logits,
-            "loss_dict": outputs.loss_dict
+            "loss_dict": getattr(outputs, "loss_dict", {})
         }
     
-    def adapt_targets(self, targets: Dict[str, Any]) -> Dict[str, Any]:
-        """Adapt targets to the format expected by DETR.
+    def format_predictions(self, outputs: Dict[str, Any], batch: Optional[Dict[str, Any]] = None) -> List[Dict[str, torch.Tensor]]:
+        """Format DETR outputs for metric computation."""
+        detection_output = DetrObjectDetectionOutput(
+            logits=outputs["pred_logits"],
+            pred_boxes=outputs["pred_boxes"]
+        )
         
-        Args:
-            targets: Dictionary containing:
-                - boxes: List of bounding box tensors
-                - class_labels: List of class label tensors
-                - image_id: Tensor of image IDs
+        # Get target sizes from the batch
+        target_sizes = []
+        if batch and "labels" in batch:
+            for target in batch["labels"]:
+                if "size" in target:
+                    target_sizes.append(target["size"].tolist())
+                else:
+                    target_sizes.append([self.image_size, self.image_size])
+        else:
+            # Fallback: use default size for all images
+            batch_size = outputs["pred_logits"].shape[0]
+            target_sizes = [[self.image_size, self.image_size]] * batch_size
         
-        Returns:
-            List of target dictionaries in DETR format
-        """
-        adapted_targets = []
+        # Use processor's postprocessing
+        processed_outputs = self.processor.post_process_object_detection(
+            detection_output,
+            threshold=0.7,
+            target_sizes=target_sizes
+        )
         
-        # Get the number of images in the batch
-        num_images = len(targets["boxes"])
-        
-        for i in range(num_images):
-            # Get current image's boxes and labels
-            boxes = targets["boxes"][i]
-            class_labels = targets["class_labels"][i]
-            image_id = targets["image_id"][i]
-            
-            # Handle empty boxes
-            if len(boxes) == 0:
-                # Create empty tensors with correct shape
-                boxes = torch.zeros((0, 4), dtype=torch.float32, device=boxes.device)
-                class_labels = torch.zeros(0, dtype=torch.int64, device=class_labels.device)
-            else:
-                # Convert boxes to center format for DETR
-                boxes = self._corner_to_center(boxes)
-            
-            # Create target dictionary for current image
-            target = {
-                "boxes": boxes,
-                "class_labels": class_labels,  # Keep original key for DETR
-                "labels": class_labels,  # Add labels key for compatibility
-                "image_id": image_id
-            }
-            adapted_targets.append(target)
-        
-        return adapted_targets
-    
-    def format_predictions(self, outputs: Dict[str, Any]) -> List[Dict[str, torch.Tensor]]:
-        """Format DETR outputs for metric computation.
-        
-        Args:
-            outputs: DETR outputs dictionary
-            
-        Returns:
-            List of prediction dictionaries for each image
-        """
         preds = []
-        for i in range(len(outputs["pred_boxes"])):
-            # Ensure tensors are on the same device
-            boxes = outputs["pred_boxes"][i]
-            logits = outputs["pred_logits"][i]
+        for i, processed_output in enumerate(processed_outputs):
+            boxes = processed_output["boxes"]
+            scores = processed_output["scores"]
+            labels = processed_output["labels"]
             
-            # Handle empty predictions
-            if len(boxes) == 0:
-                preds.append({
-                    "boxes": torch.zeros((0, 4), dtype=torch.float32, device=boxes.device),
-                    "scores": torch.zeros(0, dtype=torch.float32, device=logits.device),
-                    "labels": torch.zeros(0, dtype=torch.int64, device=logits.device)
-                })
-                continue
-            
-            # Convert boxes from center format to corner format for mAP
-            boxes = self._center_to_corner(boxes)
-            
-            # Compute scores and labels
-            scores = logits.softmax(dim=-1)[..., :-1].max(dim=-1)[0]
-            labels = logits.softmax(dim=-1)[..., :-1].argmax(dim=-1)
+            # Get image_id from batch if available
+            image_id = torch.tensor([i])
+            if batch and "labels" in batch and i < len(batch["labels"]):
+                image_id = batch["labels"][i].get("image_id", torch.tensor([i]))
             
             preds.append({
-                "boxes": boxes,
+                "boxes": boxes,  # Already in [x1, y1, x2, y2] format in absolute pixels
                 "scores": scores,
-                "labels": labels
+                "labels": labels,
+                "image_id": image_id
             })
+        
         return preds
-    
-    def format_targets(self, targets: Dict[str, Any]) -> List[Dict[str, torch.Tensor]]:
-        """Format targets for metric computation.
-        
-        Args:
-            targets: Dictionary containing:
-                - boxes: List of bounding box tensors
-                - class_labels: List of class label tensors
-                - image_id: Tensor of image IDs
-        
-        Returns:
-            List of target dictionaries for each image
-        """
-        target_list = []
-        
-        # Get the number of images in the batch
-        num_images = len(targets["boxes"])
-        
-        for i in range(num_images):
-            # Get current image's boxes and labels
-            boxes = targets["boxes"][i]
-            class_labels = targets["class_labels"][i]
-            
-            # Handle empty boxes
-            if len(boxes) == 0:
-                target_list.append({
-                    "boxes": torch.zeros((0, 4), dtype=torch.float32, device=boxes.device),
-                    "labels": torch.zeros(0, dtype=torch.int64, device=class_labels.device)
-                })
-                continue
-            
-            # Convert boxes from center format to corner format for mAP
-            boxes = self._center_to_corner(boxes)
-            
-            target_list.append({
-                "boxes": boxes,
-                "labels": class_labels
-            })
-        
-        return target_list
-    
-    def _center_to_corner(self, boxes: torch.Tensor) -> torch.Tensor:
-        """Convert boxes from [center_x, center_y, width, height] to [x0, y0, x1, y1] format.
-        
-        Args:
-            boxes: Boxes in center format
-            
-        Returns:
-            Boxes in corner format
-        """
-        x_center, y_center, width, height = boxes.unbind(-1)
-        x0 = x_center - width / 2
-        y0 = y_center - height / 2
-        x1 = x_center + width / 2
-        y1 = y_center + height / 2
-        return torch.stack([x0, y0, x1, y1], dim=-1)
-    
-    def _corner_to_center(self, boxes: torch.Tensor) -> torch.Tensor:
-        """Convert boxes from [x0, y0, x1, y1] to [center_x, center_y, width, height] format.
-        
-        Args:
-            boxes: Boxes in corner format
-            
-        Returns:
-            Boxes in center format
-        """
-        x0, y0, x1, y1 = boxes.unbind(-1)
-        center_x = (x0 + x1) / 2
-        center_y = (y0 + y1) / 2
-        width = x1 - x0
-        height = y1 - y0
-        return torch.stack([center_x, center_y, width, height], dim=-1)
 
-class YOLOOutputAdapter(OutputAdapter):
-    """Adapter for YOLO model outputs."""
-    
-    def adapt_output(self, outputs: Any) -> Dict[str, torch.Tensor]:
-        """Adapt YOLO outputs to standard format.
+    def format_targets(self, targets: List[Dict[str, torch.Tensor]]) -> List[Dict[str, torch.Tensor]]:
+        """Format batch targets for metric computation.
+        
+        Converts targets from DETR format ([cx, cy, w, h] normalized) to metric format ([x1, y1, x2, y2] absolute pixels).
         
         Args:
-            outputs: YOLO model outputs
-            
+            targets: List of target dictionaries, each containing:
+                - boxes: Tensor of shape [N, 4] in [cx, cy, w, h] normalized format
+                - class_labels: Tensor of shape [N] containing class indices
+                - size: Tensor of shape [2] containing image size [h, w]
+                - image_id: Tensor containing image ID
+                
         Returns:
-            Dictionary with standardized keys
+            List of target dictionaries for each image in the batch
         """
-        # Implement YOLO-specific adaptation
-        pass
-
-def get_output_adapter(model_name: str) -> OutputAdapter:
-    """Get the appropriate output adapter for a model.
-    
-    Args:
-        model_name: Name of the model
+        formatted_targets = []
         
-    Returns:
-        Appropriate output adapter
-    """
+        for i, target in enumerate(targets):
+            boxes = target["boxes"]
+            labels = target["class_labels"]
+            size = target["size"]
+            image_id = target.get("image_id", torch.tensor([i]))
+            
+            # Convert from [cx, cy, w, h] normalized to [x1, y1, x2, y2] absolute pixels
+            h, w = size
+            boxes_xyxy = torch.zeros_like(boxes)
+            boxes_xyxy[:, 0] = (boxes[:, 0] - boxes[:, 2] / 2) * w  # x1
+            boxes_xyxy[:, 1] = (boxes[:, 1] - boxes[:, 3] / 2) * h  # y1
+            boxes_xyxy[:, 2] = (boxes[:, 0] + boxes[:, 2] / 2) * w  # x2
+            boxes_xyxy[:, 3] = (boxes[:, 1] + boxes[:, 3] / 2) * h  # y2
+            
+            # Create target dictionary
+            formatted_target = {
+                "boxes": boxes_xyxy,  # Now in [x1, y1, x2, y2] format in absolute pixels
+                "labels": labels,
+                "image_id": image_id
+            }
+            
+            formatted_targets.append(formatted_target)
+        
+        return formatted_targets
+
+def get_adapter(model_name: str, image_size: int = 800) -> BaseAdapter:
+    """Get the appropriate adapter for a model."""
     if "detr" in model_name.lower():
-        return DETROutputAdapter()
-    elif "yolo" in model_name.lower():
-        return YOLOOutputAdapter()
+        return DETRAdapter(model_name=model_name, image_size=image_size)
     else:
-        raise ValueError(f"No output adapter found for model: {model_name}") 
+        return NoOpAdapter() 

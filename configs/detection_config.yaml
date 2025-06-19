@@ -1,83 +1,88 @@
 # Model Configuration
 model:
-  # Model architecture
-  model_name: "facebook/detr-resnet-50"
-  num_classes: 80  # COCO classes
-  pretrained: true
-  
-  # Training hyperparameters
-  learning_rate: 0.0004
-  weight_decay: 0.0004
-  scheduler: "cosine"
-  scheduler_params:
-    T_max: 100
-    eta_min: 0.00006
-  epochs: 5
-  
-  # Task-specific settings
+  model_name: "facebook/detr-resnet-50"  # Base DETR model
   task_type: "detection"
-  class_names: null  # Will be loaded from COCO annotations
-  
-  # Detection-specific settings
-  confidence_threshold: 0.5
+  num_classes: 80  # COCO dataset has 80 classes
+  pretrained: true
+  confidence_threshold: 0.7
   iou_threshold: 0.5
   max_detections: 100
-
-# Training Configuration
-training:
-  # Batch and optimization settings
-  batch_size: 16
-  num_workers: 4
-  gradient_clip_val: 1.0
-  gradient_clip_algorithm: "norm"
-  accumulate_grad_batches: 1
-  
-  # Early stopping and checkpointing
-  early_stopping_patience: 10
-  checkpoint_dir: "/Volumes/users/aradhya_chouhan/coco_mini-train/data/checkpoints/"
-  save_top_k: 3
-  monitor: "val_loss"
-  mode: "min"
-  
-  # Logging settings
-  log_every_n_steps: 50
-  log_metrics: true
-  log_artifacts: true
-  
-  # Ray distributed training settings
-  distributed: false
-  use_gpu: true
-  resources_per_worker:
-    CPU: 2
-    GPU: 1
+  image_size: 800  # DETR's default image size
+  class_names: null  # Will be loaded from COCO annotations
+  model_kwargs: {}  # Additional model arguments
 
 # Data Configuration
 data:
-  # Dataset paths
-  train_path: "/Volumes/users/aradhya_chouhan/coco_mini-train/data/val2017/"
-  val_path: "/Volumes/users/aradhya_chouhan/coco_mini-train/data/val2017/"
-  test_path: "/Volumes/users/aradhya_chouhan/coco_mini-train/data/val2017/"
+  # Base paths for data loading
+  data_path: "/Volumes/users/aradhya_chouhan/coco_mini-train/data/val2017/"
   annotation_file: "/Volumes/users/aradhya_chouhan/coco_mini-train/data/instances_val2017.json"
   
-  # Data processing
-  image_size: [800, 800]  # DETR default size
-  normalize_mean: [0.485, 0.456, 0.406]
+  # Data loading parameters
+  batch_size: 16  # DETR's recommended batch size per GPU
+  num_workers: 4
+  model_name: "facebook/detr-resnet-50"  # Required for adapter initialization
+  
+  # Image processing
+  image_size: [800, 800]  # [height, width]
+  normalize_mean: [0.485, 0.456, 0.406]  # ImageNet normalization
   normalize_std: [0.229, 0.224, 0.225]
   
-  # Data loading
-  augment: true
-  num_workers: 4
-  pin_memory: true
-  
-  # Augmentation settings
-  augmentations:
+  # Data augmentation
+  augment:
     horizontal_flip: true
     vertical_flip: false
-    rotation: 15
-    color_jitter:
-      brightness: 0.2
-      contrast: 0.2
-      saturation: 0.2
-      hue: 0.1
-    random_crop: true
-    random_resize: [0.8, 1.2]
+    rotation: 10  # degrees
+    brightness_contrast: 0.2
+    hue_saturation: 0.1
+
+# Training Configuration
+training:
+  # Basic training parameters
+  max_epochs: 50  # DETR's default training epochs
+  
+  # Learning rate and optimization
+  learning_rate: 1e-4
+  weight_decay: 1e-4
+  scheduler: "cosine"
+  scheduler_params:
+    T_max: 300
+    eta_min: 1e-6
+  
+  # Early stopping
+  early_stopping_patience: 20
+  monitor_metric: "val_map"  # Metric to monitor
+  monitor_mode: "max"  # Maximize the monitored metric
+  
+  # Checkpointing
+  checkpoint_dir: "/Volumes/users/aradhya_chouhan/coco_mini-train/data/checkpoints/detection"
+  save_top_k: 3
+  
+  # Logging
+  log_every_n_steps: 50
+  log_dir: "/Volumes/users/aradhya_chouhan/coco_mini-train/data/logs"
+  
+  # Distributed training
+  distributed: false
+  use_gpu: true
+  resources_per_worker:
+    CPU: 4
+    GPU: 1
+
+# MLflow Configuration
+mlflow:
+  experiment_name: "detection_training"
+  run_name: "detr_resnet50"
+  log_model: true
+  tags:
+    framework: "pytorch_lightning"
+    model: "detr"
+    dataset: "coco"
+
+# Output Configuration
+output:
+  results_dir: "/Volumes/users/aradhya_chouhan/coco_mini-train/data/results/detection"
+  save_predictions: true
+  visualization:
+    save_images: true
+    confidence_threshold: 0.5
+    max_boxes: 20

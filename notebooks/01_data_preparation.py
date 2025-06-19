@@ -33,8 +33,6 @@
 import sys
 import os
 from pathlib import Path
-import mlflow
-import torch
 from torch.utils.data import DataLoader
 import yaml
 
@@ -46,6 +44,7 @@ sys.path.append(project_root)
 from src.utils.coco_handler import COCOHandler
 from src.utils.logging import setup_logger
 from src.tasks.detection.data import DetectionDataModule, DetectionDataConfig
+from src.tasks.detection.adapters import get_adapter
 from src.tasks.classification.data import ClassificationDataModule, ClassificationDataConfig
 from src.tasks.segmentation.data import SegmentationDataModule, SegmentationDataConfig
 
@@ -92,23 +91,32 @@ def setup_data_module(task: str, config):
     
     DataModule, DataConfig = data_modules[task]
     
+    # Create data config
     data_config = DataConfig(
-        data_path=config['data']['train_path'],
+        data_path=config['data']['data_path'],
         annotation_file=config['data']['annotation_file'],
-        image_size=config['data']['image_size'][0],  # Use first dimension as size
-        mean=tuple(config['data']['normalize_mean']),
-        std=tuple(config['data']['normalize_std']),
-        batch_size=config['training']['batch_size'],
-        num_workers=config['training']['num_workers'],
-        horizontal_flip=config['data']['augment']['horizontal_flip'],
-        vertical_flip=config['data']['augment']['vertical_flip'],
-        rotation=config['data']['augment']['rotation'],
-        brightness_contrast=config['data']['augment']['brightness_contrast'],
-        hue_saturation=config['data']['augment']['hue_saturation'],
-        model_name=config['model']['model_name']
+        batch_size=config['data']['batch_size'],
+        num_workers=config['data']['num_workers'],
+        model_name=config['data']['model_name'],
+        image_size=config['data'].get('image_size'),
+        normalize_mean=config['data'].get('normalize_mean'),
+        normalize_std=config['data'].get('normalize_std'),
+        augment=config['data'].get('augment')
     )
     
-    return DataModule(data_config)
+    # Initialize data module
+    data_module = DataModule(data_config)
+    
+    # For detection task, set the appropriate adapter
+    if task == 'detection':
+        adapter = get_adapter(
+            model_name=config['model']['model_name'],
+            image_size=config['data']['image_size'][0]
+        )
+        # We'll set the adapter after setup() is called
+        data_module.adapter = adapter
+    
+    return data_module
 
 # COMMAND ----------
 

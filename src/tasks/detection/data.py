@@ -1,17 +1,14 @@
 from typing import Dict, Any, Optional, Tuple, Union, List
 from dataclasses import dataclass
 import os
+from pathlib import Path
 
 import torch
 from torch.utils.data import DataLoader
 import pytorch_lightning as pl
 from pycocotools.coco import COCO
-import albumentations as A
-from albumentations.pytorch import ToTensorV2
 import cv2
 import numpy as np
-from pathlib import Path
-from transformers import AutoFeatureExtractor
 from PIL import Image
 
 @dataclass
@@ -19,57 +16,44 @@ class DetectionDataConfig:
     """Configuration for detection data module."""
     data_path: str
     annotation_file: str
-    image_size: int = 640
-    mean: Tuple[float, float, float] = (0.485, 0.456, 0.406)
-    std: Tuple[float, float, float] = (0.229, 0.224, 0.225)
     batch_size: int = 8
     num_workers: int = 4
-    horizontal_flip: bool = True
-    vertical_flip: bool = False
-    rotation: int = 30
-    brightness_contrast: float = 0.2
-    hue_saturation: float = 0.2
     model_name: Optional[str] = None
+    image_size: Optional[List[int]] = None
+    normalize_mean: Optional[List[float]] = None
+    normalize_std: Optional[List[float]] = None
+    augment: Optional[Dict[str, Any]] = None
 
 class COCODetectionDataset(torch.utils.data.Dataset):
+    """A PyTorch Dataset for COCO-formatted object detection datasets.
+    
+    This class uses the pycocotools library to load and parse annotations.
+    It is designed to be generic for any dataset in the COCO format.
+    """
     def __init__(
         self,
         root_dir: str,
         annotation_file: str,
-        transform: Optional[Union[A.Compose, Any]] = None,
-        image_size: int = 640,
-        model_name: Optional[str] = None
+        transform: Optional[Any] = None,
     ):
         self.root_dir = Path(root_dir)
         self.coco = COCO(annotation_file)
         self.transform = transform
-        self.image_size = image_size
-        self.model_name = model_name
         self.ids = list(sorted(self.coco.imgs.keys()))
-        
-        # Initialize feature extractor if using Hugging Face model
-        if model_name:
-            with torch.device('cpu'):
-                self.feature_extractor = AutoFeatureExtractor.from_pretrained(
-                    model_name,
-                    device_map=None,
-                    torch_dtype=torch.float32
-                )
         
         # Load class names and create category to index mapping
         self.class_names = [cat["name"] for cat in self.coco.loadCats(self.coco.getCatIds())]
         self.cat_to_idx = {cat["id"]: idx for idx, cat in enumerate(self.coco.loadCats(self.coco.getCatIds()))}
-        
+    
     def __len__(self) -> int:
         return len(self.ids)
     
-    def __getitem__(self, idx: int) -> Dict[str, torch.Tensor]:
+    def __getitem__(self, idx: int) -> Tuple[Any, Dict[str, torch.Tensor]]:
         # Load image
         img_id = self.ids[idx]
         img_info = self.coco.loadImgs(img_id)[0]
         img_path = self.root_dir / img_info['file_name']
-        image = cv2.imread(str(img_path))
-        image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
+        image = Image.open(img_path).convert("RGB")
         
         # Load annotations
         ann_ids = self.coco.getAnnIds(imgIds=img_id)
@@ -81,54 +65,35 @@ class COCODetectionDataset(torch.utils.data.Dataset):
         
         for ann in anns:
             bbox = ann['bbox']  # [x, y, w, h]
-            # Convert to [x1, y1, x2, y2] format
+            # Convert to [x1, y1, x2, y2] format in absolute pixels
             boxes.append([
-                bbox[0],
-                bbox[1],
-                bbox[0] + bbox[2],
-                bbox[1] + bbox[3]
+                bbox[0],  # x1
+                bbox[1],  # y1
+                bbox[0] + bbox[2],  # x2
+                bbox[1] + bbox[3]   # y2
             ])
             # Convert category ID to zero-based index
             labels.append(self.cat_to_idx[ann['category_id']])
         
-        boxes = torch.as_tensor(boxes, dtype=torch.float32)
-        labels = torch.as_tensor(labels, dtype=torch.int64)
+        # Handle empty boxes case
+        if not boxes:
+            boxes = torch.zeros((0, 4), dtype=torch.float32)
+            labels = torch.zeros(0, dtype=torch.int64)
+        else:
+            boxes = torch.as_tensor(boxes, dtype=torch.float32)
+            labels = torch.as_tensor(labels, dtype=torch.int64)
         
         target = {
-            'boxes': boxes,
-            'class_labels': labels,
+            'boxes': boxes,  # [x1, y1, x2, y2] in absolute pixels
+            'labels': labels,
             'image_id': torch.tensor([img_id])
         }
         
         # Apply transforms
-        if self.model_name:
-            # Convert OpenCV image to PIL Image
-            image = Image.fromarray(image)
-            
-            # Use Hugging Face feature extractor with consistent size
-            inputs = self.feature_extractor(
-                image,
-                return_tensors="pt",
-                do_resize=True,
-                size={"height": self.image_size, "width": self.image_size},
-                do_normalize=True
-            )
-            return {
-                "pixel_values": inputs["pixel_values"].squeeze(0),
-                "labels": target
-            }
-        else:
-            # Use Albumentations transforms
-            if self.transform:
-                transformed = self.transform(image=image, bboxes=boxes, labels=labels)
-                image = transformed['image']
-                target['boxes'] = torch.as_tensor(transformed['bboxes'], dtype=torch.float32)
-                target['class_labels'] = torch.as_tensor(transformed['labels'], dtype=torch.int64)
-            
-            return {
-                "pixel_values": image,
-                "labels": target
-            }
+        if self.transform:
+            image, target = self.transform(image, target)
+        
+        return image, target
 
 class DetectionDataModule(pl.LightningDataModule):
     def __init__(self, config: Union[Dict[str, Any], DetectionDataConfig]):
@@ -136,76 +101,37 @@ class DetectionDataModule(pl.LightningDataModule):
         if isinstance(config, dict):
             config = DetectionDataConfig(**config)
         self.config = config
-        
-        # Initialize feature extractor if using Hugging Face model
-        if config.model_name:
-            with torch.device('cpu'):
-                self.feature_extractor = AutoFeatureExtractor.from_pretrained(
-                    config.model_name,
-                    device_map=None,
-                    torch_dtype=torch.float32
-                )
-            self.transform = None
-        else:
-            # Define transforms
-            self.train_transform = A.Compose([
-                A.Resize(config.image_size, config.image_size),
-                A.HorizontalFlip(p=0.5 if config.horizontal_flip else 0),
-                A.VerticalFlip(p=0.5 if config.vertical_flip else 0),
-                A.Rotate(limit=config.rotation, p=0.5),
-                A.RandomBrightnessContrast(
-                    brightness_limit=config.brightness_contrast,
-                    contrast_limit=config.brightness_contrast,
-                    p=0.5
-                ),
-                A.HueSaturationValue(
-                    hue_shift_limit=config.hue_saturation,
-                    sat_shift_limit=config.hue_saturation,
-                    val_shift_limit=config.hue_saturation,
-                    p=0.5
-                ),
-                A.Normalize(
-                    mean=config.mean,
-                    std=config.std
-                ),
-                ToTensorV2()
-            ], bbox_params=A.BboxParams(format='pascal_voc', label_fields=['labels']))
-            
-            self.val_transform = A.Compose([
-                A.Resize(config.image_size, config.image_size),
-                A.Normalize(
-                    mean=config.mean,
-                    std=config.std
-                ),
-                ToTensorV2()
-            ], bbox_params=A.BboxParams(format='pascal_voc', label_fields=['labels']))
+        self.adapter = None  # Will be set after initialization
     
     def setup(self, stage: Optional[str] = None):
         if stage == 'fit' or stage is None:
             self.train_dataset = COCODetectionDataset(
                 root_dir=self.config.data_path,
                 annotation_file=self.config.annotation_file,
-                transform=self.train_transform if not self.config.model_name else None,
-                image_size=self.config.image_size,
-                model_name=self.config.model_name
+                transform=None  # Transform will be set by the adapter
             )
             
             self.val_dataset = COCODetectionDataset(
                 root_dir=self.config.data_path,
                 annotation_file=self.config.annotation_file,
-                transform=self.val_transform if not self.config.model_name else None,
-                image_size=self.config.image_size,
-                model_name=self.config.model_name
+                transform=None  # Transform will be set by the adapter
             )
         
         if stage == 'test':
             self.test_dataset = COCODetectionDataset(
                 root_dir=self.config.data_path,
                 annotation_file=self.config.annotation_file,
-                transform=self.val_transform if not self.config.model_name else None,
-                image_size=self.config.image_size,
-                model_name=self.config.model_name
+                transform=None  # Transform will be set by the adapter
             )
+        
+        # Set the adapter after datasets are created
+        if self.adapter is not None:
+            if hasattr(self, 'train_dataset'):
+                self.train_dataset.transform = self.adapter
+            if hasattr(self, 'val_dataset'):
+                self.val_dataset.transform = self.adapter
+            if hasattr(self, 'test_dataset'):
+                self.test_dataset.transform = self.adapter
     
     def train_dataloader(self) -> DataLoader:
         return DataLoader(
@@ -242,45 +168,29 @@ class DetectionDataModule(pl.LightningDataModule):
         """Collate function for object detection.
         
         Args:
-            batch: List of samples, each containing:
-                - pixel_values: Image tensor
-                - labels: Dictionary containing:
-                    - boxes: Bounding box coordinates
-                    - class_labels: Class labels
-                    - image_id: Image identifier
-        
+            batch: List of tuples (image, target) where image is a tensor and target is a dict
+            
         Returns:
-            Dictionary containing:
-                - pixel_values: Stacked image tensors
-                - labels: Dictionary containing:
-                    - boxes: List of bounding box tensors
-                    - class_labels: List of class label tensors
-                    - image_id: Tensor of image IDs
+            Dictionary with 'pixel_values' and 'labels' keys
         """
-        # Stack images
-        images = torch.stack([sample["pixel_values"] for sample in batch])
+        # Separate images and targets
+        images = []
+        targets = []
         
-        # Collect all boxes, labels, and image IDs
-        boxes = []
-        class_labels = []
-        image_ids = []
+        for image, target in batch:
+            images.append(image)
+            targets.append(target)
         
-        for sample in batch:
-            boxes.append(sample["labels"]["boxes"])
-            class_labels.append(sample["labels"]["class_labels"])
-            image_ids.append(sample["labels"]["image_id"])
+        # Stack images into a batch tensor
+        pixel_values = torch.stack(images, dim=0)
         
-        # Stack image IDs
-        image_ids = torch.cat(image_ids)
-        
-        return {
-            "pixel_values": images,
-            "labels": {
-                "boxes": boxes,
-                "class_labels": class_labels,
-                "image_id": image_ids
-            }
+        # Create batch dictionary
+        batch_dict = {
+            'pixel_values': pixel_values,
+            'labels': targets
         }
+        
+        return batch_dict
     
     @property
     def class_names(self) -> List[str]:

@@ -89,13 +89,13 @@ class UnifiedTrainer:
                 'model_name': config['model']['model_name'],
                 'max_epochs': config['model']['epochs'],
                 'log_every_n_steps': config['training']['log_every_n_steps'],
-                'monitor_metric': config['training']['monitor'],
-                'monitor_mode': config['training']['mode'],
+                'monitor_metric': config['training']['monitor_metric'],
+                'monitor_mode': config['training']['monitor_mode'],
                 'early_stopping_patience': config['training']['early_stopping_patience'],
                 'checkpoint_dir': config['training']['checkpoint_dir'],
                 'save_top_k': config['training']['save_top_k'],
                 'distributed': config['training']['distributed'],
-                'num_workers': config['training']['num_workers'],
+                'num_workers': config['data']['num_workers'],
                 'use_gpu': config['training']['use_gpu'],
                 'resources_per_worker': config['training']['resources_per_worker']
             }
