@@ -28,10 +28,13 @@ databricks-cv-architecture/
 ├── notebooks/                # Interactive development and experimentation
 ├── src/
 │   ├── tasks/               # Task-specific implementations
-│   │   ├── detection/       # Object detection (current implementation)
-│   │   ├── classification/  # Image classification (future)
-│   │   ├── segmentation/    # Semantic/instance/panoptic segmentation (future)
-│   │   └── keypoints/       # Keypoint detection (future)
+│   │   ├── [task_type]/     # Individual task modules (detection, classification, etc.)
+│   │   │   ├── adapters.py  # Model-specific data and output adapters
+│   │   │   ├── data.py      # Data loading and preprocessing
+│   │   │   ├── model.py     # PyTorch Lightning model implementation
+│   │   │   ├── evaluate.py  # Evaluation and metrics computation
+│   │   │   └── inference.py # Inference and prediction utilities
+│   │   └── README.md        # Task-specific documentation
 │   ├── training/            # Training orchestration and distributed computing
 │   └── utils/               # Shared utilities and helpers
 └── tests/                   # Comprehensive testing suite
@@ -41,11 +44,63 @@ This structure reflects our design philosophy of task-specific modules that shar
 
 ---
 
+## 🎯 Understanding Tasks in Our Framework
+
+### What is a "Task"?
+
+A "task" in our framework represents a specific computer vision problem type. Each task is a self-contained module that implements a complete pipeline for solving that particular problem. Tasks are designed to be independent, reusable, and extensible.
+
+### Common Task Types
+
+Our framework supports various computer vision tasks, each with its own specialized requirements:
+
+- **Classification Tasks**: Assign class labels to entire images
+- **Detection Tasks**: Locate and classify objects within images using bounding boxes
+- **Segmentation Tasks**: Perform pixel-level classification (semantic, instance, or panoptic)
+- **Keypoint Tasks**: Detect specific points of interest in images
+- **Custom Tasks**: Any specialized computer vision problem
+
+### Task Architecture Components
+
+Every task in our framework follows a consistent architecture with these core components:
+
+#### 1. **Configuration Management**
+Each task defines its own configuration classes that specify:
+- **Model Configuration**: Architecture parameters, training settings, evaluation metrics
+- **Data Configuration**: Dataset paths, preprocessing options, augmentation settings
+- **Task-Specific Parameters**: Any unique requirements for that particular task
+
+#### 2. **Data Management**
+Tasks implement standardized data handling through:
+- **Dataset Classes**: Extend PyTorch Dataset to handle task-specific annotations
+- **Data Modules**: Extend PyTorch Lightning DataModule for complete data pipeline management
+- **Data Adapters**: Handle model-specific preprocessing requirements
+
+#### 3. **Model Implementation**
+Each task provides:
+- **Model Classes**: Extend PyTorch Lightning LightningModule for training orchestration
+- **Architecture Support**: Integration with various model architectures (transformers, CNNs, etc.)
+- **Task-Specific Logic**: Custom training, validation, and testing steps
+
+#### 4. **Adapter System**
+Tasks include specialized adapters for:
+- **Input Adapters**: Convert raw data to model-specific formats
+- **Output Adapters**: Standardize model outputs for evaluation and inference
+- **Factory Functions**: Automatically select appropriate adapters based on model names
+
+#### 5. **Evaluation and Inference**
+Tasks provide:
+- **Evaluation Utilities**: Task-specific metrics and evaluation procedures
+- **Inference Tools**: Prediction and visualization capabilities
+- **Metric Computation**: Standardized evaluation across different model architectures
+
+---
+
 ## 🔍 Detailed Technical Workflow
 
 ### 1. **Configuration Management: The Central Nervous System**
 
-The configuration system serves as the foundation of our framework, using YAML for its human-readable format and hierarchical structure. The `DetectionModelConfig` and `DetectionDataConfig` dataclasses provide type-safe configuration validation, catching errors early and ensuring parameter consistency.
+The configuration system serves as the foundation of our framework, using YAML for its human-readable format and hierarchical structure. Each task defines its own configuration dataclasses that provide type-safe configuration validation, catching errors early and ensuring parameter consistency.
 
 #### Technical Implementation:
 - **YAML Parsing**: Configuration files loaded using `yaml.safe_load()` and validated against dataclasses
@@ -53,22 +108,22 @@ The configuration system serves as the foundation of our framework, using YAML f
 - **Runtime Validation**: Additional checks ensure parameter compatibility across components
 
 #### Design Rationale:
-The three-level configuration (model, data, training) mirrors our component separation, making it intuitive for users to understand which parameters affect which parts of the system. This hierarchical approach enables reproducible experiments and easy parameter tuning without code changes.
+The hierarchical configuration approach mirrors our component separation, making it intuitive for users to understand which parameters affect which parts of the system. This approach enables reproducible experiments and easy parameter tuning without code changes.
 
 ### 2. **Data Management: From Raw Data to Model-Ready Batches**
 
-The data management system is built on PyTorch Lightning's `LightningDataModule` abstraction, providing a complete data pipeline from raw COCO annotations to model-ready batches.
+The data management system is built on PyTorch Lightning's `LightningDataModule` abstraction, providing a complete data pipeline from raw annotations to model-ready batches.
 
 #### Technical Components:
 
-**`DetectionDataConfig` Dataclass**: Defines data loading parameters including paths, batch size, and processing options. This type-safe configuration ensures consistency across different data sources.
+**Task-Specific Config Classes**: Define data loading parameters including paths, batch size, and processing options. This type-safe configuration ensures consistency across different data sources.
 
-**`COCODetectionDataset` Class**: Extends PyTorch's `Dataset` class to handle COCO format annotations. Key methods include:
+**Dataset Classes**: Extend PyTorch's `Dataset` class to handle task-specific annotations. Key methods include:
 - `__getitem__(idx)`: Returns `(image, target)` tuple with PIL image and annotation dict
 - `_load_image(idx)`: Loads PIL image from file path
-- `_load_target(idx)`: Loads and formats annotations, converting COCO format `[x, y, w, h]` to `[x1, y1, x2, y2]`
+- `_load_target(idx)`: Loads and formats annotations according to task requirements
 
-**`DetectionDataModule` Class**: Extends `LightningDataModule` and manages the complete data pipeline:
+**Data Module Classes**: Extend `LightningDataModule` and manage the complete data pipeline:
 - `setup(stage)`: Initializes datasets for specified stage (fit/test)
 - `train_dataloader()`, `val_dataloader()`, `test_dataloader()`: Create DataLoader instances
 - `_collate_fn(batch)`: Custom batch collation converting tuples to dictionary format
@@ -76,23 +131,18 @@ The data management system is built on PyTorch Lightning's `LightningDataModule`
 #### Design Philosophy:
 We chose COCO format as our primary data format because it's widely adopted, well-documented, and supports multiple computer vision tasks. The adapter-based preprocessing allows the same dataset to work with different model architectures without code changes.
 
-#### Extensibility for Other Tasks:
-- **Classification**: Would use same COCO format but focus on image-level annotations
-- **Segmentation**: Would extend dataset to handle mask annotations alongside bounding boxes
-- **Keypoint Detection**: Would add keypoint coordinate handling to existing annotation structure
-
 ### 3. **Model Management: Architecture-Agnostic Training**
 
-The model management system provides a standardized interface for object detection models through the `DetectionModel` class, which extends PyTorch Lightning's `LightningModule`.
+The model management system provides a standardized interface for various computer vision models through task-specific model classes that extend PyTorch Lightning's `LightningModule`.
 
 #### Technical Components:
 
-**`DetectionModelConfig` Dataclass**: Centralizes model configuration including architecture, training parameters, and evaluation settings.
+**Task-Specific Config Classes**: Centralize model configuration including architecture, training parameters, and evaluation settings.
 
-**`DetectionModel` Class**: Main model class that orchestrates training, validation, and testing:
-- `_init_model()`: Uses Hugging Face's `AutoModelForObjectDetection` for dynamic model loading
-- `_init_metrics()`: Sets up `torchmetrics.detection.MeanAveragePrecision` for all training stages
-- `forward(pixel_values, pixel_mask, labels)`: Handles forward propagation with adapter integration
+**Model Classes**: Main model classes that orchestrate training, validation, and testing:
+- `_init_model()`: Uses Hugging Face's AutoModel classes for dynamic model loading
+- `_init_metrics()`: Sets up task-specific metrics for all training stages
+- `forward()`: Handles forward propagation with adapter integration
 - `training_step()`, `validation_step()`, `test_step()`: Implement stage-specific logic
 - `configure_optimizers()`: Sets up optimization with support for different learning rates
 
@@ -104,27 +154,21 @@ The model management system provides a standardized interface for object detecti
 #### Design Rationale:
 By leveraging Hugging Face's AutoModel classes, we enable users to experiment with different architectures without code changes. The standardized LightningModule interface ensures consistent training workflows across different model types.
 
-#### Extensibility for Other Tasks:
-- **Classification Models**: Would use `AutoModelForImageClassification` and classification metrics
-- **Segmentation Models**: Would use `AutoModelForSemanticSegmentation` with segmentation metrics
-- **Keypoint Models**: Would use pose estimation models with keypoint-specific evaluation metrics
-
 ### 4. **Adapter Framework: The Bridge Between Components**
 
 The adapter system provides model-agnostic data processing and output formatting through two main components: data adapters and output adapters.
 
 #### Technical Components:
 
-**Data Adapters (`BaseAdapter`)**:
-- **`BaseAdapter`**: Abstract base class defining the adapter interface with `__call__(image, target)` method
-- **`DETRAdapter`**: Specialized adapter for DETR models using Hugging Face processors
-- **`NoOpAdapter`**: Simple adapter for models requiring minimal preprocessing
+**Data Adapters**:
+- **Base Adapter**: Abstract base class defining the adapter interface
+- **Model-Specific Adapters**: Specialized adapters for different model architectures
+- **No-Op Adapter**: Simple adapter for models requiring minimal preprocessing
 
 **Output Adapters**:
-- **`DETROutputAdapter`**: Processes DETR model outputs with methods:
-  - `adapt_output()`: Converts raw model outputs to standardized format
-  - `format_predictions()`: Formats predictions for metric computation
-  - `format_targets()`: Converts targets from normalized to absolute coordinates
+- **Standardized Interface**: Common methods for all output adapters
+- **Model-Specific Processing**: Handle different output formats from various models
+- **Format Conversion**: Convert model outputs to standardized formats for evaluation
 
 **Adapter Factory Functions**:
 - `get_adapter(model_name, image_size)`: Returns appropriate data adapter
@@ -133,18 +177,13 @@ The adapter system provides model-agnostic data processing and output formatting
 #### Design Philosophy:
 Traditional approaches embed model-specific logic directly in data loaders or model classes, creating tight coupling. Our adapter approach isolates model-specific logic, enabling easy addition of new architectures without touching core training or data loading code.
 
-#### Extensibility for Other Tasks:
-- **Classification Adapters**: Would handle image preprocessing and label formatting
-- **Segmentation Adapters**: Would manage mask processing and pixel-level annotations
-- **Keypoint Adapters**: Would handle keypoint coordinate transformations and heatmap generation
-
 ### 5. **Unified Trainer: Orchestration and Scalability**
 
 The `UnifiedTrainer` class orchestrates the entire training process, providing seamless integration between PyTorch Lightning, Ray, and MLflow.
 
 #### Technical Components:
 
-**`UnifiedTrainer` Class**: Main orchestrator with key methods:
+**UnifiedTrainer Class**: Main orchestrator with key methods:
 - `_init_callbacks()`: Sets up `ModelCheckpoint`, `EarlyStopping`, and MLflow logging
 - `_init_trainer()`: Configures PyTorch Lightning trainer for local or distributed training
 - `train()`: Executes training process with data module setup
@@ -158,9 +197,6 @@ The `UnifiedTrainer` class orchestrates the entire training process, providing s
 #### Design Rationale:
 The trainer automatically detects available resources and chooses appropriate training strategy. Ray integration provides excellent distributed computing capabilities, while MLflow ensures comprehensive experiment tracking and model versioning.
 
-#### Extensibility for Other Tasks:
-The trainer is completely task-agnostic and can handle any computer vision task that implements the LightningModule interface. The same distributed training and hyperparameter optimization capabilities apply to all tasks.
-
 ---
 
 ## 🔄 Module Integration & Communication Patterns
@@ -170,7 +206,7 @@ The trainer is completely task-agnostic and can handle any computer vision task 
 The data flows through our system in a carefully orchestrated pipeline:
 
 1. **Configuration Injection**: All components receive configuration at initialization via their respective config classes
-2. **Data Processing Pipeline**: Raw data flows through `COCODetectionDataset` → `DataAdapter` → `DetectionDataModule` → `Model`
+2. **Data Processing Pipeline**: Raw data flows through `Dataset` → `DataAdapter` → `DataModule` → `Model`
 3. **Model Processing Pipeline**: Model outputs flow through `OutputAdapter` → `Metrics` → `Logging`
 4. **Training Orchestration**: `UnifiedTrainer` coordinates all components while maintaining their independence
 
@@ -184,88 +220,77 @@ We've designed the communication between modules to be explicit, stateless, test
 
 ---
 
-## 🚀 Extensibility to Other Computer Vision Tasks
+## 🚀 Extensibility to New Computer Vision Tasks
 
 ### Framework Extensibility Philosophy
 
-Our framework is designed with extensibility as a first-class concern. The same architectural patterns that work for object detection can be applied to other computer vision tasks with minimal modifications.
+Our framework is designed with extensibility as a first-class concern. The same architectural patterns that work for existing tasks can be applied to new computer vision tasks with minimal modifications.
 
-### Classification Task Extension
+### Adding a New Task
 
-**Data Management**: The existing `COCODetectionDataset` can be adapted for classification by using image-level annotations. A new `ClassificationDataModule` would extend `LightningDataModule` with classification-specific data loading.
+To add support for a new computer vision task, follow these steps:
 
-**Model Management**: Would use `AutoModelForImageClassification` and classification-specific metrics like accuracy, precision, recall, and F1-score through `torchmetrics.classification` modules.
+1. **Create Task Directory**: Add a new directory under `src/tasks/` for your task
+2. **Implement Core Components**:
+   - **Configuration**: Define task-specific config dataclasses
+   - **Data Management**: Create dataset and data module classes
+   - **Model Implementation**: Implement PyTorch Lightning model class
+   - **Adapters**: Create input and output adapters for model support
+   - **Evaluation**: Add task-specific evaluation utilities
 
-**Adapters**: Classification adapters would handle image preprocessing (resizing, normalization) and label encoding/decoding.
+3. **Follow Established Patterns**:
+   - Use the same interface patterns as existing tasks
+   - Implement the same abstract base classes
+   - Follow the same configuration structure
+   - Use the same adapter patterns
 
-### Segmentation Task Extension
+4. **Integration**: The new task automatically integrates with:
+   - The unified trainer for distributed training
+   - MLflow for experiment tracking
+   - Ray for hyperparameter optimization
+   - The existing configuration system
 
-**Data Management**: Would extend the COCO format to include mask annotations. A new `SegmentationDataset` would handle both bounding boxes and pixel-level masks.
+### Benefits of This Approach
 
-**Model Management**: Would use `AutoModelForSemanticSegmentation` or `AutoModelForInstanceSegmentation` with segmentation-specific metrics like IoU, Dice coefficient, and pixel accuracy.
-
-**Adapters**: Segmentation adapters would handle mask processing, coordinate transformations, and output formatting for different segmentation types (semantic, instance, panoptic).
-
-### Keypoint Detection Extension
-
-**Data Management**: Would extend COCO format to include keypoint annotations with visibility flags and coordinate information.
-
-**Model Management**: Would use pose estimation models with keypoint-specific metrics like PCK (Percentage of Correct Keypoints) and OKS (Object Keypoint Similarity).
-
-**Adapters**: Keypoint adapters would handle coordinate transformations, heatmap generation, and keypoint post-processing.
-
-### Multi-Task Learning Extension
-
-The framework's modular design naturally supports multi-task learning scenarios. The adapter system would be extended to handle multiple output formats, and the model management system would support multi-task loss computation through custom `LightningModule` implementations.
-
----
-
-## 🔧 Technical Implementation Philosophy
-
-### Performance Optimization Strategy
-
-Our performance optimizations are guided by the principle of "optimize for the common case while maintaining flexibility":
-
-- **Data Loading**: Multi-worker DataLoaders and pin memory optimize for the most common bottleneck in computer vision training
-- **Training**: Mixed precision and gradient accumulation provide significant speedups without requiring architectural changes
-- **Memory Management**: Gradient clipping and efficient checkpointing prevent common training issues
-
-### Error Handling Philosophy
-
-We believe in "fail fast, fail clearly" - errors should be caught early with clear, actionable messages:
-- **Configuration Validation**: Catch configuration errors at startup through dataclass validation
-- **Data Validation**: Validate data format and integrity during dataset loading
-- **Model Validation**: Ensure model compatibility with data and configuration
-- **Graceful Degradation**: Handle edge cases (like empty annotations) without crashing
-
-### Testing Strategy
-
-Our testing philosophy emphasizes "test the interfaces, not the implementations":
-- **Unit Tests**: Test each component in isolation (datasets, adapters, models)
-- **Integration Tests**: Test component interactions (data → model → metrics)
-- **Configuration Tests**: Validate configuration loading and validation
-- **End-to-End Tests**: Verify complete pipeline functionality
+- **Consistency**: All tasks follow the same architectural patterns
+- **Reusability**: Common components can be shared across tasks
+- **Maintainability**: Changes to core infrastructure benefit all tasks
+- **Scalability**: New tasks automatically inherit distributed training capabilities
+- **Testing**: Standardized testing patterns apply to all tasks
 
 ---
 
-## 🔮 Future Architecture Evolution
+## 📚 Documentation and Resources
 
-### Planned Architectural Enhancements
+### Task-Specific Documentation
 
-1. **Plugin System**: A registry-based plugin system for even easier extension of adapters and models
-2. **Advanced Scheduling**: More sophisticated learning rate and optimization strategies
-3. **Real-time Monitoring**: Enhanced training monitoring and alerting capabilities
-4. **Model Compression**: Integration with quantization and pruning techniques
-5. **Production Deployment**: Optimized inference pipelines for production deployment
+Each task includes its own documentation that covers:
+- **Usage Examples**: How to use the task with different models
+- **Configuration Options**: Available parameters and their effects
+- **Model Support**: List of supported model architectures
+- **Best Practices**: Task-specific recommendations and tips
 
-### Design Evolution Principles
+### Adapter Documentation
 
-As the framework evolves, we maintain these principles:
-- **Backward Compatibility**: New versions should not break existing implementations
-- **Gradual Migration**: Provide migration paths for users adopting new features
-- **Community Feedback**: Architecture decisions are informed by user needs and feedback
-- **Performance First**: New features must not compromise performance
+The adapter system is documented in detail, covering:
+- **Adapter Types**: Different types of adapters for various model architectures
+- **Design Rationale**: Why each adapter was designed in a particular way
+- **Usage Patterns**: How to use adapters effectively
+- **Extension Guide**: How to add support for new models
+
+### General Framework Documentation
+
+- **Configuration Guide**: How to configure tasks and models
+- **Training Guide**: How to use the unified trainer
+- **Deployment Guide**: How to deploy trained models
+- **Troubleshooting**: Common issues and solutions
 
 ---
 
-This technical overview provides both the concrete implementation details and the reasoning behind our architectural decisions. The modular, adapter-based approach ensures that the framework can grow and adapt to new computer vision challenges while maintaining the core principles of simplicity, reproducibility, and scalability.
+## 🎯 Conclusion
+
+The Databricks Computer Vision Framework provides a robust, extensible, and maintainable architecture for building production-ready computer vision solutions. By following established patterns and leveraging the adapter system, users can easily add support for new tasks and model architectures while maintaining consistency and reliability across the entire system.
+
+The modular design ensures that each component has a single responsibility, making the codebase easier to understand, test, and extend. The configuration-driven approach enables rapid experimentation and parameter tuning without code changes, while the adapter system provides the flexibility to work with diverse model architectures.
+
+Whether you're working with existing tasks or adding new ones, the framework provides the tools and patterns needed to build scalable, maintainable computer vision solutions.

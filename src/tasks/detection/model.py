@@ -7,7 +7,7 @@ import torch.nn.functional as F
 import pytorch_lightning as pl
 from torchmetrics.detection import MeanAveragePrecision
 from transformers import AutoModelForObjectDetection, AutoConfig, PreTrainedModel
-from .adapters import get_adapter, DETROutputAdapter
+from .adapters import get_adapter, get_output_adapter
 
 @dataclass
 class DetectionModelConfig:
@@ -45,7 +45,7 @@ class DetectionModel(pl.LightningModule):
         self._init_metrics()
         
         # Initialize output adapter with image size from config
-        self.output_adapter = get_adapter(
+        self.output_adapter = get_output_adapter(
             config.model_name,
             image_size=config.image_size if hasattr(config, 'image_size') else 640
         )

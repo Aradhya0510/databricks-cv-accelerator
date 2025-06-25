@@ -87,8 +87,8 @@ def export_segmentation_model(
         config = yaml.safe_load(f)
     
     # Load model
-    from src.tasks.segmentation.model import SegmentationModel
-    model = SegmentationModel.load_from_checkpoint(model_path, config=config)
+    from src.tasks.semantic_segmentation.model import SemanticSegmentationModel
+    model = SemanticSegmentationModel.load_from_checkpoint(model_path, config=config)
     model.eval()
     
     # Create dummy input
@@ -153,8 +153,8 @@ def export_model_to_mlflow(
         from src.tasks.detection.model import DetectionModel
         model = DetectionModel.load_from_checkpoint(model_path, config=config)
     elif task == 'segmentation':
-        from src.tasks.segmentation.model import SegmentationModel
-        model = SegmentationModel.load_from_checkpoint(model_path, config=config)
+        from src.tasks.semantic_segmentation.model import SemanticSegmentationModel
+        model = SemanticSegmentationModel.load_from_checkpoint(model_path, config=config)
     else:
         raise ValueError(f"Unsupported task: {task}")
     

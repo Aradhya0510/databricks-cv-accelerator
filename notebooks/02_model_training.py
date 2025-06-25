@@ -45,8 +45,8 @@ from src.tasks.detection.model import DetectionModel
 from src.tasks.detection.data import DetectionDataModule
 from src.tasks.classification.model import ClassificationModel
 from src.tasks.classification.data import ClassificationDataModule
-from src.tasks.segmentation.model import SegmentationModel
-from src.tasks.segmentation.data import SegmentationDataModule
+from src.tasks.semantic_segmentation.model import SemanticSegmentationModel
+from src.tasks.semantic_segmentation.data import SemanticSegmentationDataModule
 from src.training.trainer import UnifiedTrainer
 from src.utils.logging import setup_logger, get_mlflow_logger
 from src.tasks.detection.adapters import DETROutputAdapter, get_adapter
@@ -102,7 +102,7 @@ def get_model_class(task: str):
     model_classes = {
         'detection': DetectionModel,
         'classification': ClassificationModel,
-        'segmentation': SegmentationModel
+        'semantic_segmentation': SemanticSegmentationModel
     }
     
     if task not in model_classes:
@@ -218,7 +218,7 @@ def get_data_module_class(task: str):
     data_modules = {
         'detection': DetectionDataModule,
         'classification': ClassificationDataModule,
-        'segmentation': SegmentationDataModule
+        'semantic_segmentation': SemanticSegmentationDataModule
     }
     
     if task not in data_modules:

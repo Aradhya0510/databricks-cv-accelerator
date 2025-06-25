@@ -1,0 +1,88 @@
+# Model Configuration for YOLOS
+model:
+  model_name: "hustvl/yolos-base"  # YOLOS base model
+  task_type: "detection"
+  num_classes: 80  # COCO dataset has 80 classes
+  pretrained: true
+  confidence_threshold: 0.7
+  iou_threshold: 0.5
+  max_detections: 100
+  image_size: 800  # YOLOS default image size
+  class_names: null  # Will be loaded from COCO annotations
+  model_kwargs: {}  # Additional model arguments
+
+# Data Configuration
+data:
+  # Base paths for data loading
+  data_path: "/Volumes/users/aradhya_chouhan/coco_mini-train/data/val2017/"
+  annotation_file: "/Volumes/users/aradhya_chouhan/coco_mini-train/data/instances_val2017.json"
+  
+  # Data loading parameters
+  batch_size: 16  # YOLOS recommended batch size per GPU
+  num_workers: 4
+  model_name: "hustvl/yolos-base"  # Required for adapter initialization
+  
+  # Image processing
+  image_size: [800, 800]  # [height, width]
+  normalize_mean: [0.485, 0.456, 0.406]  # ImageNet normalization
+  normalize_std: [0.229, 0.224, 0.225]
+  
+  # Data augmentation
+  augment:
+    horizontal_flip: true
+    vertical_flip: false
+    rotation: 10  # degrees
+    brightness_contrast: 0.2
+    hue_saturation: 0.1
+
+# Training Configuration
+training:
+  # Basic training parameters
+  max_epochs: 50  # YOLOS default training epochs
+  
+  # Learning rate and optimization
+  learning_rate: 1e-4
+  weight_decay: 1e-4
+  scheduler: "cosine"
+  scheduler_params:
+    T_max: 300
+    eta_min: 1e-6
+  
+  # Early stopping
+  early_stopping_patience: 20
+  monitor_metric: "val_map"  # Metric to monitor
+  monitor_mode: "max"  # Maximize the monitored metric
+  
+  # Checkpointing
+  checkpoint_dir: "/Volumes/users/aradhya_chouhan/coco_mini-train/data/checkpoints/detection_yolos"
+  save_top_k: 3
+  
+  # Logging
+  log_every_n_steps: 50
+  log_dir: "/Volumes/users/aradhya_chouhan/coco_mini-train/data/logs"
+  
+  # Distributed training
+  distributed: false
+  use_gpu: true
+  resources_per_worker:
+    CPU: 4
+    GPU: 1
+
+# MLflow Configuration
+mlflow:
+  experiment_name: "detection_training"
+  run_name: "yolos_base"
+  log_model: true
+  tags:
+    framework: "pytorch_lightning"
+    model: "yolos"
+    dataset: "coco"
+
+# Output Configuration
+output:
+  results_dir: "/Volumes/users/aradhya_chouhan/coco_mini-train/data/results/detection_yolos"
+  save_predictions: true
+  visualization:
+    save_images: true
+    confidence_threshold: 0.5
+    max_boxes: 20 

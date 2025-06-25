@@ -1,4 +1,4 @@
-from typing import Dict, Any, Optional, Tuple, Union
+from typing import Dict, Any, Optional, Tuple, Union, List
 from dataclasses import dataclass
 
 import torch
@@ -10,6 +10,7 @@ from albumentations.pytorch import ToTensorV2
 import numpy as np
 from pathlib import Path
 from transformers import AutoFeatureExtractor
+from .adapters import get_adapter
 
 @dataclass
 class ClassificationDataConfig:
@@ -33,16 +34,20 @@ class ClassificationDataset(Dataset):
         data_path: str,
         transform: Optional[Union[A.Compose, Any]] = None,
         is_train: bool = True,
-        model_name: Optional[str] = None
+        model_name: Optional[str] = None,
+        image_size: int = 224
     ):
         self.data_path = Path(data_path)
         self.transform = transform
         self.is_train = is_train
         self.model_name = model_name
+        self.image_size = image_size
         
-        # Initialize feature extractor if using Hugging Face model
+        # Initialize adapter if using Hugging Face model
         if model_name:
-            self.feature_extractor = AutoFeatureExtractor.from_pretrained(model_name)
+            self.adapter = get_adapter(model_name, image_size=image_size)
+        else:
+            self.adapter = None
         
         # Load image paths and labels
         self.image_paths = []
@@ -67,19 +72,19 @@ class ClassificationDataset(Dataset):
         # Load image
         image = Image.open(img_path).convert("RGB")
         
+        # Create target dictionary
+        target = {
+            "class_labels": torch.tensor(label, dtype=torch.long),
+            "image_id": torch.tensor(idx)
+        }
+        
         # Apply transformations
-        if self.model_name:
-            # Use Hugging Face feature extractor
-            inputs = self.feature_extractor(
-                image,
-                return_tensors="pt",
-                do_resize=True,
-                size=self.feature_extractor.size,
-                do_normalize=True
-            )
+        if self.adapter:
+            # Use adapter for preprocessing
+            processed_image, adapted_target = self.adapter(image, target)
             return {
-                "pixel_values": inputs["pixel_values"].squeeze(0),
-                "labels": torch.tensor(label, dtype=torch.long)
+                "pixel_values": processed_image,
+                "labels": adapted_target
             }
         else:
             # Use Albumentations transforms
@@ -89,7 +94,7 @@ class ClassificationDataset(Dataset):
                 image = transformed["image"]
             return {
                 "pixel_values": image,
-                "labels": torch.tensor(label, dtype=torch.long)
+                "labels": target
             }
 
 class ClassificationDataModule(pl.LightningDataModule):
@@ -99,10 +104,11 @@ class ClassificationDataModule(pl.LightningDataModule):
             config = ClassificationDataConfig(**config)
         self.config = config
         
-        # Initialize feature extractor if using Hugging Face model
+        # Initialize adapter if using Hugging Face model
         if config.model_name:
-            self.feature_extractor = AutoFeatureExtractor.from_pretrained(config.model_name)
-            self.transform = None
+            self.adapter = get_adapter(config.model_name, image_size=config.image_size)
+            self.train_transform = None
+            self.val_transform = None
         else:
             # Define Albumentations transforms
             self.train_transform = A.Compose([
@@ -128,23 +134,26 @@ class ClassificationDataModule(pl.LightningDataModule):
         if stage == "fit" or stage is None:
             self.train_dataset = ClassificationDataset(
                 self.config.data_path,
-                transform=self.train_transform if not self.config.model_name else None,
+                transform=self.train_transform,
                 is_train=True,
-                model_name=self.config.model_name
+                model_name=self.config.model_name,
+                image_size=self.config.image_size
             )
             self.val_dataset = ClassificationDataset(
                 self.config.data_path,
-                transform=self.val_transform if not self.config.model_name else None,
+                transform=self.val_transform,
                 is_train=False,
-                model_name=self.config.model_name
+                model_name=self.config.model_name,
+                image_size=self.config.image_size
             )
         
         if stage == "test" or stage is None:
             self.test_dataset = ClassificationDataset(
                 self.config.data_path,
-                transform=self.val_transform if not self.config.model_name else None,
+                transform=self.val_transform,
                 is_train=False,
-                model_name=self.config.model_name
+                model_name=self.config.model_name,
+                image_size=self.config.image_size
             )
     
     def train_dataloader(self) -> DataLoader:
@@ -177,4 +186,6 @@ class ClassificationDataModule(pl.LightningDataModule):
     @property
     def class_names(self) -> List[str]:
         """Get list of class names."""
-        return self.train_dataset.class_names 
+        if hasattr(self, 'train_dataset'):
+            return self.train_dataset.class_names
+        return [] 

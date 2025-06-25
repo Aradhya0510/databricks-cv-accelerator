@@ -10,17 +10,19 @@ from albumentations.pytorch import ToTensorV2
 import cv2
 import numpy as np
 from pathlib import Path
+from PIL import Image
 from transformers import AutoFeatureExtractor
+from .adapters import get_instance_adapter
 
 @dataclass
-class SegmentationDataConfig:
-    """Configuration for segmentation data module."""
+class InstanceSegmentationDataConfig:
+    """Configuration for instance segmentation data module."""
     data_path: str
     annotation_file: str
     image_size: int = 512
     mean: Tuple[float, float, float] = (0.485, 0.456, 0.406)
     std: Tuple[float, float, float] = (0.229, 0.224, 0.225)
-    batch_size: int = 8
+    batch_size: int = 4  # Smaller batch size for instance segmentation
     num_workers: int = 4
     horizontal_flip: bool = True
     vertical_flip: bool = False
@@ -29,7 +31,7 @@ class SegmentationDataConfig:
     hue_saturation: float = 0.2
     model_name: Optional[str] = None
 
-class COCOSegmentationDataset(torch.utils.data.Dataset):
+class COCOInstanceSegmentationDataset(torch.utils.data.Dataset):
     def __init__(
         self,
         root_dir: str,
@@ -45,9 +47,11 @@ class COCOSegmentationDataset(torch.utils.data.Dataset):
         self.model_name = model_name
         self.ids = list(sorted(self.coco.imgs.keys()))
         
-        # Initialize feature extractor if using Hugging Face model
+        # Initialize adapter if using Hugging Face model
         if model_name:
-            self.feature_extractor = AutoFeatureExtractor.from_pretrained(model_name)
+            self.adapter = get_instance_adapter(model_name, image_size=image_size)
+        else:
+            self.adapter = None
         
         # Load class names
         self.class_names = [cat["name"] for cat in self.coco.loadCats(self.coco.getCatIds())]
@@ -63,60 +67,79 @@ class COCOSegmentationDataset(torch.utils.data.Dataset):
         image = cv2.imread(str(img_path))
         image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
         
+        # Convert to PIL Image for adapter
+        image_pil = Image.fromarray(image)
+        
         # Load annotations
         ann_ids = self.coco.getAnnIds(imgIds=img_id)
         anns = self.coco.loadAnns(ann_ids)
         
-        # Create mask
-        mask = np.zeros((img_info['height'], img_info['width']), dtype=np.uint8)
+        # Create instance masks and bounding boxes
+        instance_masks = []
+        bounding_boxes = []
+        class_labels = []
+        
         for ann in anns:
             if ann['segmentation']:
+                # Create instance mask
+                mask = np.zeros((img_info['height'], img_info['width']), dtype=np.uint8)
                 for seg in ann['segmentation']:
                     points = np.array(seg).reshape(-1, 2).astype(np.int32)
-                    cv2.fillPoly(mask, [points], ann['category_id'])
+                    cv2.fillPoly(mask, [points], 1)
+                
+                instance_masks.append(mask)
+                bounding_boxes.append(ann['bbox'])  # [x, y, width, height]
+                class_labels.append(ann['category_id'])
+        
+        # Convert to tensors
+        if instance_masks:
+            instance_masks = torch.stack([torch.as_tensor(mask, dtype=torch.long) for mask in instance_masks])
+            bounding_boxes = torch.as_tensor(bounding_boxes, dtype=torch.float32)
+            class_labels = torch.as_tensor(class_labels, dtype=torch.long)
+        else:
+            # Empty image case
+            instance_masks = torch.empty((0, img_info['height'], img_info['width']), dtype=torch.long)
+            bounding_boxes = torch.empty((0, 4), dtype=torch.float32)
+            class_labels = torch.empty((0,), dtype=torch.long)
+        
+        # Create target dictionary
+        target = {
+            "instance_masks": instance_masks,
+            "bounding_boxes": bounding_boxes,
+            "class_labels": class_labels,
+            "image_id": torch.tensor(img_id)
+        }
         
         # Apply transforms
-        if self.model_name:
-            # Use Hugging Face feature extractor
-            inputs = self.feature_extractor(
-                image,
-                return_tensors="pt",
-                do_resize=True,
-                size=self.feature_extractor.size,
-                do_normalize=True
-            )
-            # Resize mask to match image size
-            mask = cv2.resize(
-                mask,
-                (self.feature_extractor.size["width"], self.feature_extractor.size["height"]),
-                interpolation=cv2.INTER_NEAREST
-            )
+        if self.adapter:
+            # Use adapter for preprocessing
+            processed_image, adapted_target = self.adapter(image_pil, target)
             return {
-                "pixel_values": inputs["pixel_values"].squeeze(0),
-                "labels": torch.as_tensor(mask, dtype=torch.long)
+                "pixel_values": processed_image,
+                "labels": adapted_target
             }
         else:
             # Use Albumentations transforms
             if self.transform:
-                transformed = self.transform(image=image, mask=mask)
+                transformed = self.transform(image=image)
                 image = transformed['image']
-                mask = transformed['mask']
             return {
                 "pixel_values": image,
-                "labels": torch.as_tensor(mask, dtype=torch.long)
+                "labels": target
             }
 
-class SegmentationDataModule(pl.LightningDataModule):
-    def __init__(self, config: Union[Dict[str, Any], SegmentationDataConfig]):
+class InstanceSegmentationDataModule(pl.LightningDataModule):
+    def __init__(self, config: Union[Dict[str, Any], InstanceSegmentationDataConfig]):
         super().__init__()
         if isinstance(config, dict):
-            config = SegmentationDataConfig(**config)
+            config = InstanceSegmentationDataConfig(**config)
         self.config = config
         
-        # Initialize feature extractor if using Hugging Face model
+        # Initialize adapter if using Hugging Face model
         if config.model_name:
-            self.feature_extractor = AutoFeatureExtractor.from_pretrained(config.model_name)
-            self.transform = None
+            self.adapter = get_instance_adapter(config.model_name, image_size=config.image_size)
+            self.train_transform = None
+            self.val_transform = None
         else:
             # Define transforms
             self.train_transform = A.Compose([
@@ -153,27 +176,27 @@ class SegmentationDataModule(pl.LightningDataModule):
     
     def setup(self, stage: Optional[str] = None):
         if stage == 'fit' or stage is None:
-            self.train_dataset = COCOSegmentationDataset(
+            self.train_dataset = COCOInstanceSegmentationDataset(
                 root_dir=self.config.data_path,
                 annotation_file=self.config.annotation_file,
-                transform=self.train_transform if not self.config.model_name else None,
+                transform=self.train_transform,
                 image_size=self.config.image_size,
                 model_name=self.config.model_name
             )
             
-            self.val_dataset = COCOSegmentationDataset(
+            self.val_dataset = COCOInstanceSegmentationDataset(
                 root_dir=self.config.data_path,
                 annotation_file=self.config.annotation_file,
-                transform=self.val_transform if not self.config.model_name else None,
+                transform=self.val_transform,
                 image_size=self.config.image_size,
                 model_name=self.config.model_name
             )
         
         if stage == 'test':
-            self.test_dataset = COCOSegmentationDataset(
+            self.test_dataset = COCOInstanceSegmentationDataset(
                 root_dir=self.config.data_path,
                 annotation_file=self.config.annotation_file,
-                transform=self.val_transform if not self.config.model_name else None,
+                transform=self.val_transform,
                 image_size=self.config.image_size,
                 model_name=self.config.model_name
             )
@@ -184,7 +207,8 @@ class SegmentationDataModule(pl.LightningDataModule):
             batch_size=self.config.batch_size,
             shuffle=True,
             num_workers=self.config.num_workers,
-            pin_memory=True
+            pin_memory=True,
+            collate_fn=self._collate_fn
         )
     
     def val_dataloader(self) -> DataLoader:
@@ -193,7 +217,8 @@ class SegmentationDataModule(pl.LightningDataModule):
             batch_size=self.config.batch_size,
             shuffle=False,
             num_workers=self.config.num_workers,
-            pin_memory=True
+            pin_memory=True,
+            collate_fn=self._collate_fn
         )
     
     def test_dataloader(self) -> DataLoader:
@@ -202,10 +227,45 @@ class SegmentationDataModule(pl.LightningDataModule):
             batch_size=self.config.batch_size,
             shuffle=False,
             num_workers=self.config.num_workers,
-            pin_memory=True
+            pin_memory=True,
+            collate_fn=self._collate_fn
         )
+    
+    def _collate_fn(self, batch):
+        """Custom collate function to handle variable number of instances."""
+        pixel_values = torch.stack([item["pixel_values"] for item in batch])
+        
+        # Handle variable number of instances
+        labels = {
+            "instance_masks": [item["labels"]["instance_masks"] for item in batch],
+            "bounding_boxes": [item["labels"]["bounding_boxes"] for item in batch],
+            "class_labels": [item["labels"]["class_labels"] for item in batch],
+            "image_id": torch.stack([item["labels"]["image_id"] for item in batch])
+        }
+        
+        return {
+            "pixel_values": pixel_values,
+            "labels": labels
+        }
     
     @property
     def class_names(self) -> List[str]:
-        """Get list of class names."""
-        return self.train_dataset.class_names 
+        """Get class names from the dataset."""
+        if hasattr(self, 'train_dataset'):
+            return self.train_dataset.class_names
+        else:
+            # Default COCO class names
+            return [
+                'person', 'bicycle', 'car', 'motorcycle', 'airplane', 'bus', 'train', 'truck',
+                'boat', 'traffic light', 'fire hydrant', 'stop sign', 'parking meter', 'bench',
+                'bird', 'cat', 'dog', 'horse', 'sheep', 'cow', 'elephant', 'bear', 'zebra',
+                'giraffe', 'backpack', 'umbrella', 'handbag', 'tie', 'suitcase', 'frisbee',
+                'skis', 'snowboard', 'sports ball', 'kite', 'baseball bat', 'baseball glove',
+                'skateboard', 'surfboard', 'tennis racket', 'bottle', 'wine glass', 'cup',
+                'fork', 'knife', 'spoon', 'bowl', 'banana', 'apple', 'sandwich', 'orange',
+                'broccoli', 'carrot', 'hot dog', 'pizza', 'donut', 'cake', 'chair', 'couch',
+                'potted plant', 'bed', 'dining table', 'toilet', 'tv', 'laptop', 'mouse',
+                'remote', 'keyboard', 'cell phone', 'microwave', 'oven', 'toaster', 'sink',
+                'refrigerator', 'book', 'clock', 'vase', 'scissors', 'teddy bear', 'hair drier',
+                'toothbrush'
+            ] 

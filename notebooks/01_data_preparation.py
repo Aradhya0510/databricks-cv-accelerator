@@ -46,7 +46,7 @@ from src.utils.logging import setup_logger
 from src.tasks.detection.data import DetectionDataModule, DetectionDataConfig
 from src.tasks.detection.adapters import get_adapter
 from src.tasks.classification.data import ClassificationDataModule, ClassificationDataConfig
-from src.tasks.segmentation.data import SegmentationDataModule, SegmentationDataConfig
+from src.tasks.semantic_segmentation.data import SemanticSegmentationDataModule, SemanticSegmentationDataConfig
 
 # COMMAND ----------
 
@@ -83,7 +83,7 @@ def setup_data_module(task: str, config):
     data_modules = {
         'detection': (DetectionDataModule, DetectionDataConfig),
         'classification': (ClassificationDataModule, ClassificationDataConfig),
-        'segmentation': (SegmentationDataModule, SegmentationDataConfig)
+        'semantic_segmentation': (SemanticSegmentationDataModule, SemanticSegmentationDataConfig)
     }
     
     if task not in data_modules:

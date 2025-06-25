@@ -5,13 +5,17 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import pytorch_lightning as pl
-from torchmetrics.classification import Accuracy, F1Score, Precision, Recall
-from transformers import AutoModelForImageClassification, AutoConfig, PreTrainedModel
-from .adapters import get_output_adapter
+from torchmetrics.classification import Dice, JaccardIndex, Accuracy, Precision, Recall
+from transformers import (
+    AutoModelForSemanticSegmentation,
+    AutoConfig,
+    PreTrainedModel
+)
+from .adapters import get_semantic_adapter, SemanticSegmentationOutputAdapter
 
 @dataclass
-class ClassificationModelConfig:
-    """Configuration for classification model."""
+class SemanticSegmentationModelConfig:
+    """Configuration for semantic segmentation model."""
     model_name: str
     num_classes: int
     pretrained: bool = True
@@ -21,15 +25,15 @@ class ClassificationModelConfig:
     epochs: int = 10
     class_names: Optional[List[str]] = None
     model_kwargs: Optional[Dict[str, Any]] = None
-    image_size: int = 224
+    image_size: int = 512
 
-class ClassificationModel(pl.LightningModule):
-    """Base classification model that can work with any Hugging Face image classification model."""
+class SemanticSegmentationModel(pl.LightningModule):
+    """Semantic segmentation model that works with Hugging Face semantic segmentation models."""
     
-    def __init__(self, config: Union[Dict[str, Any], ClassificationModelConfig]):
+    def __init__(self, config: Union[Dict[str, Any], SemanticSegmentationModelConfig]):
         super().__init__()
         if isinstance(config, dict):
-            config = ClassificationModelConfig(**config)
+            config = SemanticSegmentationModelConfig(**config)
         self.config = config
         self.save_hyperparameters(config.__dict__)
         
@@ -40,7 +44,7 @@ class ClassificationModel(pl.LightningModule):
         self._init_metrics()
         
         # Initialize output adapter
-        self.output_adapter = get_output_adapter(config.model_name)
+        self.output_adapter = SemanticSegmentationOutputAdapter()
     
     def _init_model(self) -> None:
         """Initialize the model architecture."""
@@ -52,8 +56,8 @@ class ClassificationModel(pl.LightningModule):
                 **self.config.model_kwargs or {}
             )
             
-            # Initialize model
-            self.model = AutoModelForImageClassification.from_pretrained(
+            # Initialize semantic segmentation model
+            self.model = AutoModelForSemanticSegmentation.from_pretrained(
                 self.config.model_name,
                 config=model_config,
                 ignore_mismatched_sizes=True,
@@ -64,18 +68,22 @@ class ClassificationModel(pl.LightningModule):
     
     def _init_metrics(self) -> None:
         """Initialize metrics for training, validation, and testing."""
+        # Semantic segmentation metrics
+        self.train_dice = Dice(num_classes=self.config.num_classes)
+        self.train_iou = JaccardIndex(task="multiclass", num_classes=self.config.num_classes)
         self.train_accuracy = Accuracy(task="multiclass", num_classes=self.config.num_classes)
-        self.train_f1 = F1Score(task="multiclass", num_classes=self.config.num_classes)
         self.train_precision = Precision(task="multiclass", num_classes=self.config.num_classes)
         self.train_recall = Recall(task="multiclass", num_classes=self.config.num_classes)
         
+        self.val_dice = Dice(num_classes=self.config.num_classes)
+        self.val_iou = JaccardIndex(task="multiclass", num_classes=self.config.num_classes)
         self.val_accuracy = Accuracy(task="multiclass", num_classes=self.config.num_classes)
-        self.val_f1 = F1Score(task="multiclass", num_classes=self.config.num_classes)
         self.val_precision = Precision(task="multiclass", num_classes=self.config.num_classes)
         self.val_recall = Recall(task="multiclass", num_classes=self.config.num_classes)
         
+        self.test_dice = Dice(num_classes=self.config.num_classes)
+        self.test_iou = JaccardIndex(task="multiclass", num_classes=self.config.num_classes)
         self.test_accuracy = Accuracy(task="multiclass", num_classes=self.config.num_classes)
-        self.test_f1 = F1Score(task="multiclass", num_classes=self.config.num_classes)
         self.test_precision = Precision(task="multiclass", num_classes=self.config.num_classes)
         self.test_recall = Recall(task="multiclass", num_classes=self.config.num_classes)
     
@@ -148,29 +156,40 @@ class ClassificationModel(pl.LightningModule):
         )
         
         # Format predictions and targets for metrics
-        preds = self._format_predictions(outputs)
+        predictions = self._format_predictions(outputs)
         targets = self._format_targets(batch)
         
         # Update metrics
-        for pred, target in zip(preds, targets):
-            self.train_accuracy.update(pred["labels"], target["labels"])
-            self.train_f1.update(pred["labels"], target["labels"])
-            self.train_precision.update(pred["labels"], target["labels"])
-            self.train_recall.update(pred["labels"], target["labels"])
+        for pred, target in zip(predictions, targets):
+            pred_mask = pred["semantic_mask"]
+            target_mask = target["semantic_mask"]
+            
+            self.train_dice.update(pred_mask, target_mask)
+            self.train_iou.update(pred_mask, target_mask)
+            self.train_accuracy.update(pred_mask, target_mask)
+            self.train_precision.update(pred_mask, target_mask)
+            self.train_recall.update(pred_mask, target_mask)
         
-        # Log metrics
-        self.log("train_loss", outputs["loss"], on_step=True, on_epoch=True, prog_bar=True)
-        for k, v in outputs["loss_dict"].items():
-            self.log(f"train_{k}", v, on_step=True, on_epoch=True)
+        # Log loss
+        self.log("train_loss", outputs["loss"], prog_bar=True)
         
         return outputs["loss"]
     
     def on_train_epoch_end(self) -> None:
-        """Calculate and log metrics at the end of training epoch."""
+        """Called at the end of training epoch."""
+        # Log metrics
+        self.log("train_dice", self.train_dice.compute(), prog_bar=True)
+        self.log("train_iou", self.train_iou.compute(), prog_bar=True)
         self.log("train_accuracy", self.train_accuracy.compute(), prog_bar=True)
-        self.log("train_f1", self.train_f1.compute())
-        self.log("train_precision", self.train_precision.compute())
-        self.log("train_recall", self.train_recall.compute())
+        self.log("train_precision", self.train_precision.compute(), prog_bar=True)
+        self.log("train_recall", self.train_recall.compute(), prog_bar=True)
+        
+        # Reset metrics
+        self.train_dice.reset()
+        self.train_iou.reset()
+        self.train_accuracy.reset()
+        self.train_precision.reset()
+        self.train_recall.reset()
     
     def validation_step(self, batch: Dict[str, torch.Tensor], batch_idx: int) -> None:
         """Validation step.
@@ -185,25 +204,38 @@ class ClassificationModel(pl.LightningModule):
         )
         
         # Format predictions and targets for metrics
-        preds = self._format_predictions(outputs)
+        predictions = self._format_predictions(outputs)
         targets = self._format_targets(batch)
         
         # Update metrics
-        for pred, target in zip(preds, targets):
-            self.val_accuracy.update(pred["labels"], target["labels"])
-            self.val_f1.update(pred["labels"], target["labels"])
-            self.val_precision.update(pred["labels"], target["labels"])
-            self.val_recall.update(pred["labels"], target["labels"])
+        for pred, target in zip(predictions, targets):
+            pred_mask = pred["semantic_mask"]
+            target_mask = target["semantic_mask"]
+            
+            self.val_dice.update(pred_mask, target_mask)
+            self.val_iou.update(pred_mask, target_mask)
+            self.val_accuracy.update(pred_mask, target_mask)
+            self.val_precision.update(pred_mask, target_mask)
+            self.val_recall.update(pred_mask, target_mask)
         
-        # Log metrics
-        self.log("val_loss", outputs["loss"], on_step=True, on_epoch=True, prog_bar=True)
+        # Log loss
+        self.log("val_loss", outputs["loss"], prog_bar=True)
     
     def on_validation_epoch_end(self) -> None:
-        """Calculate and log metrics at the end of validation epoch."""
+        """Called at the end of validation epoch."""
+        # Log metrics
+        self.log("val_dice", self.val_dice.compute(), prog_bar=True)
+        self.log("val_iou", self.val_iou.compute(), prog_bar=True)
         self.log("val_accuracy", self.val_accuracy.compute(), prog_bar=True)
-        self.log("val_f1", self.val_f1.compute())
-        self.log("val_precision", self.val_precision.compute())
-        self.log("val_recall", self.val_recall.compute())
+        self.log("val_precision", self.val_precision.compute(), prog_bar=True)
+        self.log("val_recall", self.val_recall.compute(), prog_bar=True)
+        
+        # Reset metrics
+        self.val_dice.reset()
+        self.val_iou.reset()
+        self.val_accuracy.reset()
+        self.val_precision.reset()
+        self.val_recall.reset()
     
     def test_step(self, batch: Dict[str, torch.Tensor], batch_idx: int) -> None:
         """Test step.
@@ -218,30 +250,41 @@ class ClassificationModel(pl.LightningModule):
         )
         
         # Format predictions and targets for metrics
-        preds = self._format_predictions(outputs)
+        predictions = self._format_predictions(outputs)
         targets = self._format_targets(batch)
         
         # Update metrics
-        for pred, target in zip(preds, targets):
-            self.test_accuracy.update(pred["labels"], target["labels"])
-            self.test_f1.update(pred["labels"], target["labels"])
-            self.test_precision.update(pred["labels"], target["labels"])
-            self.test_recall.update(pred["labels"], target["labels"])
+        for pred, target in zip(predictions, targets):
+            pred_mask = pred["semantic_mask"]
+            target_mask = target["semantic_mask"]
+            
+            self.test_dice.update(pred_mask, target_mask)
+            self.test_iou.update(pred_mask, target_mask)
+            self.test_accuracy.update(pred_mask, target_mask)
+            self.test_precision.update(pred_mask, target_mask)
+            self.test_recall.update(pred_mask, target_mask)
         
-        # Log metrics
-        self.log("test_loss", outputs["loss"], on_step=True, on_epoch=True, prog_bar=True)
-        for k, v in outputs["loss_dict"].items():
-            self.log(f"test_{k}", v, on_step=True, on_epoch=True)
+        # Log loss
+        self.log("test_loss", outputs["loss"], prog_bar=True)
     
     def on_test_epoch_end(self) -> None:
-        """Calculate and log metrics at the end of test epoch."""
+        """Called at the end of test epoch."""
+        # Log metrics
+        self.log("test_dice", self.test_dice.compute(), prog_bar=True)
+        self.log("test_iou", self.test_iou.compute(), prog_bar=True)
         self.log("test_accuracy", self.test_accuracy.compute(), prog_bar=True)
-        self.log("test_f1", self.test_f1.compute())
-        self.log("test_precision", self.test_precision.compute())
-        self.log("test_recall", self.test_recall.compute())
+        self.log("test_precision", self.test_precision.compute(), prog_bar=True)
+        self.log("test_recall", self.test_recall.compute(), prog_bar=True)
+        
+        # Reset metrics
+        self.test_dice.reset()
+        self.test_iou.reset()
+        self.test_accuracy.reset()
+        self.test_precision.reset()
+        self.test_recall.reset()
     
     def configure_optimizers(self):
-        """Configure optimizers and learning rate schedulers."""
+        """Configure optimizers and schedulers."""
         optimizer = torch.optim.AdamW(
             self.parameters(),
             lr=self.config.learning_rate,
@@ -251,12 +294,22 @@ class ClassificationModel(pl.LightningModule):
         if self.config.scheduler == "cosine":
             scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
                 optimizer,
-                T_max=self.config.epochs,
-                eta_min=1e-6
+                T_max=self.config.epochs
             )
-            return [optimizer], [scheduler]
+        else:
+            scheduler = torch.optim.lr_scheduler.StepLR(
+                optimizer,
+                step_size=30,
+                gamma=0.1
+            )
         
-        return optimizer
+        return {
+            "optimizer": optimizer,
+            "lr_scheduler": {
+                "scheduler": scheduler,
+                "monitor": "val_loss"
+            }
+        }
     
     @classmethod
     def from_pretrained(
@@ -264,18 +317,18 @@ class ClassificationModel(pl.LightningModule):
         model_name: str,
         num_classes: int,
         **kwargs
-    ) -> "ClassificationModel":
+    ) -> "SemanticSegmentationModel":
         """Create a model from a pretrained checkpoint.
         
         Args:
-            model_name: Name or path of the pretrained model
-            num_classes: Number of output classes
-            **kwargs: Additional arguments for model configuration
+            model_name: Name of the pretrained model
+            num_classes: Number of classes
+            **kwargs: Additional arguments
             
         Returns:
-            Initialized model
+            Model instance
         """
-        config = ClassificationModelConfig(
+        config = SemanticSegmentationModelConfig(
             model_name=model_name,
             num_classes=num_classes,
             **kwargs
@@ -283,42 +336,27 @@ class ClassificationModel(pl.LightningModule):
         return cls(config)
     
     def on_train_epoch_start(self) -> None:
-        """Reset training metrics at the start of each epoch."""
-        self.train_accuracy.reset()
-        self.train_f1.reset()
-        self.train_precision.reset()
-        self.train_recall.reset()
+        """Called at the start of training epoch."""
+        # Set model to training mode
+        self.model.train()
     
     def on_validation_epoch_start(self) -> None:
-        """Reset validation metrics at the start of each epoch."""
-        self.val_accuracy.reset()
-        self.val_f1.reset()
-        self.val_precision.reset()
-        self.val_recall.reset()
+        """Called at the start of validation epoch."""
+        # Set model to evaluation mode
+        self.model.eval()
     
     def on_test_epoch_start(self) -> None:
-        """Reset test metrics at the start of each epoch."""
-        self.test_accuracy.reset()
-        self.test_f1.reset()
-        self.test_precision.reset()
-        self.test_recall.reset()
+        """Called at the start of test epoch."""
+        # Set model to evaluation mode
+        self.model.eval()
     
     def on_save_checkpoint(self, checkpoint: Dict[str, Any]) -> None:
-        """Save additional state to checkpoint.
-        
-        Args:
-            checkpoint: Dictionary to save state to
-        """
+        """Called when saving a checkpoint."""
+        # Add model configuration to checkpoint
         checkpoint["model_config"] = self.config.__dict__
-        checkpoint["class_names"] = self.config.class_names
     
     def on_load_checkpoint(self, checkpoint: Dict[str, Any]) -> None:
-        """Load additional state from checkpoint.
-        
-        Args:
-            checkpoint: Dictionary to load state from
-        """
+        """Called when loading a checkpoint."""
+        # Load model configuration from checkpoint
         if "model_config" in checkpoint:
-            self.config = ClassificationModelConfig(**checkpoint["model_config"])
-        if "class_names" in checkpoint:
-            self.config.class_names = checkpoint["class_names"] 
+            self.config = SemanticSegmentationModelConfig(**checkpoint["model_config"]) 

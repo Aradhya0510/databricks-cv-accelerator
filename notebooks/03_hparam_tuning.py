@@ -130,7 +130,7 @@ from src.utils.logging import setup_logger, get_metric_logger
 from src.training.trainer import UnifiedTrainer
 from src.tasks.detection.model import DetectionModel
 from src.tasks.classification.model import ClassificationModel
-from src.tasks.segmentation.model import SegmentationModel
+from src.tasks.semantic_segmentation.model import SemanticSegmentationModel
 
 # COMMAND ----------
 

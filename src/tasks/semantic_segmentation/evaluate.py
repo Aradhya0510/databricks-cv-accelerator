@@ -10,17 +10,17 @@ import matplotlib.pyplot as plt
 import seaborn as sns
 from torchmetrics import IoU, Dice
 
-from .model import SegmentationModel
-from .data import SegmentationDataModule
+from .model import SemanticSegmentationModel
+from .data import SemanticSegmentationDataModule
 
-class SegmentationEvaluator:
+class SemanticSegmentationEvaluator:
     def __init__(self, model_path: str, config_path: str):
         # Load configuration
         with open(config_path, 'r') as f:
             self.config = yaml.safe_load(f)
         
         # Load model
-        self.model = SegmentationModel.load_from_checkpoint(model_path, config=self.config)
+        self.model = SemanticSegmentationModel.load_from_checkpoint(model_path, config=self.config)
         self.model.eval()
         
         # Move model to GPU if available
@@ -53,7 +53,7 @@ class SegmentationEvaluator:
             'toothbrush'
         ]
     
-    def evaluate(self, data_module: SegmentationDataModule) -> Dict[str, Any]:
+    def evaluate(self, data_module: SemanticSegmentationDataModule) -> Dict[str, Any]:
         """Evaluate model on validation dataset."""
         # Initialize metrics
         self.iou_metric = self.iou_metric.to(self.device)
@@ -67,17 +67,16 @@ class SegmentationEvaluator:
         # Run evaluation
         with torch.no_grad():
             for batch in data_module.val_dataloader():
-                images, masks = batch
-                images = images.to(self.device)
-                masks = masks.to(self.device)
+                images = batch["pixel_values"].to(self.device)
+                masks = batch["labels"]["semantic_masks"].to(self.device)
                 
                 # Get predictions
-                predictions = self.model(images)
-                pred_masks = torch.argmax(predictions, dim=1)
+                outputs = self.model(images)
+                predictions = torch.argmax(outputs["logits"], dim=1)
                 
                 # Update metrics
-                self.iou_metric.update(pred_masks, masks)
-                self.dice_metric.update(pred_masks, masks)
+                self.iou_metric.update(predictions, masks)
+                self.dice_metric.update(predictions, masks)
                 
                 # Calculate per-class metrics
                 for class_idx in range(self.num_classes):
@@ -85,7 +84,7 @@ class SegmentationEvaluator:
                         continue
                     
                     # Get class-specific masks
-                    pred_class = (pred_masks == class_idx)
+                    pred_class = (predictions == class_idx)
                     true_class = (masks == class_idx)
                     
                     # Calculate IoU
@@ -141,7 +140,7 @@ class SegmentationEvaluator:
             x=list(metrics['overall_metrics'].keys()),
             y=list(metrics['overall_metrics'].values())
         )
-        plt.title('Overall Segmentation Metrics')
+        plt.title('Overall Semantic Segmentation Metrics')
         plt.ylim(0, 1)
         plt.tight_layout()
         
@@ -161,7 +160,7 @@ class SegmentationEvaluator:
             y='value',
             hue='variable'
         )
-        plt.title('Per-Class Segmentation Metrics')
+        plt.title('Per-Class Semantic Segmentation Metrics')
         plt.xticks(rotation=90)
         plt.ylim(0, 1)
         plt.tight_layout()
@@ -200,10 +199,11 @@ def evaluate_model(
         config = yaml.safe_load(f)
     
     # Initialize data module
-    data_module = SegmentationDataModule(config)
+    data_module = SemanticSegmentationDataModule(config)
+    data_module.setup(stage='test')
     
     # Initialize evaluator
-    evaluator = SegmentationEvaluator(model_path, config_path)
+    evaluator = SemanticSegmentationEvaluator(model_path, config_path)
     
     # Run evaluation
     metrics = evaluator.evaluate(data_module)
@@ -211,37 +211,13 @@ def evaluate_model(
     # Plot metrics
     evaluator.plot_metrics(metrics, output_dir)
     
-    # Print metrics
-    print("\nOverall Metrics:")
+    # Print results
+    print("Overall Metrics:")
     for metric, value in metrics['overall_metrics'].items():
-        print(f"{metric}: {value:.4f}")
+        print(f"  {metric}: {value:.4f}")
     
     print("\nPer-Class Metrics:")
-    per_class_df = pd.DataFrame(metrics['per_class_metrics'])
-    print(per_class_df.to_string(index=False))
+    for class_metric in metrics['per_class_metrics'][:10]:  # Show first 10 classes
+        print(f"  {class_metric['class_name']}: IoU={class_metric['IoU']:.4f}, Dice={class_metric['Dice']:.4f}")
     
-    # Save metrics to file
-    if output_dir:
-        # Save overall metrics
-        pd.DataFrame([metrics['overall_metrics']]).to_csv(
-            os.path.join(output_dir, 'overall_metrics.csv'),
-            index=False
-        )
-        
-        # Save per-class metrics
-        per_class_df.to_csv(
-            os.path.join(output_dir, 'per_class_metrics.csv'),
-            index=False
-        )
-
-if __name__ == '__main__':
-    import argparse
-    
-    parser = argparse.ArgumentParser()
-    parser.add_argument('--model', type=str, required=True, help='Path to model checkpoint')
-    parser.add_argument('--config', type=str, required=True, help='Path to config file')
-    parser.add_argument('--output', type=str, help='Path to output directory')
-    
-    args = parser.parse_args()
-    
-    evaluate_model(args.model, args.config, args.output) 
+    return metrics 

@@ -9,16 +9,16 @@ from typing import List, Dict, Any, Tuple
 import matplotlib.pyplot as plt
 from matplotlib.colors import ListedColormap
 
-from .model import SegmentationModel
+from .model import SemanticSegmentationModel
 
-class SegmentationInference:
+class SemanticSegmentationInference:
     def __init__(self, model_path: str, config_path: str):
         # Load configuration
         with open(config_path, 'r') as f:
             self.config = yaml.safe_load(f)
         
         # Load model
-        self.model = SegmentationModel.load_from_checkpoint(model_path, config=self.config)
+        self.model = SemanticSegmentationModel.load_from_checkpoint(model_path, config=self.config)
         self.model.eval()
         
         # Move model to GPU if available
@@ -35,6 +35,7 @@ class SegmentationInference:
         """Load COCO class names."""
         # You can replace this with your own class names file
         return [
+            'background',  # Add background class
             'person', 'bicycle', 'car', 'motorcycle', 'airplane', 'bus', 'train', 'truck',
             'boat', 'traffic light', 'fire hydrant', 'stop sign', 'parking meter', 'bench',
             'bird', 'cat', 'dog', 'horse', 'sheep', 'cow', 'elephant', 'bear', 'zebra',
@@ -100,10 +101,10 @@ class SegmentationInference:
         
         # Run inference
         with torch.no_grad():
-            predictions = self.model(input_tensor)
+            outputs = self.model(input_tensor)
         
         # Postprocess predictions
-        mask = self.postprocess_predictions(predictions, image.shape[:2])
+        mask = self.postprocess_predictions(outputs["logits"], image.shape[:2])
         
         return mask
     
@@ -158,7 +159,7 @@ def batch_inference(
 ):
     """Run batch inference on a directory of images."""
     # Initialize inference
-    inference = SegmentationInference(model_path, config_path)
+    inference = SemanticSegmentationInference(model_path, config_path)
     
     # Create output directory
     os.makedirs(output_dir, exist_ok=True)
@@ -197,12 +198,7 @@ if __name__ == '__main__':
         batch_inference(args.model, args.config, args.input, args.output, args.batch_size)
     else:
         # Single image inference
-        inference = SegmentationInference(args.model, args.config)
+        inference = SemanticSegmentationInference(args.model, args.config)
         image = cv2.imread(args.input)
         mask = inference.predict(image)
-        
-        if args.output:
-            inference.visualize(image, mask, args.output)
-        else:
-            inference.visualize(image, mask)
-            plt.show() 
+        inference.visualize(image, mask, args.output) 
