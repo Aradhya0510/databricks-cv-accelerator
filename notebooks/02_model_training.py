@@ -23,6 +23,15 @@
 
 # COMMAND ----------
 
+%pip install -r "../requirements.txt"
+dbutils.library.restartPython()
+
+# COMMAND ----------
+
+%run ./01_data_preparation
+
+# COMMAND ----------
+
 # DBTITLE 1,Import Dependencies
 import sys
 import os
@@ -37,7 +46,7 @@ import numpy as np
 import cv2
 
 # Add the project root to Python path
-project_root = "/Workspace/Repos/Databricks_CV_ref"
+project_root = "/Volumes/<catalog>/<schema>/<volume>/<path>/<file_name>"
 sys.path.append(project_root)
 
 # Import project modules
@@ -55,7 +64,7 @@ from src.tasks.detection.adapters import DETROutputAdapter, get_adapter
 
 # DBTITLE 1,Initialize Logging
 # Get the Unity Catalog volume path from environment or use default
-volume_path = os.getenv("UNITY_CATALOG_VOLUME", "/Volumes/cv_ref/datasets/coco_mini")
+volume_path = os.getenv("UNITY_CATALOG_VOLUME", project_root)
 log_dir = f"{volume_path}/logs"
 os.makedirs(log_dir, exist_ok=True)
 
@@ -238,7 +247,6 @@ mlflow_logger = setup_mlflow(experiment_name)
 print(f"Using MLflow experiment: {experiment_name}")
 
 # Prepare data loaders (from previous notebook)
-from notebook_01_data_preparation import prepare_data
 train_loader, val_loader = prepare_data(task)
 
 # Train model

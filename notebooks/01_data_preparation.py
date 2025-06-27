@@ -29,6 +29,11 @@
 
 # COMMAND ----------
 
+%pip install -r "../requirements.txt"
+dbutils.library.restartPython()
+
+# COMMAND ----------
+
 # DBTITLE 1,Import Dependencies
 import sys
 import os
@@ -37,7 +42,7 @@ from torch.utils.data import DataLoader
 import yaml
 
 # Add the project root to Python path
-project_root = "/Workspace/Repos/Databricks_CV_ref"
+project_root = "/Volumes/<catalog>/<schema>/<volume>/<path>/<file_name>"
 sys.path.append(project_root)
 
 # Import project modules
@@ -52,7 +57,7 @@ from src.tasks.semantic_segmentation.data import SemanticSegmentationDataModule,
 
 # DBTITLE 1,Initialize Logging
 # Get the Unity Catalog volume path from environment or use default
-volume_path = os.getenv("UNITY_CATALOG_VOLUME", "/Volumes/cv_ref/datasets/coco_mini")
+volume_path = os.getenv("UNITY_CATALOG_VOLUME", project_root)
 log_dir = f"{volume_path}/logs"
 os.makedirs(log_dir, exist_ok=True)
 

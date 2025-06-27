@@ -41,7 +41,7 @@ from pathlib import Path
 import yaml
 
 # Add the project root to Python path
-project_root = "/Workspace/Repos/Databricks_CV_ref"
+project_root = "/Volumes/<catalog>/<schema>/<volume>/<path>/<file_name>"
 sys.path.append(project_root)
 
 from src.config import (
@@ -60,7 +60,7 @@ from src.tasks.semantic_segmentation.model import SemanticSegmentationModel
 
 # DBTITLE 1,Initialize Logging
 # Get the Unity Catalog volume path from environment or use default
-volume_path = os.getenv("UNITY_CATALOG_VOLUME", "/Volumes/cv_ref/datasets/coco_mini")
+volume_path = os.getenv("UNITY_CATALOG_VOLUME",project_root)
 log_dir = f"{volume_path}/logs"
 os.makedirs(log_dir, exist_ok=True)
 
