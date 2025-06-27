@@ -5,8 +5,6 @@ import torch
 from torch.utils.data import DataLoader
 import pytorch_lightning as pl
 from pycocotools.coco import COCO
-import albumentations as A
-from albumentations.pytorch import ToTensorV2
 import cv2
 import numpy as np
 from pathlib import Path
@@ -17,8 +15,14 @@ from .adapters import get_semantic_adapter
 @dataclass
 class SemanticSegmentationDataConfig:
     """Configuration for semantic segmentation data module."""
-    data_path: str
-    annotation_file: str
+    # Separate paths for train/val/test splits
+    train_data_path: str
+    train_annotation_file: str
+    val_data_path: str
+    val_annotation_file: str
+    test_data_path: Optional[str] = None
+    test_annotation_file: Optional[str] = None
+    
     image_size: int = 512
     mean: Tuple[float, float, float] = (0.485, 0.456, 0.406)
     std: Tuple[float, float, float] = (0.229, 0.224, 0.225)
@@ -36,22 +40,12 @@ class COCOSemanticSegmentationDataset(torch.utils.data.Dataset):
         self,
         root_dir: str,
         annotation_file: str,
-        transform: Optional[Union[A.Compose, Any]] = None,
-        image_size: int = 512,
-        model_name: Optional[str] = None
+        transform: Optional[Any] = None,
     ):
         self.root_dir = Path(root_dir)
         self.coco = COCO(annotation_file)
         self.transform = transform
-        self.image_size = image_size
-        self.model_name = model_name
         self.ids = list(sorted(self.coco.imgs.keys()))
-        
-        # Initialize adapter if using Hugging Face model
-        if model_name:
-            self.adapter = get_semantic_adapter(model_name, image_size=image_size)
-        else:
-            self.adapter = None
         
         # Load class names
         self.class_names = [cat["name"] for cat in self.coco.loadCats(self.coco.getCatIds())]
@@ -89,23 +83,13 @@ class COCOSemanticSegmentationDataset(torch.utils.data.Dataset):
         }
         
         # Apply transforms
-        if self.adapter:
-            # Use adapter for preprocessing
-            processed_image, adapted_target = self.adapter(image_pil, target)
-            return {
-                "pixel_values": processed_image,
-                "labels": adapted_target
-            }
-        else:
-            # Use Albumentations transforms
-            if self.transform:
-                transformed = self.transform(image=image, mask=mask)
-                image = transformed['image']
-                mask = transformed['mask']
-            return {
-                "pixel_values": image,
-                "labels": target
-            }
+        if self.transform:
+            image_pil, target = self.transform(image_pil, target)
+        
+        return {
+            "pixel_values": image_pil,
+            "labels": target
+        }
 
 class SemanticSegmentationDataModule(pl.LightningDataModule):
     def __init__(self, config: Union[Dict[str, Any], SemanticSegmentationDataConfig]):
@@ -113,72 +97,45 @@ class SemanticSegmentationDataModule(pl.LightningDataModule):
         if isinstance(config, dict):
             config = SemanticSegmentationDataConfig(**config)
         self.config = config
-        
-        # Initialize adapter if using Hugging Face model
-        if config.model_name:
-            self.adapter = get_semantic_adapter(config.model_name, image_size=config.image_size)
-            self.train_transform = None
-            self.val_transform = None
-        else:
-            # Define transforms
-            self.train_transform = A.Compose([
-                A.Resize(config.image_size, config.image_size),
-                A.HorizontalFlip(p=0.5 if config.horizontal_flip else 0),
-                A.VerticalFlip(p=0.5 if config.vertical_flip else 0),
-                A.Rotate(limit=config.rotation, p=0.5),
-                A.RandomBrightnessContrast(
-                    brightness_limit=config.brightness_contrast,
-                    contrast_limit=config.brightness_contrast,
-                    p=0.5
-                ),
-                A.HueSaturationValue(
-                    hue_shift_limit=config.hue_saturation,
-                    sat_shift_limit=config.hue_saturation,
-                    val_shift_limit=config.hue_saturation,
-                    p=0.5
-                ),
-                A.Normalize(
-                    mean=config.mean,
-                    std=config.std
-                ),
-                ToTensorV2()
-            ])
-            
-            self.val_transform = A.Compose([
-                A.Resize(config.image_size, config.image_size),
-                A.Normalize(
-                    mean=config.mean,
-                    std=config.std
-                ),
-                ToTensorV2()
-            ])
+        self.adapter = None  # Will be set after initialization
     
     def setup(self, stage: Optional[str] = None):
         if stage == 'fit' or stage is None:
             self.train_dataset = COCOSemanticSegmentationDataset(
-                root_dir=self.config.data_path,
-                annotation_file=self.config.annotation_file,
-                transform=self.train_transform,
-                image_size=self.config.image_size,
-                model_name=self.config.model_name
+                root_dir=self.config.train_data_path,
+                annotation_file=self.config.train_annotation_file,
+                transform=None  # Transform will be set by the adapter
             )
             
             self.val_dataset = COCOSemanticSegmentationDataset(
-                root_dir=self.config.data_path,
-                annotation_file=self.config.annotation_file,
-                transform=self.val_transform,
-                image_size=self.config.image_size,
-                model_name=self.config.model_name
+                root_dir=self.config.val_data_path,
+                annotation_file=self.config.val_annotation_file,
+                transform=None  # Transform will be set by the adapter
             )
         
         if stage == 'test':
-            self.test_dataset = COCOSemanticSegmentationDataset(
-                root_dir=self.config.data_path,
-                annotation_file=self.config.annotation_file,
-                transform=self.val_transform,
-                image_size=self.config.image_size,
-                model_name=self.config.model_name
-            )
+            if self.config.test_data_path is not None and self.config.test_annotation_file is not None:
+                self.test_dataset = COCOSemanticSegmentationDataset(
+                    root_dir=self.config.test_data_path,
+                    annotation_file=self.config.test_annotation_file,
+                    transform=None  # Transform will be set by the adapter
+                )
+            else:
+                # Use validation data for testing if test data not provided
+                self.test_dataset = COCOSemanticSegmentationDataset(
+                    root_dir=self.config.val_data_path,
+                    annotation_file=self.config.val_annotation_file,
+                    transform=None  # Transform will be set by the adapter
+                )
+        
+        # Set the adapter after datasets are created
+        if self.adapter is not None:
+            if hasattr(self, 'train_dataset'):
+                self.train_dataset.transform = self.adapter
+            if hasattr(self, 'val_dataset'):
+                self.val_dataset.transform = self.adapter
+            if hasattr(self, 'test_dataset'):
+                self.test_dataset.transform = self.adapter
     
     def train_dataloader(self) -> DataLoader:
         return DataLoader(

@@ -53,10 +53,13 @@ training:
 
 # Data Configuration
 data:
-  # Dataset paths
-  train_path: "/Volumes/users/aradhya_chouhan/coco_mini-train/data/train"
-  val_path: "/Volumes/users/aradhya_chouhan/coco_mini-train/data/val"
-  test_path: "/Volumes/users/aradhya_chouhan/coco_mini-train/data/test"
+  # Separate paths for train/val/test splits
+  train_data_path: "/Volumes/users/aradhya_chouhan/coco_mini-train/data/train"
+  train_annotation_file: "/Volumes/users/aradhya_chouhan/coco_mini-train/data/annotations_train.json"
+  val_data_path: "/Volumes/users/aradhya_chouhan/coco_mini-train/data/val"
+  val_annotation_file: "/Volumes/users/aradhya_chouhan/coco_mini-train/data/annotations_val.json"
+  test_data_path: "/Volumes/users/aradhya_chouhan/coco_mini-train/data/test"
+  test_annotation_file: "/Volumes/users/aradhya_chouhan/coco_mini-train/data/annotations_test.json"
   
   # Data processing
   image_size: [512, 512]  # Common size for segmentation

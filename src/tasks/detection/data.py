@@ -14,8 +14,14 @@ from PIL import Image
 @dataclass
 class DetectionDataConfig:
     """Configuration for detection data module."""
-    data_path: str
-    annotation_file: str
+    # Separate paths for train/val/test splits
+    train_data_path: str
+    train_annotation_file: str
+    val_data_path: str
+    val_annotation_file: str
+    test_data_path: Optional[str] = None
+    test_annotation_file: Optional[str] = None
+    
     batch_size: int = 8
     num_workers: int = 4
     model_name: Optional[str] = None
@@ -106,23 +112,31 @@ class DetectionDataModule(pl.LightningDataModule):
     def setup(self, stage: Optional[str] = None):
         if stage == 'fit' or stage is None:
             self.train_dataset = COCODetectionDataset(
-                root_dir=self.config.data_path,
-                annotation_file=self.config.annotation_file,
+                root_dir=self.config.train_data_path,
+                annotation_file=self.config.train_annotation_file,
                 transform=None  # Transform will be set by the adapter
             )
             
             self.val_dataset = COCODetectionDataset(
-                root_dir=self.config.data_path,
-                annotation_file=self.config.annotation_file,
+                root_dir=self.config.val_data_path,
+                annotation_file=self.config.val_annotation_file,
                 transform=None  # Transform will be set by the adapter
             )
         
         if stage == 'test':
-            self.test_dataset = COCODetectionDataset(
-                root_dir=self.config.data_path,
-                annotation_file=self.config.annotation_file,
-                transform=None  # Transform will be set by the adapter
-            )
+            if self.config.test_data_path is not None and self.config.test_annotation_file is not None:
+                self.test_dataset = COCODetectionDataset(
+                    root_dir=self.config.test_data_path,
+                    annotation_file=self.config.test_annotation_file,
+                    transform=None  # Transform will be set by the adapter
+                )
+            else:
+                # Use validation data for testing if test data not provided
+                self.test_dataset = COCODetectionDataset(
+                    root_dir=self.config.val_data_path,
+                    annotation_file=self.config.val_annotation_file,
+                    transform=None  # Transform will be set by the adapter
+                )
         
         # Set the adapter after datasets are created
         if self.adapter is not None:

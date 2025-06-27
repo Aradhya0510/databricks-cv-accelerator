@@ -5,8 +5,6 @@ import torch
 from torch.utils.data import Dataset, DataLoader
 import pytorch_lightning as pl
 from PIL import Image
-import albumentations as A
-from albumentations.pytorch import ToTensorV2
 import numpy as np
 from pathlib import Path
 from transformers import AutoFeatureExtractor
@@ -15,7 +13,11 @@ from .adapters import get_adapter
 @dataclass
 class ClassificationDataConfig:
     """Configuration for classification data module."""
-    data_path: str
+    # Separate paths for train/val/test splits
+    train_data_path: str
+    val_data_path: str
+    test_data_path: Optional[str] = None
+    
     image_size: int = 224
     mean: Tuple[float, float, float] = (0.485, 0.456, 0.406)
     std: Tuple[float, float, float] = (0.229, 0.224, 0.225)
@@ -32,22 +34,10 @@ class ClassificationDataset(Dataset):
     def __init__(
         self,
         data_path: str,
-        transform: Optional[Union[A.Compose, Any]] = None,
-        is_train: bool = True,
-        model_name: Optional[str] = None,
-        image_size: int = 224
+        transform: Optional[Any] = None,
     ):
         self.data_path = Path(data_path)
         self.transform = transform
-        self.is_train = is_train
-        self.model_name = model_name
-        self.image_size = image_size
-        
-        # Initialize adapter if using Hugging Face model
-        if model_name:
-            self.adapter = get_adapter(model_name, image_size=image_size)
-        else:
-            self.adapter = None
         
         # Load image paths and labels
         self.image_paths = []
@@ -78,24 +68,14 @@ class ClassificationDataset(Dataset):
             "image_id": torch.tensor(idx)
         }
         
-        # Apply transformations
-        if self.adapter:
-            # Use adapter for preprocessing
-            processed_image, adapted_target = self.adapter(image, target)
-            return {
-                "pixel_values": processed_image,
-                "labels": adapted_target
-            }
-        else:
-            # Use Albumentations transforms
-            image = np.array(image)
-            if self.transform:
-                transformed = self.transform(image=image)
-                image = transformed["image"]
-            return {
-                "pixel_values": image,
-                "labels": target
-            }
+        # Apply transforms
+        if self.transform:
+            image, target = self.transform(image, target)
+        
+        return {
+            "pixel_values": image,
+            "labels": target
+        }
 
 class ClassificationDataModule(pl.LightningDataModule):
     def __init__(self, config: Union[Dict[str, Any], ClassificationDataConfig]):
@@ -103,58 +83,35 @@ class ClassificationDataModule(pl.LightningDataModule):
         if isinstance(config, dict):
             config = ClassificationDataConfig(**config)
         self.config = config
-        
-        # Initialize adapter if using Hugging Face model
-        if config.model_name:
-            self.adapter = get_adapter(config.model_name, image_size=config.image_size)
-            self.train_transform = None
-            self.val_transform = None
-        else:
-            # Define Albumentations transforms
-            self.train_transform = A.Compose([
-                A.RandomResizedCrop(config.image_size, config.image_size),
-                A.HorizontalFlip(p=0.5 if config.horizontal_flip else 0),
-                A.VerticalFlip(p=0.5 if config.vertical_flip else 0),
-                A.Rotate(limit=config.rotation),
-                A.RandomBrightnessContrast(
-                    brightness_limit=config.brightness_contrast,
-                    contrast_limit=config.brightness_contrast
-                ),
-                A.Normalize(mean=config.mean, std=config.std),
-                ToTensorV2(),
-            ])
-            
-            self.val_transform = A.Compose([
-                A.Resize(config.image_size, config.image_size),
-                A.Normalize(mean=config.mean, std=config.std),
-                ToTensorV2(),
-            ])
+        self.adapter = None  # Will be set after initialization
     
     def setup(self, stage: Optional[str] = None):
         if stage == "fit" or stage is None:
             self.train_dataset = ClassificationDataset(
-                self.config.data_path,
-                transform=self.train_transform,
-                is_train=True,
-                model_name=self.config.model_name,
-                image_size=self.config.image_size
+                self.config.train_data_path,
+                transform=None  # Transform will be set by the adapter
             )
             self.val_dataset = ClassificationDataset(
-                self.config.data_path,
-                transform=self.val_transform,
-                is_train=False,
-                model_name=self.config.model_name,
-                image_size=self.config.image_size
+                self.config.val_data_path,
+                transform=None  # Transform will be set by the adapter
             )
         
         if stage == "test" or stage is None:
+            # Use test data if available, otherwise use validation data
+            test_path = self.config.test_data_path if self.config.test_data_path is not None else self.config.val_data_path
             self.test_dataset = ClassificationDataset(
-                self.config.data_path,
-                transform=self.val_transform,
-                is_train=False,
-                model_name=self.config.model_name,
-                image_size=self.config.image_size
+                test_path,
+                transform=None  # Transform will be set by the adapter
             )
+        
+        # Set the adapter after datasets are created
+        if self.adapter is not None:
+            if hasattr(self, 'train_dataset'):
+                self.train_dataset.transform = self.adapter
+            if hasattr(self, 'val_dataset'):
+                self.val_dataset.transform = self.adapter
+            if hasattr(self, 'test_dataset'):
+                self.test_dataset.transform = self.adapter
     
     def train_dataloader(self) -> DataLoader:
         return DataLoader(

@@ -52,10 +52,10 @@ training:
 
 # Data Configuration
 data:
-  # Dataset paths
-  train_path: "/Volumes/users/aradhya_chouhan/coco_mini-train/data/train"
-  val_path: "/Volumes/users/aradhya_chouhan/coco_mini-train/data/val"
-  test_path: "/Volumes/users/aradhya_chouhan/coco_mini-train/data/test"
+  # Separate paths for train/val/test splits
+  train_data_path: "/Volumes/users/aradhya_chouhan/coco_mini-train/data/train"
+  val_data_path: "/Volumes/users/aradhya_chouhan/coco_mini-train/data/val"
+  test_data_path: "/Volumes/users/aradhya_chouhan/coco_mini-train/data/test"
   
   # Data processing
   image_size: [224, 224]  # ResNet default size

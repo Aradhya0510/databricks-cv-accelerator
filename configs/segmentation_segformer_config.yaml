@@ -15,9 +15,13 @@ model:
 
 # Data Configuration
 data:
-  # Base paths for data loading
-  data_path: "/Volumes/users/aradhya_chouhan/ade20k_mini/data/images/"
-  annotation_file: "/Volumes/users/aradhya_chouhan/ade20k_mini/data/annotations.json"
+  # Separate paths for train/val/test splits
+  train_data_path: "/Volumes/users/aradhya_chouhan/ade20k_mini/data/images/"
+  train_annotation_file: "/Volumes/users/aradhya_chouhan/ade20k_mini/data/annotations_train.json"
+  val_data_path: "/Volumes/users/aradhya_chouhan/ade20k_mini/data/images/"
+  val_annotation_file: "/Volumes/users/aradhya_chouhan/ade20k_mini/data/annotations_val.json"
+  test_data_path: "/Volumes/users/aradhya_chouhan/ade20k_mini/data/images/"
+  test_annotation_file: "/Volumes/users/aradhya_chouhan/ade20k_mini/data/annotations_test.json"
   
   # Data loading parameters
   batch_size: 8  # SegFormer recommended batch size per GPU

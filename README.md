@@ -120,6 +120,8 @@ Upload to Unity Catalog volume:
 └── results/
 ```
 
+**📖 For detailed information on configuring train/validation/test splits, see [Data Configuration Guide](docs/DATA_CONFIGURATION.md)**
+
 ### Configuration Example
 
 ```yaml
@@ -127,8 +129,13 @@ model:
   model_name: "facebook/detr-resnet-50"
   ...
 data:
-  data_path: ".../images"
-  annotation_file: ".../annotations.json"
+  # New format with separate train/val/test paths (recommended)
+  train_data_path: ".../train/images"
+  train_annotation_file: ".../train/annotations.json"
+  val_data_path: ".../val/images"
+  val_annotation_file: ".../val/annotations.json"
+  test_data_path: ".../test/images"
+  test_annotation_file: ".../test/annotations.json"
 training:
   max_epochs: 300
   early_stopping_patience: 20

@@ -13,9 +13,13 @@ model:
 
 # Data Configuration
 data:
-  # Base paths for data loading
-  data_path: "/Volumes/users/aradhya_chouhan/coco_mini-train/data/val2017/"
-  annotation_file: "/Volumes/users/aradhya_chouhan/coco_mini-train/data/instances_val2017.json"
+  # Separate paths for train/val/test splits
+  train_data_path: "/Volumes/users/aradhya_chouhan/coco_mini-train/data/train2017/"
+  train_annotation_file: "/Volumes/users/aradhya_chouhan/coco_mini-train/data/instances_train2017.json"
+  val_data_path: "/Volumes/users/aradhya_chouhan/coco_mini-train/data/val2017/"
+  val_annotation_file: "/Volumes/users/aradhya_chouhan/coco_mini-train/data/instances_val2017.json"
+  test_data_path: "/Volumes/users/aradhya_chouhan/coco_mini-train/data/test2017/"
+  test_annotation_file: "/Volumes/users/aradhya_chouhan/coco_mini-train/data/instances_test2017.json"
   
   # Data loading parameters
   batch_size: 16  # DETR's recommended batch size per GPU

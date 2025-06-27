@@ -14,8 +14,10 @@ model:
 
 # Data Configuration
 data:
-  # Base paths for data loading
-  data_path: "/Volumes/users/aradhya_chouhan/imagenet_mini/data/train/"
+  # Separate paths for train/val/test splits
+  train_data_path: "/Volumes/users/aradhya_chouhan/imagenet_mini/data/train/"
+  val_data_path: "/Volumes/users/aradhya_chouhan/imagenet_mini/data/val/"
+  test_data_path: "/Volumes/users/aradhya_chouhan/imagenet_mini/data/test/"
   
   # Data loading parameters
   batch_size: 32  # ViT recommended batch size per GPU
