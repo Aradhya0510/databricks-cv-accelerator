@@ -14,12 +14,12 @@ model:
 # Data Configuration
 data:
   # Separate paths for train/val/test splits
-  train_data_path: "/Volumes/users/aradhya_chouhan/coco_mini-train/data/train2017/"
-  train_annotation_file: "/Volumes/users/aradhya_chouhan/coco_mini-train/data/instances_train2017.json"
-  val_data_path: "/Volumes/users/aradhya_chouhan/coco_mini-train/data/val2017/"
-  val_annotation_file: "/Volumes/users/aradhya_chouhan/coco_mini-train/data/instances_val2017.json"
-  test_data_path: "/Volumes/users/aradhya_chouhan/coco_mini-train/data/test2017/"
-  test_annotation_file: "/Volumes/users/aradhya_chouhan/coco_mini-train/data/instances_test2017.json"
+  train_data_path: "/Volumes/<catalog>/<schema>/<volume>/<path>/data/train2017/"
+  train_annotation_file: "/Volumes/<catalog>/<schema>/<volume>/<path>/data/instances_train2017.json"
+  val_data_path: "/Volumes/<catalog>/<schema>/<volume>/<path>/data/val2017/"
+  val_annotation_file: "/Volumes/<catalog>/<schema>/<volume>/<path>/data/instances_val2017.json"
+  test_data_path: "/Volumes/<catalog>/<schema>/<volume>/<path>/data/test2017/"
+  test_annotation_file: "/Volumes/<catalog>/<schema>/<volume>/<path>/data/instances_test2017.json"
   
   # Data loading parameters
   batch_size: 16  # DETR's recommended batch size per GPU
@@ -58,12 +58,12 @@ training:
   monitor_mode: "max"  # Maximize the monitored metric
   
   # Checkpointing
-  checkpoint_dir: "/Volumes/users/aradhya_chouhan/coco_mini-train/data/checkpoints/detection"
+  checkpoint_dir: "/Volumes/<catalog>/<schema>/<volume>/<path>/checkpoints/detection"
   save_top_k: 3
   
   # Logging
   log_every_n_steps: 50
-  log_dir: "/Volumes/users/aradhya_chouhan/coco_mini-train/data/logs"
+  log_dir: "/Volumes/<catalog>/<schema>/<volume>/<path>/logs"
   
   # Distributed training
   distributed: false
@@ -84,7 +84,7 @@ mlflow:
 
 # Output Configuration
 output:
-  results_dir: "/Volumes/users/aradhya_chouhan/coco_mini-train/data/results/detection"
+  results_dir: "/Volumes/<catalog>/<schema>/<volume>/<path>/results/detection"
   save_predictions: true
   visualization:
     save_images: true

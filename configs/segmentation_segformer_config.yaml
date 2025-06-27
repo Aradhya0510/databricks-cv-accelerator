@@ -16,12 +16,12 @@ model:
 # Data Configuration
 data:
   # Separate paths for train/val/test splits
-  train_data_path: "/Volumes/users/aradhya_chouhan/ade20k_mini/data/images/"
-  train_annotation_file: "/Volumes/users/aradhya_chouhan/ade20k_mini/data/annotations_train.json"
-  val_data_path: "/Volumes/users/aradhya_chouhan/ade20k_mini/data/images/"
-  val_annotation_file: "/Volumes/users/aradhya_chouhan/ade20k_mini/data/annotations_val.json"
-  test_data_path: "/Volumes/users/aradhya_chouhan/ade20k_mini/data/images/"
-  test_annotation_file: "/Volumes/users/aradhya_chouhan/ade20k_mini/data/annotations_test.json"
+  train_data_path: "/Volumes/<catalog>/<schema>/<volume>/<path>/data/images/"
+  train_annotation_file: "/Volumes/<catalog>/<schema>/<volume>/<path>/data/annotations_train.json"
+  val_data_path: "/Volumes/<catalog>/<schema>/<volume>/<path>/data/images/"
+  val_annotation_file: "/Volumes/<catalog>/<schema>/<volume>/<path>/data/annotations_val.json"
+  test_data_path: "/Volumes/<catalog>/<schema>/<volume>/<path>/data/images/"
+  test_annotation_file: "/Volumes/<catalog>/<schema>/<volume>/<path>/data/annotations_test.json"
   
   # Data loading parameters
   batch_size: 8  # SegFormer recommended batch size per GPU
@@ -55,16 +55,16 @@ training:
   
   # Early stopping
   early_stopping_patience: 15
-  monitor_metric: "val_dice"  # Metric to monitor
+  monitor_metric: "val_iou"  # Metric to monitor
   monitor_mode: "max"  # Maximize the monitored metric
   
   # Checkpointing
-  checkpoint_dir: "/Volumes/users/aradhya_chouhan/ade20k_mini/data/checkpoints/segmentation_segformer"
+  checkpoint_dir: "/Volumes/<catalog>/<schema>/<volume>/<path>/checkpoints/segmentation_segformer"
   save_top_k: 3
   
   # Logging
   log_every_n_steps: 50
-  log_dir: "/Volumes/users/aradhya_chouhan/ade20k_mini/data/logs"
+  log_dir: "/Volumes/<catalog>/<schema>/<volume>/<path>/logs"
   
   # Distributed training
   distributed: false
@@ -85,7 +85,7 @@ mlflow:
 
 # Output Configuration
 output:
-  results_dir: "/Volumes/users/aradhya_chouhan/ade20k_mini/data/results/segmentation_segformer"
+  results_dir: "/Volumes/<catalog>/<schema>/<volume>/<path>/results/segmentation_segformer"
   save_predictions: true
   visualization:
     save_images: true

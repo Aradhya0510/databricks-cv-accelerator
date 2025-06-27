@@ -15,12 +15,12 @@ For tasks that require annotation files (detection, semantic segmentation, insta
 ```yaml
 data:
   # Separate paths for train/val/test splits
-  train_data_path: "/path/to/coco/train2017/"
-  train_annotation_file: "/path/to/coco/annotations/instances_train2017.json"
-  val_data_path: "/path/to/coco/val2017/"
-  val_annotation_file: "/path/to/coco/annotations/instances_val2017.json"
-  test_data_path: "/path/to/coco/test2017/"
-  test_annotation_file: "/path/to/coco/annotations/instances_test2017.json"
+  train_data_path: "/Volumes/<catalog>/<schema>/<volume>/<path>/data/train2017/"
+  train_annotation_file: "/Volumes/<catalog>/<schema>/<volume>/<path>/data/instances_train2017.json"
+  val_data_path: "/Volumes/<catalog>/<schema>/<volume>/<path>/data/val2017/"
+  val_annotation_file: "/Volumes/<catalog>/<schema>/<volume>/<path>/data/instances_val2017.json"
+  test_data_path: "/Volumes/<catalog>/<schema>/<volume>/<path>/data/test2017/"
+  test_annotation_file: "/Volumes/<catalog>/<schema>/<volume>/<path>/data/instances_test2017.json"
   
   # Other parameters
   batch_size: 16
@@ -36,9 +36,9 @@ For classification tasks that use folder-based organization:
 ```yaml
 data:
   # Separate paths for train/val/test splits
-  train_data_path: "/path/to/imagenet/train/"
-  val_data_path: "/path/to/imagenet/val/"
-  test_data_path: "/path/to/imagenet/test/"
+  train_data_path: "/Volumes/<catalog>/<schema>/<volume>/<path>/data/train/"
+  val_data_path: "/Volumes/<catalog>/<schema>/<volume>/<path>/data/val/"
+  test_data_path: "/Volumes/<catalog>/<schema>/<volume>/<path>/data/test/"
   
   # Other parameters
   batch_size: 32
@@ -94,12 +94,12 @@ class ClassificationDataConfig:
 ```python
 # Configuration with separate train/val/test paths
 config = {
-    "train_data_path": "/path/to/coco/train2017/",
-    "train_annotation_file": "/path/to/coco/annotations/instances_train2017.json",
-    "val_data_path": "/path/to/coco/val2017/",
-    "val_annotation_file": "/path/to/coco/annotations/instances_val2017.json",
-    "test_data_path": "/path/to/coco/test2017/",
-    "test_annotation_file": "/path/to/coco/annotations/instances_test2017.json",
+    "train_data_path": "/Volumes/<catalog>/<schema>/<volume>/<path>/data/train2017/",
+    "train_annotation_file": "/Volumes/<catalog>/<schema>/<volume>/<path>/data/instances_train2017.json",
+    "val_data_path": "/Volumes/<catalog>/<schema>/<volume>/<path>/data/val2017/",
+    "val_annotation_file": "/Volumes/<catalog>/<schema>/<volume>/<path>/data/instances_val2017.json",
+    "test_data_path": "/Volumes/<catalog>/<schema>/<volume>/<path>/data/test2017/",
+    "test_annotation_file": "/Volumes/<catalog>/<schema>/<volume>/<path>/data/instances_test2017.json",
     "batch_size": 16,
     "model_name": "facebook/detr-resnet-50"
 }
@@ -119,12 +119,12 @@ print(f"Test: {len(data_module.test_dataset)} samples")
 ```yaml
 # config.yaml
 data:
-  train_data_path: "/Volumes/users/aradhya_chouhan/coco_mini-train/data/train2017/"
-  train_annotation_file: "/Volumes/users/aradhya_chouhan/coco_mini-train/data/instances_train2017.json"
-  val_data_path: "/Volumes/users/aradhya_chouhan/coco_mini-train/data/val2017/"
-  val_annotation_file: "/Volumes/users/aradhya_chouhan/coco_mini-train/data/instances_val2017.json"
-  test_data_path: "/Volumes/users/aradhya_chouhan/coco_mini-train/data/test2017/"
-  test_annotation_file: "/Volumes/users/aradhya_chouhan/coco_mini-train/data/instances_test2017.json"
+  train_data_path: "/Volumes/<catalog>/<schema>/<volume>/<path>/data/train2017/"
+  train_annotation_file: "/Volumes/<catalog>/<schema>/<volume>/<path>/data/instances_train2017.json"
+  val_data_path: "/Volumes/<catalog>/<schema>/<volume>/<path>/data/val2017/"
+  val_annotation_file: "/Volumes/<catalog>/<schema>/<volume>/<path>/data/instances_val2017.json"
+  test_data_path: "/Volumes/<catalog>/<schema>/<volume>/<path>/data/test2017/"
+  test_annotation_file: "/Volumes/<catalog>/<schema>/<volume>/<path>/data/instances_test2017.json"
   batch_size: 16
   model_name: "facebook/detr-resnet-50"
 
@@ -157,7 +157,7 @@ data_module.setup()
 ### Recommended Directory Structure
 
 ```
-/Volumes/your_catalog/your_schema/your_volume/
+/Volumes/<catalog>/<schema>/<volume>/<path>/
 ├── data/
 │   ├── train2017/
 │   │   ├── 000000000001.jpg
@@ -184,7 +184,7 @@ data_module.setup()
 ### Classification Dataset Structure
 
 ```
-/Volumes/your_catalog/your_schema/your_volume/
+/Volumes/<catalog>/<schema>/<volume>/<path>/
 ├── data/
 │   ├── train/
 │   │   ├── class1/

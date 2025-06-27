@@ -33,7 +33,7 @@ training:
   
   # Early stopping and checkpointing
   early_stopping_patience: 10
-  checkpoint_dir: "/Volumes/users/aradhya_chouhan/coco_mini-train/checkpoints"
+  checkpoint_dir: "/Volumes/<catalog>/<schema>/<volume>/<path>/checkpoints"
   save_top_k: 3
   monitor: "val_loss"
   mode: "min"
@@ -53,9 +53,9 @@ training:
 # Data Configuration
 data:
   # Separate paths for train/val/test splits
-  train_data_path: "/Volumes/users/aradhya_chouhan/coco_mini-train/data/train"
-  val_data_path: "/Volumes/users/aradhya_chouhan/coco_mini-train/data/val"
-  test_data_path: "/Volumes/users/aradhya_chouhan/coco_mini-train/data/test"
+  train_data_path: "/Volumes/<catalog>/<schema>/<volume>/<path>/data/train"
+  val_data_path: "/Volumes/<catalog>/<schema>/<volume>/<path>/data/val"
+  test_data_path: "/Volumes/<catalog>/<schema>/<volume>/<path>/data/test"
   
   # Data processing
   image_size: [224, 224]  # ResNet default size

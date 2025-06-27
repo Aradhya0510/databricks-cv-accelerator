@@ -16,12 +16,12 @@ def example_detection_config():
     """Example configuration for object detection with separate train/val/test paths."""
     
     detection_config = {
-        "train_data_path": "/path/to/coco/train2017/",
-        "train_annotation_file": "/path/to/coco/annotations/instances_train2017.json",
-        "val_data_path": "/path/to/coco/val2017/",
-        "val_annotation_file": "/path/to/coco/annotations/instances_val2017.json",
-        "test_data_path": "/path/to/coco/test2017/",
-        "test_annotation_file": "/path/to/coco/annotations/instances_test2017.json",
+        "train_data_path": "/Volumes/<catalog>/<schema>/<volume>/<path>/data/train2017/",
+        "train_annotation_file": "/Volumes/<catalog>/<schema>/<volume>/<path>/data/instances_train2017.json",
+        "val_data_path": "/Volumes/<catalog>/<schema>/<volume>/<path>/data/val2017/",
+        "val_annotation_file": "/Volumes/<catalog>/<schema>/<volume>/<path>/data/instances_val2017.json",
+        "test_data_path": "/Volumes/<catalog>/<schema>/<volume>/<path>/data/test2017/",
+        "test_annotation_file": "/Volumes/<catalog>/<schema>/<volume>/<path>/data/instances_test2017.json",
         "batch_size": 8,
         "num_workers": 4,
         "model_name": "facebook/detr-resnet-50",
@@ -45,9 +45,9 @@ def example_classification_config():
     """Example configuration for classification with separate train/val/test paths."""
     
     classification_config = {
-        "train_data_path": "/path/to/imagenet/train/",
-        "val_data_path": "/path/to/imagenet/val/",
-        "test_data_path": "/path/to/imagenet/test/",
+        "train_data_path": "/Volumes/<catalog>/<schema>/<volume>/<path>/data/train/",
+        "val_data_path": "/Volumes/<catalog>/<schema>/<volume>/<path>/data/val/",
+        "test_data_path": "/Volumes/<catalog>/<schema>/<volume>/<path>/data/test/",
         "batch_size": 32,
         "num_workers": 4,
         "model_name": "microsoft/resnet-50",
@@ -74,10 +74,10 @@ def example_optional_test_data():
     
     # Configuration without test data (will use validation data for testing)
     config_without_test = {
-        "train_data_path": "/path/to/coco/train2017/",
-        "train_annotation_file": "/path/to/coco/annotations/instances_train2017.json",
-        "val_data_path": "/path/to/coco/val2017/",
-        "val_annotation_file": "/path/to/coco/annotations/instances_val2017.json",
+        "train_data_path": "/Volumes/<catalog>/<schema>/<volume>/<path>/data/train2017/",
+        "train_annotation_file": "/Volumes/<catalog>/<schema>/<volume>/<path>/data/instances_train2017.json",
+        "val_data_path": "/Volumes/<catalog>/<schema>/<volume>/<path>/data/val2017/",
+        "val_annotation_file": "/Volumes/<catalog>/<schema>/<volume>/<path>/data/instances_val2017.json",
         "batch_size": 8,
         "model_name": "facebook/detr-resnet-50"
     }
@@ -99,12 +99,12 @@ def example_yaml_config():
     
     yaml_config = {
         "data": {
-            "train_data_path": "/Volumes/users/aradhya_chouhan/coco_mini-train/data/train2017/",
-            "train_annotation_file": "/Volumes/users/aradhya_chouhan/coco_mini-train/data/instances_train2017.json",
-            "val_data_path": "/Volumes/users/aradhya_chouhan/coco_mini-train/data/val2017/",
-            "val_annotation_file": "/Volumes/users/aradhya_chouhan/coco_mini-train/data/instances_val2017.json",
-            "test_data_path": "/Volumes/users/aradhya_chouhan/coco_mini-train/data/test2017/",
-            "test_annotation_file": "/Volumes/users/aradhya_chouhan/coco_mini-train/data/instances_test2017.json",
+            "train_data_path": "/Volumes/<catalog>/<schema>/<volume>/<path>/data/train2017/",
+            "train_annotation_file": "/Volumes/<catalog>/<schema>/<volume>/<path>/data/instances_train2017.json",
+            "val_data_path": "/Volumes/<catalog>/<schema>/<volume>/<path>/data/val2017/",
+            "val_annotation_file": "/Volumes/<catalog>/<schema>/<volume>/<path>/data/instances_val2017.json",
+            "test_data_path": "/Volumes/<catalog>/<schema>/<volume>/<path>/data/test2017/",
+            "test_annotation_file": "/Volumes/<catalog>/<schema>/<volume>/<path>/data/instances_test2017.json",
             "batch_size": 16,
             "model_name": "facebook/detr-resnet-50",
             "image_size": [800, 800]

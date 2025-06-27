@@ -177,10 +177,10 @@ class TaskDataModule(pl.LightningDataModule):
 ```python
 # Create configuration
 config = {
-    "train_data_path": "/path/to/train/",
-    "train_annotation_file": "/path/to/train_annotations.json",
-    "val_data_path": "/path/to/val/",
-    "val_annotation_file": "/path/to/val_annotations.json",
+    "train_data_path": "/Volumes/<catalog>/<schema>/<volume>/<path>/data/train/",
+    "train_annotation_file": "/Volumes/<catalog>/<schema>/<volume>/<path>/data/instances_train2017.json",
+    "val_data_path": "/Volumes/<catalog>/<schema>/<volume>/<path>/data/val/",
+    "val_annotation_file": "/Volumes/<catalog>/<schema>/<volume>/<path>/data/instances_val2017.json",
     "batch_size": 16,
     "model_name": "facebook/detr-resnet-50"
 }

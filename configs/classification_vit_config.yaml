@@ -15,9 +15,9 @@ model:
 # Data Configuration
 data:
   # Separate paths for train/val/test splits
-  train_data_path: "/Volumes/users/aradhya_chouhan/imagenet_mini/data/train/"
-  val_data_path: "/Volumes/users/aradhya_chouhan/imagenet_mini/data/val/"
-  test_data_path: "/Volumes/users/aradhya_chouhan/imagenet_mini/data/test/"
+  train_data_path: "/Volumes/<catalog>/<schema>/<volume>/<path>/data/train/"
+  val_data_path: "/Volumes/<catalog>/<schema>/<volume>/<path>/data/val/"
+  test_data_path: "/Volumes/<catalog>/<schema>/<volume>/<path>/data/test/"
   
   # Data loading parameters
   batch_size: 32  # ViT recommended batch size per GPU
@@ -55,12 +55,12 @@ training:
   monitor_mode: "max"  # Maximize the monitored metric
   
   # Checkpointing
-  checkpoint_dir: "/Volumes/users/aradhya_chouhan/imagenet_mini/data/checkpoints/classification_vit"
+  checkpoint_dir: "/Volumes/<catalog>/<schema>/<volume>/<path>/checkpoints/classification_vit"
   save_top_k: 3
   
   # Logging
   log_every_n_steps: 50
-  log_dir: "/Volumes/users/aradhya_chouhan/imagenet_mini/data/logs"
+  log_dir: "/Volumes/<catalog>/<schema>/<volume>/<path>/logs"
   
   # Distributed training
   distributed: false
@@ -81,7 +81,7 @@ mlflow:
 
 # Output Configuration
 output:
-  results_dir: "/Volumes/users/aradhya_chouhan/imagenet_mini/data/results/classification_vit"
+  results_dir: "/Volumes/<catalog>/<schema>/<volume>/<path>/results/classification_vit"
   save_predictions: true
   visualization:
     save_images: true
