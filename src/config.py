@@ -130,10 +130,47 @@ def get_default_config(task: str) -> Dict[str, Any]:
             task_type=task
         )),
         'training': asdict(TrainingConfig()),
-        'data': asdict(DataConfig(
-            train_path="/Volumes/main/cv_ref/datasets/train",
-            val_path="/Volumes/main/cv_ref/datasets/val"
-        ))
+        'data': {
+            'train': {
+                'root_dir': "/Volumes/<catalog>/<schema>/<volume>/<path>/data/train",
+                'annotation_file': "/Volumes/<catalog>/<schema>/<volume>/<path>/data/train/annotations.json"
+            },
+            'val': {
+                'root_dir': "/Volumes/<catalog>/<schema>/<volume>/<path>/data/val",
+                'annotation_file': "/Volumes/<catalog>/<schema>/<volume>/<path>/data/val/annotations.json"
+            },
+            'test': {
+                'root_dir': "/Volumes/<catalog>/<schema>/<volume>/<path>/data/test",
+                'annotation_file': "/Volumes/<catalog>/<schema>/<volume>/<path>/data/test/annotations.json"
+            },
+            'image_size': (512, 512),
+            'normalize_mean': (0.485, 0.456, 0.406),
+            'normalize_std': (0.229, 0.224, 0.225),
+            'augment': True,
+            'num_workers': 4,
+            'pin_memory': True,
+            'augmentations': {
+                "horizontal_flip": True,
+                "vertical_flip": False,
+                "rotation": 15,
+                "color_jitter": {
+                    "brightness": 0.2,
+                    "contrast": 0.2,
+                    "saturation": 0.2,
+                    "hue": 0.1
+                },
+                "random_crop": True,
+                "random_resize": [0.8, 1.2]
+            }
+        },
+        'output': {
+            'results_dir': "/Volumes/<catalog>/<schema>/<volume>/<path>/results",
+            'save_predictions': True,
+            'visualization': {
+                'save_images': True,
+                'max_images': 10
+            }
+        }
     }
     
     # Task-specific configurations

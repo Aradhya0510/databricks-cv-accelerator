@@ -29,8 +29,9 @@
 # MAGIC ```
 
 # COMMAND ----------
+%pip install -r "../requirements.txt"
+dbutils.library.restartPython()
 
-# MAGIC %pip install -r /Workspace/Repos/Databricks_CV_ref/requirements.txt
 
 # COMMAND ----------
 
@@ -41,7 +42,7 @@ from pathlib import Path
 import yaml
 
 # Add the project root to Python path
-project_root = "/Volumes/<catalog>/<schema>/<volume>/<path>/<file_name>"
+project_root = "/Volumes/<catalog>/<schema>/<volume>/<path>"
 sys.path.append(project_root)
 
 from src.config import (
@@ -49,18 +50,21 @@ from src.config import (
     TrainingConfig,
     DataConfig,
     get_default_config,
-    save_config
+    save_config,
+    load_config
 )
 from src.utils.logging import setup_logger, get_metric_logger
 from src.tasks.detection.model import DetectionModel
 from src.tasks.classification.model import ClassificationModel
 from src.tasks.semantic_segmentation.model import SemanticSegmentationModel
+from src.tasks.panoptic_segmentation.model import PanopticSegmentationModel
+from src.tasks.instance_segmentation.model import InstanceSegmentationModel
 
 # COMMAND ----------
 
 # DBTITLE 1,Initialize Logging
 # Get the Unity Catalog volume path from environment or use default
-volume_path = os.getenv("UNITY_CATALOG_VOLUME",project_root)
+volume_path = os.getenv("UNITY_CATALOG_VOLUME", "/Volumes/<catalog>/<schema>/<volume>/<path>")
 log_dir = f"{volume_path}/logs"
 os.makedirs(log_dir, exist_ok=True)
 
@@ -83,9 +87,7 @@ def setup_config(task: str, config_path: str = None):
         
         # Update paths to use Unity Catalog volume
         config['training']['checkpoint_dir'] = f"{volume_path}/checkpoints/{task}"
-        config['data']['train_path'] = f"{volume_path}/data/{task}/train"
-        config['data']['val_path'] = f"{volume_path}/data/{task}/val"
-        config['data']['test_path'] = f"{volume_path}/data/{task}/test"
+        config['output']['results_dir'] = f"{volume_path}/results/{task}"
         
         # Save default config
         if config_path:
@@ -114,6 +116,7 @@ def setup_pipeline(task: str, experiment_name: str):
     os.makedirs(f"{volume_path}/configs", exist_ok=True)
     os.makedirs(f"{volume_path}/checkpoints", exist_ok=True)
     os.makedirs(f"{volume_path}/results", exist_ok=True)
+    os.makedirs(f"{volume_path}/data", exist_ok=True)
     
     # Setup configuration
     config_path = f"{volume_path}/configs/{task}_config.yaml"
