@@ -53,7 +53,7 @@ from src.config import (
     save_config,
     load_config
 )
-from src.utils.logging import setup_logger, get_metric_logger
+from src.utils.logging import setup_logger, get_mlflow_logger
 from src.tasks.detection.model import DetectionModel
 from src.tasks.classification.model import ClassificationModel
 from src.tasks.semantic_segmentation.model import SemanticSegmentationModel
@@ -64,7 +64,7 @@ from src.tasks.instance_segmentation.model import InstanceSegmentationModel
 
 # DBTITLE 1,Initialize Logging
 # Get the Unity Catalog volume path from environment or use default
-volume_path = os.getenv("UNITY_CATALOG_VOLUME", "/Volumes/<catalog>/<schema>/<volume>/<path>")
+volume_path = os.getenv("UNITY_CATALOG_VOLUME", project_root)
 log_dir = f"{volume_path}/logs"
 os.makedirs(log_dir, exist_ok=True)
 
@@ -102,7 +102,7 @@ def setup_config(task: str, config_path: str = None):
 # DBTITLE 1,Setup MLflow
 def setup_mlflow(experiment_name: str):
     """Setup MLflow experiment."""
-    mlflow_logger = get_metric_logger(experiment_name)
+    mlflow_logger = get_mlflow_logger(experiment_name)
     logger.info(f"Initialized MLflow experiment: {experiment_name}")
     return mlflow_logger
 
