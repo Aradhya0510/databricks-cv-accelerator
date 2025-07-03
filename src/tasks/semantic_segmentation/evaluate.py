@@ -8,7 +8,7 @@ from pathlib import Path
 from typing import List, Dict, Any, Tuple
 import matplotlib.pyplot as plt
 import seaborn as sns
-from torchmetrics import IoU, Dice
+from torchmetrics.classification import MulticlassJaccardIndex, Dice
 
 from .model import SemanticSegmentationModel
 from .data import SemanticSegmentationDataModule
@@ -32,7 +32,7 @@ class SemanticSegmentationEvaluator:
         
         # Initialize metrics
         self.num_classes = len(self.class_names)
-        self.iou_metric = IoU(num_classes=self.num_classes, ignore_index=0)
+        self.iou_metric = MulticlassJaccardIndex(num_classes=self.num_classes, ignore_index=0)
         self.dice_metric = Dice(num_classes=self.num_classes, ignore_index=0)
     
     def _load_class_names(self) -> List[str]:

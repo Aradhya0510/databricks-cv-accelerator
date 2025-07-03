@@ -8,7 +8,7 @@ import pytorch_lightning as pl
 from torchmetrics.classification import Dice, JaccardIndex, Accuracy, Precision, Recall
 from torchmetrics.detection import MeanAveragePrecision
 from transformers import (
-    AutoModelForPanopticSegmentation,
+    AutoModelForUniversalSegmentation,
     AutoConfig,
     PreTrainedModel
 )
@@ -58,7 +58,7 @@ class PanopticSegmentationModel(pl.LightningModule):
             )
             
             # Initialize panoptic segmentation model
-            self.model = AutoModelForPanopticSegmentation.from_pretrained(
+            self.model = AutoModelForUniversalSegmentation.from_pretrained(
                 self.config.model_name,
                 config=model_config,
                 ignore_mismatched_sizes=True,
