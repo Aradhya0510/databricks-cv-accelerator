@@ -42,7 +42,7 @@ from torch.utils.data import DataLoader
 import yaml
 
 # Add the project root to Python path
-project_root = "/Volumes/<catalog>/<schema>/<volume>/<path>/<file_name>"
+project_root = "/Volumes/<catalog>/<schema>/<volume>/<path>"
 sys.path.append(project_root)
 
 # Import project modules
@@ -52,6 +52,8 @@ from src.tasks.detection.data import DetectionDataModule, DetectionDataConfig
 from src.tasks.detection.adapters import get_adapter
 from src.tasks.classification.data import ClassificationDataModule, ClassificationDataConfig
 from src.tasks.semantic_segmentation.data import SemanticSegmentationDataModule, SemanticSegmentationDataConfig
+from src.tasks.panoptic_segmentation.data import PanopticSegmentationDataModule, PanopticSegmentationDataConfig
+from src.tasks.instance_segmentation.data import InstanceSegmentationDataModule, InstanceSegmentationDataConfig
 
 # COMMAND ----------
 
@@ -88,7 +90,9 @@ def setup_data_module(task: str, config):
     data_modules = {
         'detection': (DetectionDataModule, DetectionDataConfig),
         'classification': (ClassificationDataModule, ClassificationDataConfig),
-        'semantic_segmentation': (SemanticSegmentationDataModule, SemanticSegmentationDataConfig)
+        'semantic_segmentation': (SemanticSegmentationDataModule, SemanticSegmentationDataConfig),
+        'panoptic_segmentation': (PanopticSegmentationDataModule, PanopticSegmentationDataConfig),
+        'instance_segmentation': (InstanceSegmentationDataModule, InstanceSegmentationDataConfig)
     }
     
     if task not in data_modules:
@@ -96,29 +100,60 @@ def setup_data_module(task: str, config):
     
     DataModule, DataConfig = data_modules[task]
     
-    # Create data config
+    # Create data config with new structure
     data_config = DataConfig(
-        data_path=config['data']['data_path'],
-        annotation_file=config['data']['annotation_file'],
+        train_data_path=config['data']['train']['root_dir'],
+        train_annotation_file=config['data']['train']['annotation_file'],
+        val_data_path=config['data']['val']['root_dir'],
+        val_annotation_file=config['data']['val']['annotation_file'],
+        test_data_path=config['data']['test']['root_dir'],
+        test_annotation_file=config['data']['test']['annotation_file'],
         batch_size=config['data']['batch_size'],
         num_workers=config['data']['num_workers'],
         model_name=config['data']['model_name'],
-        image_size=config['data'].get('image_size'),
-        normalize_mean=config['data'].get('normalize_mean'),
-        normalize_std=config['data'].get('normalize_std'),
-        augment=config['data'].get('augment')
+        image_size=config['data']['image_size'],
+        mean=config['data']['normalize_mean'],
+        std=config['data']['normalize_std'],
+        augment=config['data']['augment']
     )
     
     # Initialize data module
     data_module = DataModule(data_config)
     
-    # For detection task, set the appropriate adapter
+    # Set the appropriate adapter for all tasks
     if task == 'detection':
         adapter = get_adapter(
             model_name=config['model']['model_name'],
             image_size=config['data']['image_size'][0]
         )
-        # We'll set the adapter after setup() is called
+        data_module.adapter = adapter
+    elif task == 'classification':
+        from src.tasks.classification.adapters import get_adapter as get_classification_adapter
+        adapter = get_classification_adapter(
+            model_name=config['model']['model_name'],
+            image_size=config['data']['image_size'][0]
+        )
+        data_module.adapter = adapter
+    elif task == 'semantic_segmentation':
+        from src.tasks.semantic_segmentation.adapters import get_semantic_adapter
+        adapter = get_semantic_adapter(
+            model_name=config['model']['model_name'],
+            image_size=config['data']['image_size'][0]
+        )
+        data_module.adapter = adapter
+    elif task == 'panoptic_segmentation':
+        from src.tasks.panoptic_segmentation.adapters import get_panoptic_adapter
+        adapter = get_panoptic_adapter(
+            model_name=config['model']['model_name'],
+            image_size=config['data']['image_size'][0]
+        )
+        data_module.adapter = adapter
+    elif task == 'instance_segmentation':
+        from src.tasks.instance_segmentation.adapters import get_instance_adapter
+        adapter = get_instance_adapter(
+            model_name=config['model']['model_name'],
+            image_size=config['data']['image_size'][0]
+        )
         data_module.adapter = adapter
     
     return data_module

@@ -153,7 +153,7 @@ from ray.tune.integration.mlflow import MLflowLoggerCallback
 import yaml
 
 # Add the project root to Python path
-project_root = "/Volumes/<catalog>/<schema>/<volume>/<path>/<file_name>"
+project_root = "/Volumes/<catalog>/<schema>/<volume>/<path>"
 sys.path.append(project_root)
 
 from src.utils.logging import setup_logger, get_mlflow_logger

@@ -46,7 +46,7 @@ import numpy as np
 import cv2
 
 # Add the project root to Python path
-project_root = "/Volumes/<catalog>/<schema>/<volume>/<path>/<file_name>"
+project_root = "/Volumes/<catalog>/<schema>/<volume>/<path>"
 sys.path.append(project_root)
 
 # Import project modules
@@ -56,6 +56,10 @@ from src.tasks.classification.model import ClassificationModel
 from src.tasks.classification.data import ClassificationDataModule
 from src.tasks.semantic_segmentation.model import SemanticSegmentationModel
 from src.tasks.semantic_segmentation.data import SemanticSegmentationDataModule
+from src.tasks.panoptic_segmentation.model import PanopticSegmentationModel
+from src.tasks.panoptic_segmentation.data import PanopticSegmentationDataModule
+from src.tasks.instance_segmentation.model import InstanceSegmentationModel
+from src.tasks.instance_segmentation.data import InstanceSegmentationDataModule
 from src.training.trainer import UnifiedTrainer
 from src.utils.logging import setup_logger, get_mlflow_logger
 from src.tasks.detection.adapters import DETROutputAdapter, get_adapter
@@ -111,7 +115,9 @@ def get_model_class(task: str):
     model_classes = {
         'detection': DetectionModel,
         'classification': ClassificationModel,
-        'semantic_segmentation': SemanticSegmentationModel
+        'semantic_segmentation': SemanticSegmentationModel,
+        'panoptic_segmentation': PanopticSegmentationModel,
+        'instance_segmentation': InstanceSegmentationModel
     }
     
     if task not in model_classes:
@@ -227,7 +233,9 @@ def get_data_module_class(task: str):
     data_modules = {
         'detection': DetectionDataModule,
         'classification': ClassificationDataModule,
-        'semantic_segmentation': SemanticSegmentationDataModule
+        'semantic_segmentation': SemanticSegmentationDataModule,
+        'panoptic_segmentation': PanopticSegmentationDataModule,
+        'instance_segmentation': InstanceSegmentationDataModule
     }
     
     if task not in data_modules:

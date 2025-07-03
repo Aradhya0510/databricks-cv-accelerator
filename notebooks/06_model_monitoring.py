@@ -41,7 +41,7 @@ from typing import Dict, List, Any, Optional
 import json
 
 # Add the project root to Python path
-project_root = "/Volumes/<catalog>/<schema>/<volume>/<path>/<file_name>"
+project_root = "/Volumes/<catalog>/<schema>/<volume>/<path>"
 sys.path.append(project_root)
 
 # Import project modules
