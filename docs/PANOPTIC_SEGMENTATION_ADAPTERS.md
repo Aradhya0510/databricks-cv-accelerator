@@ -89,80 +89,29 @@ processed_image, target = adapter(image, {
 # target: {"panoptic_masks": torch.tensor, "image_id": torch.tensor([0])}
 ```
 
-## Output Adapters
+## Input Adapter Example
 
-### PanopticSegmentationOutputAdapter
-
-**Purpose**: Converts panoptic segmentation model outputs to a standardized format for metric computation.
-
-**Why This Design**:
-- Different panoptic segmentation models return outputs in different formats
-- Standardizes the output format for consistent metric computation
-- Handles both loss and prediction extraction
-- Ensures proper panoptic mask format for evaluation
-
-**Input Format**: Raw model outputs (varies by model)
-
-**Output Format**:
 ```python
-{
-    "loss": torch.tensor,  # Training loss
-    "pred_masks": torch.tensor,  # Predicted panoptic masks (B, H, W)
-    "pred_logits": torch.tensor,  # Raw prediction logits (B, C, H, W)
-    "loss_dict": dict  # Additional loss components
-}
+class Mask2FormerInputAdapter(BaseAdapter):
+    def __call__(self, image: Image.Image, target: Dict) -> Tuple[torch.Tensor, Dict]:
+        # ...
+        return processed_image, adapted_target
 ```
 
-**Key Functions**:
-1. **adapt_output()**: Extracts loss, masks, and logits from model outputs
-2. **adapt_targets()**: Converts targets to model-specific format
-3. **format_predictions()**: Formats outputs for metric computation
-4. **format_targets()**: Formats targets for metric computation
+## Output Adapter Example
 
-**Why Standardized Output is Important**:
-- Enables consistent evaluation metrics (Panoptic Quality, Segmentation Quality, Recognition Quality)
-- Ensures compatibility with existing evaluation tools
-- Maintains consistency across different panoptic segmentation models
-- Simplifies metric computation and comparison
-- Supports unified "things" and "stuff" evaluation
-
-**Code Example**:
 ```python
-output_adapter = PanopticSegmentationOutputAdapter()
-adapted_outputs = output_adapter.adapt_output(model_outputs)
-# adapted_outputs: {"loss": tensor, "pred_masks": tensor, "pred_logits": tensor, "loss_dict": {}}
+class Mask2FormerOutputAdapter:
+    def adapt_output(self, outputs: Dict[str, Any]) -> Dict[str, Any]:
+        # ...
+        return standardized_outputs
 ```
 
-## Factory Function
+## Factory Functions
 
-### get_panoptic_adapter()
-
-**Purpose**: Automatically selects the appropriate adapter based on model name.
-
-**Why This Design**:
-- Eliminates the need to manually specify adapters
-- Uses model name patterns to determine the correct adapter
-- Provides fallback to NoOpAdapter for unknown models
-- Ensures optimal preprocessing for each model type
-
-**Selection Logic**:
 ```python
-def get_panoptic_adapter(model_name: str, image_size: int = 512) -> BaseAdapter:
-    model_name_lower = model_name.lower()
-    
-    if "mask2former" in model_name_lower:
-        return Mask2FormerAdapter(model_name, image_size)
-    else:
-        return NoOpAdapter()
-```
-
-**Usage Example**:
-```python
-# Automatically selects Mask2FormerAdapter
-adapter = get_panoptic_adapter("facebook/mask2former-swin-base-coco-panoptic")
-
-# Falls back to NoOpAdapter
-adapter = get_panoptic_adapter("unknown_model")
+input_adapter = get_input_adapter("facebook/mask2former-swin-base-coco-panoptic")  # Returns Mask2FormerInputAdapter
+output_adapter = get_output_adapter("facebook/mask2former-swin-base-coco-panoptic")  # Returns Mask2FormerOutputAdapter
 ```
 
 ## Panoptic Mask Handling

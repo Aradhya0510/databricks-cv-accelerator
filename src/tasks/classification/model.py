@@ -4,10 +4,10 @@ from dataclasses import dataclass
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-import pytorch_lightning as pl
+import lightning as pl
 from torchmetrics.classification import Accuracy, F1Score, Precision, Recall
 from transformers import AutoModelForImageClassification, AutoConfig, PreTrainedModel
-from .adapters import get_output_adapter
+from .adapters import get_input_adapter, get_output_adapter
 
 @dataclass
 class ClassificationModelConfig:

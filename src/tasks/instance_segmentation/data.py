@@ -3,14 +3,14 @@ from dataclasses import dataclass
 
 import torch
 from torch.utils.data import DataLoader
-import pytorch_lightning as pl
+import lightning as pl
 from pycocotools.coco import COCO
 import cv2
 import numpy as np
 from pathlib import Path
 from PIL import Image
 from transformers import AutoFeatureExtractor
-from .adapters import get_instance_adapter
+from .adapters import get_input_adapter
 
 @dataclass
 class InstanceSegmentationDataConfig:
@@ -119,6 +119,7 @@ class InstanceSegmentationDataModule(pl.LightningDataModule):
         if isinstance(config, dict):
             config = InstanceSegmentationDataConfig(**config)
         self.config = config
+        self.save_hyperparameters(config.__dict__)
         self.adapter = None  # Will be set after initialization
     
     def setup(self, stage: Optional[str] = None):

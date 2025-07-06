@@ -4,10 +4,10 @@ from dataclasses import dataclass
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-import pytorch_lightning as pl
+import lightning as pl
 from torchmetrics.detection import MeanAveragePrecision
 from transformers import AutoModelForObjectDetection, AutoConfig, PreTrainedModel
-from .adapters import get_adapter, get_output_adapter
+from .adapters import get_input_adapter, get_output_adapter
 
 @dataclass
 class DetectionModelConfig:
@@ -27,6 +27,12 @@ class DetectionModelConfig:
     class_names: Optional[List[str]] = None
     model_kwargs: Optional[Dict[str, Any]] = None
     image_size: int = 640
+    num_workers: int = 1  # Add num_workers parameter
+    
+    @property
+    def sync_dist_flag(self) -> bool:
+        """Return True if num_workers > 1 (distributed training), False otherwise."""
+        return self.num_workers > 1
 
 class DetectionModel(pl.LightningModule):
     """Base detection model that can work with any Hugging Face object detection model."""
@@ -173,7 +179,7 @@ class DetectionModel(pl.LightningModule):
             Loss tensor
         """
         # Forward pass
-        outputs = self(
+        outputs = self.forward(
             pixel_values=batch["pixel_values"],
             labels=batch["labels"]
         )
@@ -185,10 +191,10 @@ class DetectionModel(pl.LightningModule):
         # Update metrics
         self.train_map.update(preds=preds, target=targets)
         
-        # Log metrics
-        self.log("train_loss", outputs["loss"], on_step=True, on_epoch=True, prog_bar=True)
+        # Log metrics with sync_dist flag and batch_size
+        self.log("train_loss", outputs["loss"], on_step=True, on_epoch=True, prog_bar=True, sync_dist=self.config.sync_dist_flag)
         for k, v in outputs["loss_dict"].items():
-            self.log(f"train_{k}", v, on_step=True, on_epoch=True)
+            self.log(f"train_{k}", v, on_step=True, on_epoch=True, sync_dist=self.config.sync_dist_flag)
         
         return outputs["loss"]
     
@@ -196,26 +202,26 @@ class DetectionModel(pl.LightningModule):
         """Calculate and log mAP metrics at the end of training epoch."""
         map_metrics = self.train_map.compute()
         
-        # Log each metric using PyTorch Lightning's logging
-        self.log("train_map", map_metrics["map"], prog_bar=True)
-        self.log("train_map_50", map_metrics["map_50"])
-        self.log("train_map_75", map_metrics["map_75"])
-        self.log("train_map_small", map_metrics["map_small"])
-        self.log("train_map_medium", map_metrics["map_medium"])
-        self.log("train_map_large", map_metrics["map_large"])
-        self.log("train_mar_1", map_metrics["mar_1"])
-        self.log("train_mar_10", map_metrics["mar_10"])
-        self.log("train_mar_100", map_metrics["mar_100"])
-        self.log("train_mar_small", map_metrics["mar_small"])
-        self.log("train_mar_medium", map_metrics["mar_medium"])
-        self.log("train_mar_large", map_metrics["mar_large"])
+        # Log each metric using PyTorch Lightning's logging with sync_dist flag
+        self.log("train_map", map_metrics["map"], prog_bar=True, sync_dist=self.config.sync_dist_flag)
+        self.log("train_map_50", map_metrics["map_50"], sync_dist=self.config.sync_dist_flag)
+        self.log("train_map_75", map_metrics["map_75"], sync_dist=self.config.sync_dist_flag)
+        self.log("train_map_small", map_metrics["map_small"], sync_dist=self.config.sync_dist_flag)
+        self.log("train_map_medium", map_metrics["map_medium"], sync_dist=self.config.sync_dist_flag)
+        self.log("train_map_large", map_metrics["map_large"], sync_dist=self.config.sync_dist_flag)
+        self.log("train_mar_1", map_metrics["mar_1"], sync_dist=self.config.sync_dist_flag)
+        self.log("train_mar_10", map_metrics["mar_10"], sync_dist=self.config.sync_dist_flag)
+        self.log("train_mar_100", map_metrics["mar_100"], sync_dist=self.config.sync_dist_flag)
+        self.log("train_mar_small", map_metrics["mar_small"], sync_dist=self.config.sync_dist_flag)
+        self.log("train_mar_medium", map_metrics["mar_medium"], sync_dist=self.config.sync_dist_flag)
+        self.log("train_mar_large", map_metrics["mar_large"], sync_dist=self.config.sync_dist_flag)
         
         # Log per-class metrics
         for i, class_id in enumerate(map_metrics["classes"]):
             if map_metrics["map_per_class"][i] != -1:
-                self.log(f"train_map_class_{class_id}", map_metrics["map_per_class"][i])
+                self.log(f"train_map_class_{class_id}", map_metrics["map_per_class"][i], sync_dist=self.config.sync_dist_flag)
             if map_metrics["mar_100_per_class"][i] != -1:
-                self.log(f"train_mar_100_class_{class_id}", map_metrics["mar_100_per_class"][i])
+                self.log(f"train_mar_100_class_{class_id}", map_metrics["mar_100_per_class"][i], sync_dist=self.config.sync_dist_flag)
     
     def validation_step(self, batch: Dict[str, torch.Tensor], batch_idx: int) -> None:
         """Validation step.
@@ -227,7 +233,7 @@ class DetectionModel(pl.LightningModule):
             batch_idx: Batch index
         """
         # Forward pass
-        outputs = self(
+        outputs = self.forward(
             pixel_values=batch["pixel_values"],
             labels=batch["labels"]
         )
@@ -239,35 +245,35 @@ class DetectionModel(pl.LightningModule):
         # Update metrics
         self.val_map.update(preds=preds, target=targets)
         
-        # Log metrics
-        self.log("val_loss", outputs["loss"], on_step=True, on_epoch=True, prog_bar=True)
+        # Log metrics with sync_dist flag and batch_size
+        self.log("val_loss", outputs["loss"], on_step=True, on_epoch=True, prog_bar=True, sync_dist=self.config.sync_dist_flag)
         for k, v in outputs["loss_dict"].items():
-            self.log(f"val_{k}", v, on_step=True, on_epoch=True)
+            self.log(f"val_{k}", v, on_step=True, on_epoch=True, sync_dist=self.config.sync_dist_flag)
     
     def on_validation_epoch_end(self) -> None:
         """Calculate and log mAP metrics at the end of validation epoch."""
         map_metrics = self.val_map.compute()
         
-        # Log each metric separately
-        self.log("val_map", map_metrics["map"], prog_bar=True)
-        self.log("val_map_50", map_metrics["map_50"])
-        self.log("val_map_75", map_metrics["map_75"])
-        self.log("val_map_small", map_metrics["map_small"])
-        self.log("val_map_medium", map_metrics["map_medium"])
-        self.log("val_map_large", map_metrics["map_large"])
-        self.log("val_mar_1", map_metrics["mar_1"])
-        self.log("val_mar_10", map_metrics["mar_10"])
-        self.log("val_mar_100", map_metrics["mar_100"])
-        self.log("val_mar_small", map_metrics["mar_small"])
-        self.log("val_mar_medium", map_metrics["mar_medium"])
-        self.log("val_mar_large", map_metrics["mar_large"])
+        # Log each metric separately with sync_dist flag
+        self.log("val_map", map_metrics["map"], prog_bar=True, sync_dist=self.config.sync_dist_flag)
+        self.log("val_map_50", map_metrics["map_50"], sync_dist=self.config.sync_dist_flag)
+        self.log("val_map_75", map_metrics["map_75"], sync_dist=self.config.sync_dist_flag)
+        self.log("val_map_small", map_metrics["map_small"], sync_dist=self.config.sync_dist_flag)
+        self.log("val_map_medium", map_metrics["map_medium"], sync_dist=self.config.sync_dist_flag)
+        self.log("val_map_large", map_metrics["map_large"], sync_dist=self.config.sync_dist_flag)
+        self.log("val_mar_1", map_metrics["mar_1"], sync_dist=self.config.sync_dist_flag)
+        self.log("val_mar_10", map_metrics["mar_10"], sync_dist=self.config.sync_dist_flag)
+        self.log("val_mar_100", map_metrics["mar_100"], sync_dist=self.config.sync_dist_flag)
+        self.log("val_mar_small", map_metrics["mar_small"], sync_dist=self.config.sync_dist_flag)
+        self.log("val_mar_medium", map_metrics["mar_medium"], sync_dist=self.config.sync_dist_flag)
+        self.log("val_mar_large", map_metrics["mar_large"], sync_dist=self.config.sync_dist_flag)
         
         # Log per-class metrics
         for i, class_id in enumerate(map_metrics["classes"]):
             if map_metrics["map_per_class"][i] != -1:
-                self.log(f"val_map_class_{class_id}", map_metrics["map_per_class"][i])
+                self.log(f"val_map_class_{class_id}", map_metrics["map_per_class"][i], sync_dist=self.config.sync_dist_flag)
             if map_metrics["mar_100_per_class"][i] != -1:
-                self.log(f"val_mar_100_class_{class_id}", map_metrics["mar_100_per_class"][i])
+                self.log(f"val_mar_100_class_{class_id}", map_metrics["mar_100_per_class"][i], sync_dist=self.config.sync_dist_flag)
     
     def test_step(self, batch: Dict[str, torch.Tensor], batch_idx: int) -> None:
         """Test step.
@@ -279,7 +285,7 @@ class DetectionModel(pl.LightningModule):
             batch_idx: Batch index
         """
         # Forward pass
-        outputs = self(
+        outputs = self.forward(
             pixel_values=batch["pixel_values"],
             labels=batch["labels"]
         )
@@ -291,35 +297,35 @@ class DetectionModel(pl.LightningModule):
         # Update metrics
         self.test_map.update(preds=preds, target=targets)
         
-        # Log metrics
-        self.log("test_loss", outputs["loss"], on_step=True, on_epoch=True, prog_bar=True)
+        # Log metrics with sync_dist flag and batch_size
+        self.log("test_loss", outputs["loss"], on_step=True, on_epoch=True, prog_bar=True, sync_dist=self.config.sync_dist_flag)
         for k, v in outputs["loss_dict"].items():
-            self.log(f"test_{k}", v, on_step=True, on_epoch=True)
+            self.log(f"test_{k}", v, on_step=True, on_epoch=True, sync_dist=self.config.sync_dist_flag)
     
     def on_test_epoch_end(self) -> None:
         """Calculate and log mAP metrics at the end of test epoch."""
         map_metrics = self.test_map.compute()
         
-        # Log each metric separately
-        self.log("test_map", map_metrics["map"], prog_bar=True)
-        self.log("test_map_50", map_metrics["map_50"])
-        self.log("test_map_75", map_metrics["map_75"])
-        self.log("test_map_small", map_metrics["map_small"])
-        self.log("test_map_medium", map_metrics["map_medium"])
-        self.log("test_map_large", map_metrics["map_large"])
-        self.log("test_mar_1", map_metrics["mar_1"])
-        self.log("test_mar_10", map_metrics["mar_10"])
-        self.log("test_mar_100", map_metrics["mar_100"])
-        self.log("test_mar_small", map_metrics["mar_small"])
-        self.log("test_mar_medium", map_metrics["mar_medium"])
-        self.log("test_mar_large", map_metrics["mar_large"])
+        # Log each metric separately with sync_dist flag
+        self.log("test_map", map_metrics["map"], prog_bar=True, sync_dist=self.config.sync_dist_flag)
+        self.log("test_map_50", map_metrics["map_50"], sync_dist=self.config.sync_dist_flag)
+        self.log("test_map_75", map_metrics["map_75"], sync_dist=self.config.sync_dist_flag)
+        self.log("test_map_small", map_metrics["map_small"], sync_dist=self.config.sync_dist_flag)
+        self.log("test_map_medium", map_metrics["map_medium"], sync_dist=self.config.sync_dist_flag)
+        self.log("test_map_large", map_metrics["map_large"], sync_dist=self.config.sync_dist_flag)
+        self.log("test_mar_1", map_metrics["mar_1"], sync_dist=self.config.sync_dist_flag)
+        self.log("test_mar_10", map_metrics["mar_10"], sync_dist=self.config.sync_dist_flag)
+        self.log("test_mar_100", map_metrics["mar_100"], sync_dist=self.config.sync_dist_flag)
+        self.log("test_mar_small", map_metrics["mar_small"], sync_dist=self.config.sync_dist_flag)
+        self.log("test_mar_medium", map_metrics["mar_medium"], sync_dist=self.config.sync_dist_flag)
+        self.log("test_mar_large", map_metrics["mar_large"], sync_dist=self.config.sync_dist_flag)
         
         # Log per-class metrics
         for i, class_id in enumerate(map_metrics["classes"]):
             if map_metrics["map_per_class"][i] != -1:
-                self.log(f"test_map_class_{class_id}", map_metrics["map_per_class"][i])
+                self.log(f"test_map_class_{class_id}", map_metrics["map_per_class"][i], sync_dist=self.config.sync_dist_flag)
             if map_metrics["mar_100_per_class"][i] != -1:
-                self.log(f"test_mar_100_class_{class_id}", map_metrics["mar_100_per_class"][i])
+                self.log(f"test_mar_100_class_{class_id}", map_metrics["mar_100_per_class"][i], sync_dist=self.config.sync_dist_flag)
     
     def configure_optimizers(self):
         """Configure optimizers and learning rate schedulers."""
@@ -393,12 +399,13 @@ class DetectionModel(pl.LightningModule):
                 "optimizer": optimizer,
                 "lr_scheduler": {
                     "scheduler": scheduler,
-                    "interval": "step",  # Update learning rate every step
+                    "interval": "step",
                     "frequency": 1
-                },
-                "gradient_clip_val": 0.1  # Add gradient clipping
+                }
             }
-        return optimizer
+        else:
+            # Default to no scheduler
+            return {"optimizer": optimizer}
     
     @classmethod
     def from_pretrained(

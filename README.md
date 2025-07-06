@@ -25,7 +25,7 @@ Once training is running, checkpoints are automatically saved to configured volu
 
 ## 🚀 Technology Stack and Its Significance
 
-* **PyTorch Lightning**: Simplifies model training by structuring code for better maintainability and automatic integration of callbacks like early stopping and checkpointing.
+* **Lightning**: Simplifies model training by structuring code for better maintainability and automatic integration of callbacks like early stopping and checkpointing.
 * **Ray**: Powers distributed training and large-scale hyperparameter tuning. Enables multi-GPU/multi-node workloads on Databricks.
 * **Hugging Face Transformers**: Provides high-quality pre-trained vision models such as DETR, YOLO, ViT, SegFormer, and Mask2Former with minimal setup.
 * **MLflow**: Tracks parameters, metrics, models, and artifacts. Crucial for model governance, collaboration, and auditing.
@@ -38,16 +38,16 @@ Once training is running, checkpoints are automatically saved to configured volu
 
 * **UnifiedTrainer**: Handles all training logic, seamlessly switching between local and distributed modes.
 * **DetectionModel & DetectionDataModule**: Encapsulate task-specific logic, keeping model code separate from dataset management.
-* **Adapter System**: Minimizes the work needed to plug in new models—define data and output adapters, register them, and start training.
+* **Adapter System**: Minimizes the work needed to plug in new models—define input and output adapters (e.g., MyModelInputAdapter, MyModelOutputAdapter), register them with get_input_adapter() and get_output_adapter(), and start training.
 
 ---
 
 ## 🔧 How to Introduce New Models via Adapters
 
-### Step 1: Create Data and Output Adapters
+### Step 1: Create Input and Output Adapters
 
 ```python
-class YourModelDataAdapter(BaseAdapter):
+class YourModelInputAdapter(BaseAdapter):
     def __call__(self, image: Image.Image, target: Dict) -> Tuple[torch.Tensor, Dict]:
         return processed_image, adapted_target
 ```
@@ -66,9 +66,14 @@ class YourModelOutputAdapter:
 ### Step 2: Register Your Adapters
 
 ```python
-def get_adapter(model_name: str, image_size: int = 800) -> BaseAdapter:
+def get_input_adapter(model_name: str, image_size: int = 800) -> BaseAdapter:
     if "your_model" in model_name.lower():
-        return YourModelDataAdapter(model_name=model_name, image_size=image_size)
+        return YourModelInputAdapter(model_name=model_name, image_size=image_size)
+    ...
+
+def get_output_adapter(model_name: str) -> BaseAdapter:
+    if "your_model" in model_name.lower():
+        return YourModelOutputAdapter(model_name=model_name)
     ...
 ```
 

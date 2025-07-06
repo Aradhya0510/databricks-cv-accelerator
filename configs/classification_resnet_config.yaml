@@ -1,6 +1,6 @@
 # Model Configuration
 model:
-  model_name: "google/vit-base-patch16-224"
+  model_name: "microsoft/resnet-50"
   task_type: "classification"
   num_classes: 1000  # ImageNet classes
   pretrained: true
@@ -28,10 +28,10 @@ data:
   # Data loading parameters
   batch_size: 32
   num_workers: 4
-  model_name: "google/vit-base-patch16-224"  # For adapter initialization
+  model_name: "microsoft/resnet-50"  # For adapter initialization
   
   # Image processing
-  image_size: [224, 224]  # ViT default size
+  image_size: [224, 224]  # ResNet default size
   normalize_mean: [0.485, 0.456, 0.406]
   normalize_std: [0.229, 0.224, 0.225]
   
@@ -84,11 +84,11 @@ training:
 # MLflow Configuration
 mlflow:
   experiment_name: "classification_training"
-  run_name: "vit_base"
+  run_name: "resnet50"
   log_model: true
   tags:
     framework: "lightning"
-    model: "vit"
+    model: "resnet"
     dataset: "imagenet"
 
 # Output Configuration

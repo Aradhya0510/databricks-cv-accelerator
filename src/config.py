@@ -45,55 +45,28 @@ class ModelConfig:
     mask_threshold: float = 0.5
 
 @dataclass
-class TrainingConfig:
-    """Training configuration."""
-    # Batch and optimization settings
-    batch_size: int = 32
-    num_workers: int = 4
-    gradient_clip_val: float = 1.0
-    gradient_clip_algorithm: str = "norm"
-    accumulate_grad_batches: int = 1
-    
-    # Early stopping and checkpointing
-    early_stopping_patience: int = 10
-    checkpoint_dir: str = "/Volumes/main/cv_ref/checkpoints"
-    save_top_k: int = 3
-    monitor: str = "val_loss"
-    mode: str = "min"
-    
-    # Logging settings
-    log_every_n_steps: int = 50
-    log_metrics: bool = True
-    log_artifacts: bool = True
-    
-    # Ray distributed training settings
-    distributed: bool = False
-    num_workers: int = 2
-    use_gpu: bool = True
-    resources_per_worker: Dict[str, int] = field(default_factory=lambda: {
-        "CPU": 2,
-        "GPU": 1
-    })
-
-@dataclass
 class DataConfig:
     """Data configuration."""
     # Dataset paths
-    train_path: str
-    val_path: str
-    test_path: Optional[str] = None
+    train_data_path: str
+    train_annotation_file: Optional[str] = None
+    val_data_path: str
+    val_annotation_file: Optional[str] = None
+    test_data_path: Optional[str] = None
+    test_annotation_file: Optional[str] = None
     
-    # Data processing
+    # Data loading parameters
+    batch_size: int = 16
+    num_workers: int = 4
+    model_name: str = ""  # For adapter initialization
+    
+    # Image processing
     image_size: Union[List[int], Tuple[int, int]] = (512, 512)
     normalize_mean: Tuple[float, float, float] = (0.485, 0.456, 0.406)
     normalize_std: Tuple[float, float, float] = (0.229, 0.224, 0.225)
     
-    # Data loading
+    # Augmentation
     augment: bool = True
-    num_workers: int = 4
-    pin_memory: bool = True
-    
-    # Augmentation settings
     augmentations: Optional[Dict[str, Any]] = field(default_factory=lambda: {
         "horizontal_flip": True,
         "vertical_flip": False,
@@ -106,6 +79,62 @@ class DataConfig:
         },
         "random_crop": True,
         "random_resize": [0.8, 1.2]
+    })
+
+@dataclass
+class TrainingConfig:
+    """Training configuration."""
+    # Basic training parameters
+    max_epochs: int = 100
+    
+    # Learning rate and optimization
+    learning_rate: float = 1e-4
+    weight_decay: float = 1e-4
+    scheduler: str = "cosine"
+    scheduler_params: Optional[Dict[str, Any]] = None
+    
+    # Early stopping
+    early_stopping_patience: int = 10
+    monitor_metric: str = "val_loss"
+    monitor_mode: str = "min"
+    
+    # Checkpointing
+    checkpoint_dir: str = "/Volumes/<catalog>/<schema>/<volume>/<path>/checkpoints"
+    save_top_k: int = 3
+    
+    # Logging
+    log_every_n_steps: int = 50
+    
+    # Distributed training
+    distributed: bool = False
+    use_gpu: bool = True
+    resources_per_worker: Dict[str, int] = field(default_factory=lambda: {
+        "CPU": 4,
+        "GPU": 1
+    })
+
+@dataclass
+class MLflowConfig:
+    """MLflow configuration."""
+    experiment_name: str = "cv_training"
+    run_name: str = "default_run"
+    log_model: bool = True
+    tags: Dict[str, str] = field(default_factory=lambda: {
+        "framework": "lightning",
+        "model": "default",
+        "dataset": "default"
+    })
+
+@dataclass
+class OutputConfig:
+    """Output configuration."""
+    results_dir: str = "/Volumes/<catalog>/<schema>/<volume>/<path>/results"
+    save_predictions: bool = True
+    visualization: Dict[str, Any] = field(default_factory=lambda: {
+        "save_images": True,
+        "confidence_threshold": 0.5,
+        "max_boxes": 20,
+        "max_images": 10
     })
 
 def load_config(config_path: str) -> Dict[str, Any]:
@@ -129,48 +158,13 @@ def get_default_config(task: str) -> Dict[str, Any]:
             num_classes=19,
             task_type=task
         )),
+        'data': asdict(DataConfig(
+            train_data_path="/Volumes/<catalog>/<schema>/<volume>/<path>/data/train",
+            val_data_path="/Volumes/<catalog>/<schema>/<volume>/<path>/data/val"
+        )),
         'training': asdict(TrainingConfig()),
-        'data': {
-            'train': {
-                'root_dir': "/Volumes/<catalog>/<schema>/<volume>/<path>/data/train",
-                'annotation_file': "/Volumes/<catalog>/<schema>/<volume>/<path>/data/train/annotations.json"
-            },
-            'val': {
-                'root_dir': "/Volumes/<catalog>/<schema>/<volume>/<path>/data/val",
-                'annotation_file': "/Volumes/<catalog>/<schema>/<volume>/<path>/data/val/annotations.json"
-            },
-            'test': {
-                'root_dir': "/Volumes/<catalog>/<schema>/<volume>/<path>/data/test",
-                'annotation_file': "/Volumes/<catalog>/<schema>/<volume>/<path>/data/test/annotations.json"
-            },
-            'image_size': (512, 512),
-            'normalize_mean': (0.485, 0.456, 0.406),
-            'normalize_std': (0.229, 0.224, 0.225),
-            'augment': True,
-            'num_workers': 4,
-            'pin_memory': True,
-            'augmentations': {
-                "horizontal_flip": True,
-                "vertical_flip": False,
-                "rotation": 15,
-                "color_jitter": {
-                    "brightness": 0.2,
-                    "contrast": 0.2,
-                    "saturation": 0.2,
-                    "hue": 0.1
-                },
-                "random_crop": True,
-                "random_resize": [0.8, 1.2]
-            }
-        },
-        'output': {
-            'results_dir': "/Volumes/<catalog>/<schema>/<volume>/<path>/results",
-            'save_predictions': True,
-            'visualization': {
-                'save_images': True,
-                'max_images': 10
-            }
-        }
+        'mlflow': asdict(MLflowConfig()),
+        'output': asdict(OutputConfig())
     }
     
     # Task-specific configurations
@@ -182,6 +176,29 @@ def get_default_config(task: str) -> Dict[str, Any]:
             'iou_threshold': 0.5,
             'max_detections': 100
         })
+        config['data'].update({
+            'model_name': "facebook/detr-resnet-50",
+            'image_size': [800, 800],
+            'batch_size': 16
+        })
+        config['training'].update({
+            'max_epochs': 50,
+            'monitor_metric': "val_map",
+            'monitor_mode': "max"
+        })
+        config['mlflow'].update({
+            'experiment_name': "detection_training",
+            'run_name': "detr_resnet50",
+            'tags': {
+                "framework": "lightning",
+                "model": "detr",
+                "dataset": "coco"
+            }
+        })
+        config['output'].update({
+            'results_dir': "/Volumes/<catalog>/<schema>/<volume>/<path>/results/detection"
+        })
+        
     elif task == "classification":
         config['model'].update({
             'model_name': "microsoft/resnet-50",
@@ -189,13 +206,58 @@ def get_default_config(task: str) -> Dict[str, Any]:
             'dropout': 0.2,
             'mixup_alpha': 0.2
         })
-    elif task == "segmentation":
+        config['data'].update({
+            'model_name': "microsoft/resnet-50",
+            'image_size': [224, 224],
+            'batch_size': 32
+        })
+        config['training'].update({
+            'max_epochs': 100,
+            'monitor_metric': "val_loss",
+            'monitor_mode': "min"
+        })
+        config['mlflow'].update({
+            'experiment_name': "classification_training",
+            'run_name': "resnet50",
+            'tags': {
+                "framework": "lightning",
+                "model": "resnet",
+                "dataset": "imagenet"
+            }
+        })
+        config['output'].update({
+            'results_dir': "/Volumes/<catalog>/<schema>/<volume>/<path>/results/classification"
+        })
+        
+    elif task == "semantic_segmentation":
         config['model'].update({
             'model_name': "nvidia/mit-b0",
             'num_classes': 19,
             'segmentation_type': "semantic",
             'aux_loss_weight': 0.4,
             'mask_threshold': 0.5
+        })
+        config['data'].update({
+            'model_name': "nvidia/mit-b0",
+            'image_size': [512, 512],
+            'batch_size': 8
+        })
+        config['training'].update({
+            'max_epochs': 200,
+            'monitor_metric': "val_miou",
+            'monitor_mode': "max"
+        })
+        config['mlflow'].update({
+            'experiment_name': "semantic_segmentation_training",
+            'run_name': "segformer_mit_b0",
+            'tags': {
+                "framework": "lightning",
+                "model": "segformer",
+                "dataset": "cityscapes"
+            }
+        })
+        config['output'].update({
+            'results_dir': "/Volumes/<catalog>/<schema>/<volume>/<path>/results/semantic_segmentation"
         })
     
     return config 

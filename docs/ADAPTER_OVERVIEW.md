@@ -99,17 +99,10 @@ Input adapters handle the preprocessing of images and annotations before they ar
 
 **Standard Interface**:
 ```python
-def __call__(self, image: Image.Image, target: Dict) -> Tuple[torch.Tensor, Dict]:
-    """
-    Process a single sample.
-    
-    Args:
-        image: A PIL image
-        target: A dictionary containing annotations
-        
-    Returns:
-        A tuple containing the processed image tensor and target dictionary
-    """
+class MyModelInputAdapter(BaseAdapter):
+    def __call__(self, image: Image.Image, target: Dict) -> Tuple[torch.Tensor, Dict]:
+        # ...
+        return processed_image, adapted_target
 ```
 
 **Common Preprocessing Steps**:
@@ -125,38 +118,36 @@ Output adapters convert model outputs into a standardized format for metric comp
 
 **Standard Interface**:
 ```python
-def adapt_output(self, outputs: Dict[str, Any]) -> Dict[str, Any]:
-    """Convert model outputs to standard format."""
-    
-def adapt_targets(self, targets: Dict[str, torch.Tensor]) -> Dict[str, torch.Tensor]:
-    """Convert targets to model-specific format."""
-    
-def format_predictions(self, outputs: Dict[str, Any]) -> List[Dict[str, torch.Tensor]]:
-    """Format outputs for metric computation."""
-    
-def format_targets(self, targets: Dict[str, torch.Tensor]) -> List[Dict[str, torch.Tensor]]:
-    """Format targets for metric computation."""
+class MyModelOutputAdapter:
+    def adapt_output(self, outputs: Dict[str, Any]) -> Dict[str, Any]:
+        # ...
+        return standardized_outputs
 ```
 
 ## Factory Functions
 
-Each task has a factory function that automatically selects the appropriate adapter based on the model name:
+Each task has factory functions that automatically select the appropriate adapter based on the model name:
 
 ```python
 # Classification
-adapter = get_adapter("google/vit-base-patch16-224")  # Returns ViTAdapter
+input_adapter = get_input_adapter("google/vit-base-patch16-224")  # Returns ViTInputAdapter
+output_adapter = get_output_adapter("google/vit-base-patch16-224")  # Returns ViTOutputAdapter
 
 # Detection
-adapter = get_adapter("facebook/detr-resnet-50")  # Returns DETRAdapter
+input_adapter = get_input_adapter("facebook/detr-resnet-50")  # Returns DETRInputAdapter
+output_adapter = get_output_adapter("facebook/detr-resnet-50")  # Returns DETROutputAdapter
 
 # Semantic Segmentation
-adapter = get_semantic_adapter("nvidia/segformer-b0-finetuned-ade-512-512")  # Returns SegFormerAdapter
+input_adapter = get_input_adapter("nvidia/segformer-b0-finetuned-ade-512-512")  # Returns SegFormerInputAdapter
+output_adapter = get_output_adapter("nvidia/segformer-b0-finetuned-ade-512-512")  # Returns SegFormerOutputAdapter
 
 # Instance Segmentation
-adapter = get_instance_adapter("facebook/mask2former-swin-base-coco-instance")  # Returns Mask2FormerAdapter
+input_adapter = get_input_adapter("facebook/mask2former-swin-base-coco-instance")  # Returns Mask2FormerInputAdapter
+output_adapter = get_output_adapter("facebook/mask2former-swin-base-coco-instance")  # Returns Mask2FormerOutputAdapter
 
 # Panoptic Segmentation
-adapter = get_panoptic_adapter("facebook/mask2former-swin-base-coco-panoptic")  # Returns Mask2FormerAdapter
+input_adapter = get_input_adapter("facebook/mask2former-swin-base-coco-panoptic")  # Returns Mask2FormerInputAdapter
+output_adapter = get_output_adapter("facebook/mask2former-swin-base-coco-panoptic")  # Returns Mask2FormerOutputAdapter
 ```
 
 ## Design Principles
@@ -186,16 +177,18 @@ adapter = get_panoptic_adapter("facebook/mask2former-swin-base-coco-panoptic")  
 ### Basic Usage
 
 ```python
-from src.tasks.classification.adapters import get_adapter
-from src.tasks.detection.adapters import get_adapter as get_detection_adapter
+from src.tasks.classification.adapters import get_input_adapter, get_output_adapter
+from src.tasks.detection.adapters import get_input_adapter as get_detection_input_adapter, get_output_adapter as get_detection_output_adapter
 
 # Classification
-classifier_adapter = get_adapter("google/vit-base-patch16-224")
-processed_image, target = classifier_adapter(image, {"class_labels": torch.tensor([1])})
+classifier_input_adapter = get_input_adapter("google/vit-base-patch16-224")
+classifier_output_adapter = get_output_adapter("google/vit-base-patch16-224")
+processed_image, target = classifier_input_adapter(image, {"class_labels": torch.tensor([1])})
 
 # Detection
-detector_adapter = get_detection_adapter("facebook/detr-resnet-50")
-processed_image, target = detector_adapter(image, {
+detector_input_adapter = get_detection_input_adapter("facebook/detr-resnet-50")
+detector_output_adapter = get_detection_output_adapter("facebook/detr-resnet-50")
+processed_image, target = detector_input_adapter(image, {
     "boxes": torch.tensor([[100, 100, 200, 200]]),
     "labels": torch.tensor([1]),
     "image_id": torch.tensor([0])
@@ -206,10 +199,10 @@ processed_image, target = detector_adapter(image, {
 
 ```python
 # Custom image size
-adapter = get_adapter("google/vit-base-patch16-224", image_size=384)
+input_adapter = get_input_adapter("google/vit-base-patch16-224", image_size=384)
 
 # Model-specific preprocessing
-processed_image, target = adapter(image, target)
+processed_image, target = input_adapter(image, target)
 
 # The adapter automatically handles:
 # - Resizing to 384x384
@@ -223,7 +216,7 @@ To add support for a new model:
 
 1. **Create Input Adapter**:
 ```python
-class NewModelAdapter(BaseAdapter):
+class NewModelInputAdapter(BaseAdapter):
     def __init__(self, model_name: str, image_size: int = 224):
         self.processor = AutoImageProcessor.from_pretrained(model_name)
     
@@ -245,11 +238,18 @@ class NewModelOutputAdapter(OutputAdapter):
 
 3. **Update Factory Function**:
 ```python
-def get_adapter(model_name: str, image_size: int = 224) -> BaseAdapter:
+def get_input_adapter(model_name: str, image_size: int = 224) -> BaseAdapter:
     model_name_lower = model_name.lower()
     
     if "new_model" in model_name_lower:
-        return NewModelAdapter(model_name=model_name, image_size=image_size)
+        return NewModelInputAdapter(model_name=model_name, image_size=image_size)
+    # ... existing logic
+
+def get_output_adapter(model_name: str) -> OutputAdapter:
+    model_name_lower = model_name.lower()
+    
+    if "new_model" in model_name_lower:
+        return NewModelOutputAdapter()
     # ... existing logic
 ```
 

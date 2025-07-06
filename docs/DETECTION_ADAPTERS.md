@@ -135,109 +135,29 @@ processed_image, target = adapter(image, {
 # target: {"boxes": yolos_boxes, "labels": torch.tensor([1]), "image_id": torch.tensor([0])}
 ```
 
-## Output Adapters
+## Input Adapter Example
 
-### DETROutputAdapter
-
-**Purpose**: Converts DETR model outputs to a standardized format for metric computation.
-
-**Why This Design**:
-- DETR outputs are in a specific format that needs conversion
-- Standardizes the output format for consistent metric computation
-- Handles both loss and prediction extraction
-
-**Input Format**: DETR model outputs (`DetrObjectDetectionOutput`)
-
-**Output Format**:
 ```python
-{
-    "loss": torch.tensor,  # Training loss
-    "pred_boxes": torch.tensor,  # Predicted bounding boxes
-    "pred_logits": torch.tensor,  # Raw prediction logits
-    "loss_dict": dict  # Additional loss components
-}
+class DETRInputAdapter(BaseAdapter):
+    def __call__(self, image: Image.Image, target: Dict) -> Tuple[torch.Tensor, Dict]:
+        # ...
+        return processed_image, adapted_target
 ```
 
-**Key Functions**:
-1. **adapt_output()**: Extracts loss, boxes, and logits from DETR outputs
-2. **adapt_targets()**: Converts targets to DETR-specific format
-3. **format_predictions()**: Formats outputs for COCO evaluation
-4. **format_targets()**: Formats targets for COCO evaluation
+## Output Adapter Example
 
-**Why COCO Format is Important**:
-- Enables standard COCO evaluation metrics (mAP, mAP@0.5, etc.)
-- Ensures compatibility with existing evaluation tools
-- Maintains consistency across different detection models
-
-**Code Example**:
 ```python
-output_adapter = DETROutputAdapter("facebook/detr-resnet-50", image_size=800)
-adapted_outputs = output_adapter.adapt_output(detr_outputs)
-# adapted_outputs: {"loss": tensor, "pred_boxes": tensor, "pred_logits": tensor, "loss_dict": {}}
+class DETROutputAdapter:
+    def adapt_output(self, outputs: Dict[str, Any]) -> Dict[str, Any]:
+        # ...
+        return standardized_outputs
 ```
 
-### YOLOSOutputAdapter
+## Factory Functions
 
-**Purpose**: Converts YOLOS model outputs to a standardized format.
-
-**Why This Design**:
-- YOLOS outputs have a different structure than DETR
-- Handles YOLOS-specific output format
-- Ensures consistent evaluation across different models
-
-**Input Format**: YOLOS model outputs (`YolosObjectDetectionOutput`)
-
-**Output Format**:
 ```python
-{
-    "loss": torch.tensor,  # Training loss
-    "pred_boxes": torch.tensor,  # Predicted bounding boxes
-    "pred_logits": torch.tensor,  # Raw prediction logits
-    "loss_dict": dict  # Additional loss components
-}
-```
-
-**Code Example**:
-```python
-output_adapter = YOLOSOutputAdapter("hustvl/yolos-base", image_size=800)
-adapted_outputs = output_adapter.adapt_output(yolos_outputs)
-# adapted_outputs: {"loss": tensor, "pred_boxes": tensor, "pred_logits": tensor, "loss_dict": {}}
-```
-
-## Factory Function
-
-### get_adapter()
-
-**Purpose**: Automatically selects the appropriate adapter based on model name.
-
-**Why This Design**:
-- Eliminates the need to manually specify adapters
-- Uses model name patterns to determine the correct adapter
-- Provides fallback to NoOpAdapter for unknown models
-
-**Selection Logic**:
-```python
-def get_adapter(model_name: str, image_size: int = 800) -> BaseAdapter:
-    model_name_lower = model_name.lower()
-    
-    if "yolos" in model_name_lower:
-        return YOLOSAdapter(model_name=model_name, image_size=image_size)
-    elif "detr" in model_name_lower:
-        return DETRAdapter(model_name=model_name, image_size=image_size)
-    else:
-        return NoOpAdapter()
-```
-
-**Usage Example**:
-```python
-# Automatically selects DETRAdapter
-adapter = get_adapter("facebook/detr-resnet-50")
-
-# Automatically selects YOLOSAdapter
-adapter = get_adapter("hustvl/yolos-base")
-
-# Falls back to NoOpAdapter
-adapter = get_adapter("unknown_model")
+input_adapter = get_input_adapter("facebook/detr-resnet-50")  # Returns DETRInputAdapter
+output_adapter = get_output_adapter("facebook/detr-resnet-50")  # Returns DETROutputAdapter
 ```
 
 ## Coordinate Transformations

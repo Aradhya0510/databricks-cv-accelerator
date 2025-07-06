@@ -4,14 +4,14 @@ from dataclasses import dataclass
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-import pytorch_lightning as pl
+import lightning as pl
 from torchmetrics.classification import Dice, JaccardIndex, Accuracy, Precision, Recall
 from transformers import (
     AutoModelForSemanticSegmentation,
     AutoConfig,
     PreTrainedModel
 )
-from .adapters import get_semantic_adapter, SemanticSegmentationOutputAdapter
+from .adapters import get_input_adapter, get_output_adapter
 
 @dataclass
 class SemanticSegmentationModelConfig:
@@ -44,7 +44,7 @@ class SemanticSegmentationModel(pl.LightningModule):
         self._init_metrics()
         
         # Initialize output adapter
-        self.output_adapter = SemanticSegmentationOutputAdapter()
+        self.output_adapter = get_output_adapter(config.model_name)
     
     def _init_model(self) -> None:
         """Initialize the model architecture."""

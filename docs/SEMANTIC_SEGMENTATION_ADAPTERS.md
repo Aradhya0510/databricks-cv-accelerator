@@ -317,3 +317,28 @@ def get_semantic_adapter(model_name: str, image_size: int = 512) -> BaseAdapter:
 5. **Testing**: Test with various image sizes and mask formats
 6. **Documentation**: Document model-specific requirements and assumptions
 7. **Performance Optimization**: Use model-specific optimizations for better performance 
+
+## Input Adapter Example
+
+```python
+class SegFormerInputAdapter(BaseAdapter):
+    def __call__(self, image: Image.Image, target: Dict) -> Tuple[torch.Tensor, Dict]:
+        # ...
+        return processed_image, adapted_target
+```
+
+## Output Adapter Example
+
+```python
+class SegFormerOutputAdapter:
+    def adapt_output(self, outputs: Dict[str, Any]) -> Dict[str, Any]:
+        # ...
+        return standardized_outputs
+```
+
+## Factory Functions
+
+```python
+input_adapter = get_input_adapter("nvidia/segformer-b0-finetuned-ade-512-512")  # Returns SegFormerInputAdapter
+output_adapter = get_output_adapter("nvidia/segformer-b0-finetuned-ade-512-512")  # Returns SegFormerOutputAdapter
+``` 

@@ -150,39 +150,29 @@ processed_image, target = adapter(image, {"class_labels": torch.tensor([1])})
 # target: {"class_labels": torch.tensor([1])}
 ```
 
-## Output Adapters
+## Input Adapter Example
 
-### ClassificationOutputAdapter
-
-**Purpose**: Converts model outputs to a standardized format for metric computation.
-
-**Why This Design**:
-- Different models return outputs in different formats
-- Standardizes the output format for consistent metric computation
-- Handles both loss and prediction extraction
-
-**Input Format**: Raw model outputs (varies by model)
-
-**Output Format**:
 ```python
-{
-    "loss": torch.tensor,  # Training loss
-    "logits": torch.tensor,  # Raw prediction logits
-    "loss_dict": dict  # Additional loss components
-}
+class ViTInputAdapter(BaseAdapter):
+    def __call__(self, image: Image.Image, target: Dict) -> Tuple[torch.Tensor, Dict]:
+        # ...
+        return processed_image, adapted_target
 ```
 
-**Key Functions**:
-1. **adapt_output()**: Extracts loss and logits from model outputs
-2. **adapt_targets()**: Converts targets to model-specific format
-3. **format_predictions()**: Formats outputs for metric computation
-4. **format_targets()**: Formats targets for metric computation
+## Output Adapter Example
 
-**Code Example**:
 ```python
-output_adapter = ClassificationOutputAdapter()
-adapted_outputs = output_adapter.adapt_output(model_outputs)
-# adapted_outputs: {"loss": tensor, "logits": tensor, "loss_dict": {}}
+class ViTOutputAdapter:
+    def adapt_output(self, outputs: Dict[str, Any]) -> Dict[str, Any]:
+        # ...
+        return standardized_outputs
+```
+
+## Factory Functions
+
+```python
+input_adapter = get_input_adapter("google/vit-base-patch16-224")  # Returns ViTInputAdapter
+output_adapter = get_output_adapter("google/vit-base-patch16-224")  # Returns ViTOutputAdapter
 ```
 
 ## Factory Function

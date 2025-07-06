@@ -21,8 +21,8 @@ class BaseAdapter(ABC):
         """
         pass
 
-class NoOpAdapter(BaseAdapter):
-    """A "No-Operation" adapter.
+class NoOpInputAdapter(BaseAdapter):
+    """A "No-Operation" input adapter.
     - Converts image to a tensor
     - Keeps targets in standard format
     - Suitable for models like torchvision's segmentation models
@@ -30,8 +30,8 @@ class NoOpAdapter(BaseAdapter):
     def __call__(self, image: Image.Image, target: Dict) -> Tuple[torch.Tensor, Dict]:
         return F.to_tensor(image), target
 
-class Mask2FormerAdapter(BaseAdapter):
-    """Adapter for Mask2Former models.
+class Mask2FormerInputAdapter(BaseAdapter):
+    """Input adapter for Mask2Former models.
     - Handles image resizing and preprocessing for Mask2Former architecture
     - Optimized for panoptic segmentation
     """
@@ -220,6 +220,38 @@ class PanopticSegmentationOutputAdapter(OutputAdapter):
         
         return result
 
+def get_input_adapter(model_name: str, image_size: int = 512) -> BaseAdapter:
+    """Get the appropriate input adapter for a given model name.
+    
+    Args:
+        model_name: Name of the model
+        image_size: Target image size
+        
+    Returns:
+        Appropriate input adapter instance
+    """
+    model_name_lower = model_name.lower()
+    
+    if "mask2former" in model_name_lower:
+        return Mask2FormerInputAdapter(model_name, image_size)
+    else:
+        # Default to no-op adapter for other models
+        return NoOpInputAdapter()
+
+def get_output_adapter(model_name: str) -> OutputAdapter:
+    """Get the appropriate output adapter for a given model name.
+    
+    Args:
+        model_name: Name of the model
+        
+    Returns:
+        Appropriate output adapter instance
+    """
+    # For panoptic segmentation, we use a single output adapter
+    # since the output format is consistent across models
+    return PanopticSegmentationOutputAdapter()
+
+# Keep the old function for backward compatibility
 def get_panoptic_adapter(model_name: str, image_size: int = 512) -> BaseAdapter:
     """Get the appropriate adapter for a given model name.
     
@@ -230,10 +262,4 @@ def get_panoptic_adapter(model_name: str, image_size: int = 512) -> BaseAdapter:
     Returns:
         Appropriate adapter instance
     """
-    model_name_lower = model_name.lower()
-    
-    if "mask2former" in model_name_lower:
-        return Mask2FormerAdapter(model_name, image_size)
-    else:
-        # Default to no-op adapter for other models
-        return NoOpAdapter() 
+    return get_input_adapter(model_name, image_size) 

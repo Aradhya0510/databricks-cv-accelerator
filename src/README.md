@@ -86,7 +86,7 @@ Each task provides:
 Tasks include specialized adapters for:
 - **Input Adapters**: Convert raw data to model-specific formats
 - **Output Adapters**: Standardize model outputs for evaluation and inference
-- **Factory Functions**: Automatically select appropriate adapters based on model names
+- **Factory Functions**: Automatically select appropriate adapters based on model names (get_input_adapter, get_output_adapter)
 
 #### 5. **Evaluation and Inference**
 Tasks provide:
@@ -171,7 +171,7 @@ The adapter system provides model-agnostic data processing and output formatting
 - **Format Conversion**: Convert model outputs to standardized formats for evaluation
 
 **Adapter Factory Functions**:
-- `get_adapter(model_name, image_size)`: Returns appropriate data adapter
+- `get_input_adapter(model_name, image_size)`: Returns appropriate input adapter
 - `get_output_adapter(model_name)`: Returns appropriate output adapter
 
 #### Design Philosophy:

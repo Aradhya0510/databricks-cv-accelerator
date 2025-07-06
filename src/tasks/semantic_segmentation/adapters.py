@@ -21,8 +21,8 @@ class BaseAdapter(ABC):
         """
         pass
 
-class NoOpAdapter(BaseAdapter):
-    """A "No-Operation" adapter.
+class NoOpInputAdapter(BaseAdapter):
+    """A "No-Operation" input adapter.
     - Converts image to a tensor
     - Keeps targets in standard format
     - Suitable for models like torchvision's segmentation models
@@ -30,8 +30,8 @@ class NoOpAdapter(BaseAdapter):
     def __call__(self, image: Image.Image, target: Dict) -> Tuple[torch.Tensor, Dict]:
         return F.to_tensor(image), target
 
-class SegFormerAdapter(BaseAdapter):
-    """Adapter for SegFormer models.
+class SegFormerInputAdapter(BaseAdapter):
+    """Input adapter for SegFormer models.
     - Handles image resizing and preprocessing for SegFormer architecture
     - Uses Hugging Face's AutoImageProcessor
     """
@@ -59,8 +59,8 @@ class SegFormerAdapter(BaseAdapter):
         
         return processed.pixel_values.squeeze(0), target
 
-class DeepLabV3Adapter(BaseAdapter):
-    """Adapter for DeepLabV3 models.
+class DeepLabV3InputAdapter(BaseAdapter):
+    """Input adapter for DeepLabV3 models.
     - Handles image resizing and preprocessing for DeepLabV3 architecture
     """
     def __init__(self, model_name: str, image_size: int = 512):
@@ -224,6 +224,40 @@ class SemanticSegmentationOutputAdapter(OutputAdapter):
         
         return result
 
+def get_input_adapter(model_name: str, image_size: int = 512) -> BaseAdapter:
+    """Get the appropriate input adapter for a given model name.
+    
+    Args:
+        model_name: Name of the model
+        image_size: Target image size
+        
+    Returns:
+        Appropriate input adapter instance
+    """
+    model_name_lower = model_name.lower()
+    
+    if "segformer" in model_name_lower:
+        return SegFormerInputAdapter(model_name, image_size)
+    elif "deeplab" in model_name_lower:
+        return DeepLabV3InputAdapter(model_name, image_size)
+    else:
+        # Default to no-op adapter for other models
+        return NoOpInputAdapter()
+
+def get_output_adapter(model_name: str) -> OutputAdapter:
+    """Get the appropriate output adapter for a given model name.
+    
+    Args:
+        model_name: Name of the model
+        
+    Returns:
+        Appropriate output adapter instance
+    """
+    # For semantic segmentation, we use a single output adapter
+    # since the output format is consistent across models
+    return SemanticSegmentationOutputAdapter()
+
+# Keep the old function for backward compatibility
 def get_semantic_adapter(model_name: str, image_size: int = 512) -> BaseAdapter:
     """Get the appropriate adapter for a given model name.
     
@@ -234,12 +268,4 @@ def get_semantic_adapter(model_name: str, image_size: int = 512) -> BaseAdapter:
     Returns:
         Appropriate adapter instance
     """
-    model_name_lower = model_name.lower()
-    
-    if "segformer" in model_name_lower:
-        return SegFormerAdapter(model_name, image_size)
-    elif "deeplab" in model_name_lower:
-        return DeepLabV3Adapter(model_name, image_size)
-    else:
-        # Default to no-op adapter for other models
-        return NoOpAdapter() 
+    return get_input_adapter(model_name, image_size) 

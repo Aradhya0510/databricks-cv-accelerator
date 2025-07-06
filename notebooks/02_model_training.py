@@ -1,506 +1,660 @@
 # Databricks notebook source
+# MAGIC %md
+# MAGIC # 02. DETR Model Training
+# MAGIC 
+# MAGIC This notebook trains a DETR (DEtection TRansformer) model for object detection on the COCO dataset using our modular computer vision framework. We'll cover model initialization, training configuration, monitoring, and best practices for multi-GPU training.
+# MAGIC 
+# MAGIC ## Overview
+# MAGIC 
+# MAGIC **DETR Training Process:**
+# MAGIC 1. **Model Initialization**: Load pre-trained DETR with ResNet-50 backbone
+# MAGIC 2. **Data Loading**: Efficient COCO data loading with preprocessing
+# MAGIC 3. **Training Setup**: Multi-GPU training with Lightning
+# MAGIC 4. **Monitoring**: Real-time metrics and MLflow tracking
+# MAGIC 5. **Checkpointing**: Automatic model saving and early stopping
+# MAGIC 
+# MAGIC ### Key Training Concepts:
+# MAGIC - **Bipartite Matching Loss**: Ensures unique predictions through Hungarian algorithm
+# MAGIC - **Set Prediction**: Treats detection as a set prediction problem
+# MAGIC - **Transformer Training**: Uses self-attention for global reasoning
+# MAGIC - **Auxiliary Losses**: Help with convergence and stability
+# MAGIC 
+# MAGIC ## What This Notebook Does
+# MAGIC 
+# MAGIC 1. **Model Setup**: Initialize DETR model with proper configuration
+# MAGIC 2. **Training Configuration**: Set up Lightning trainer with callbacks
+# MAGIC 3. **Multi-GPU Training**: Configure distributed training on 4 GPUs
+# MAGIC 4. **Monitoring**: Real-time metrics tracking and visualization
+# MAGIC 5. **Model Saving**: Automatic checkpointing and model registration
+# MAGIC 
+# MAGIC ---
+
 # COMMAND ----------
 
 # MAGIC %md
-# MAGIC # Model Training
-# MAGIC 
-# MAGIC This notebook handles model initialization and training for computer vision tasks.
-# MAGIC 
-# MAGIC ## Unity Catalog Setup
-# MAGIC 
-# MAGIC The notebook uses the following Unity Catalog volume structure:
-# MAGIC ```
-# MAGIC /Volumes/cv_ref/datasets/coco_mini/
-# MAGIC ├── configs/
-# MAGIC │   └── {task}_config.yaml
-# MAGIC ├── checkpoints/
-# MAGIC │   └── {task}_model/
-# MAGIC ├── logs/
-# MAGIC │   └── training.log
-# MAGIC └── results/
-# MAGIC     └── {task}_test_results.yaml
-# MAGIC ```
+# MAGIC ## 1. Import Dependencies and Load Configuration
 
 # COMMAND ----------
 
-%pip install -r "../requirements.txt"
-dbutils.library.restartPython()
-
-# COMMAND ----------
-
-%run ./01_data_preparation
-
-# COMMAND ----------
-
-# DBTITLE 1,Import Dependencies
 import sys
 import os
-from pathlib import Path
-import mlflow
 import torch
-import yaml
-import matplotlib.pyplot as plt
-import matplotlib.patches as patches
-from PIL import Image
+import lightning
+import mlflow
 import numpy as np
-import cv2
+import matplotlib.pyplot as plt
+from pathlib import Path
 
-# Add the project root to Python path
-project_root = "/Volumes/<catalog>/<schema>/<volume>/<path>"
-sys.path.append(project_root)
+# Add the src directory to Python path
+sys.path.append('/Workspace/Repos/your-repo/Databricks_CV_ref/src')
 
-# Import project modules
-from src.tasks.detection.model import DetectionModel
-from src.tasks.detection.data import DetectionDataModule
-from src.tasks.classification.model import ClassificationModel
-from src.tasks.classification.data import ClassificationDataModule
-from src.tasks.semantic_segmentation.model import SemanticSegmentationModel
-from src.tasks.semantic_segmentation.data import SemanticSegmentationDataModule
-from src.tasks.panoptic_segmentation.model import PanopticSegmentationModel
-from src.tasks.panoptic_segmentation.data import PanopticSegmentationDataModule
-from src.tasks.instance_segmentation.model import InstanceSegmentationModel
-from src.tasks.instance_segmentation.data import InstanceSegmentationDataModule
-from src.training.trainer import UnifiedTrainer
-from src.utils.logging import setup_logger, get_mlflow_logger
-from src.tasks.detection.adapters import DETROutputAdapter, get_adapter
+from config import load_config
+from tasks.detection.model import DetectionModel
+from tasks.detection.data import DetectionDataModule
+from training.trainer import UnifiedTrainer
+from utils.logging import setup_logger
 
-# COMMAND ----------
+# Load configuration from previous notebooks
+CATALOG = "your_catalog"
+SCHEMA = "your_schema"  
+VOLUME = "your_volume"
+PROJECT_PATH = "cv_detr_training"
 
-# DBTITLE 1,Initialize Logging
-# Get the Unity Catalog volume path from environment or use default
-volume_path = os.getenv("UNITY_CATALOG_VOLUME", project_root)
-log_dir = f"{volume_path}/logs"
-os.makedirs(log_dir, exist_ok=True)
+BASE_VOLUME_PATH = f"/Volumes/{CATALOG}/{SCHEMA}/{VOLUME}/{PROJECT_PATH}"
+CONFIG_PATH = f"{BASE_VOLUME_PATH}/configs/detection_detr_config.yaml"
 
-logger = setup_logger(
-    name="model_training",
-    log_file=f"{log_dir}/training.log"
-)
-
-# COMMAND ----------
-
-# DBTITLE 1,Setup MLflow
-def setup_mlflow(experiment_name: str):
-    """Setup MLflow experiment and logger."""
-    # Get MLflow logger
-    mlflow_logger = get_mlflow_logger(
-        experiment_name=experiment_name,
-        tracking_uri=os.getenv("MLFLOW_TRACKING_URI"),
-        run_name=f"training_run_{os.getenv('USER')}",
-        log_model=True,
-        tags={"framework": "pytorch_lightning"}
-    )
-    
-    return mlflow_logger
-
-# COMMAND ----------
-
-# DBTITLE 1,Load Configuration
-def load_task_config(task: str):
-    """Load task-specific configuration."""
-    config_path = f"{volume_path}/configs/{task}_config.yaml"
-    if not os.path.exists(config_path):
-        raise FileNotFoundError(f"Configuration file not found: {config_path}")
-    
-    with open(config_path, 'r') as f:
-        config = yaml.safe_load(f)
-    
-    return config
-
-# COMMAND ----------
-
-# DBTITLE 1,Get Model Class
-def get_model_class(task: str):
-    """Get the appropriate model class based on task."""
-    model_classes = {
-        'detection': DetectionModel,
-        'classification': ClassificationModel,
-        'semantic_segmentation': SemanticSegmentationModel,
-        'panoptic_segmentation': PanopticSegmentationModel,
-        'instance_segmentation': InstanceSegmentationModel
-    }
-    
-    if task not in model_classes:
-        raise ValueError(f"Unsupported task: {task}")
-    
-    return model_classes[task]
-
-# COMMAND ----------
-
-# DBTITLE 1,Initialize Model
-def initialize_model(task: str, config: dict):
-    """Initialize model for the specified task."""
-    model_class = get_model_class(task)
-    
-    # Extract model-specific configuration
-    model_config = config['model']
-    model = model_class(config=model_config)
-    
-    # For detection task, set the output adapter
-    if task == 'detection':
-        output_adapter = DETROutputAdapter(
-            model_name=config['model']['model_name'],
-            image_size=config['data']['image_size'][0]
-        )
-        model.output_adapter = output_adapter
-    
-    return model
-
-# COMMAND ----------
-
-# DBTITLE 1,Setup Trainer
-def setup_trainer(task: str, model, config: dict, mlflow_logger):
-    """Setup trainer for the specified task."""
-    trainer = UnifiedTrainer(
-        task=task,
-        model=model,
-        config=config,
-        data_module_class=get_data_module_class(task)
-    )
-    
-    return trainer
-
-# COMMAND ----------
-
-# DBTITLE 1,Training Function
-def train_model(
-    task: str,
-    train_loader,
-    val_loader,
-    test_loader=None,
-    experiment_name: str = None
-):
-    """Main function to train the model."""
-    # Load configuration
-    config = load_task_config(task)
-    
-    # Initialize model
-    model = initialize_model(task, config)
-    
-    # Log model architecture
-    logger.info(f"Model architecture:\n{model}")
-    
-    # Create data module with config
-    data_config = {
-        'data_path': config['data']['data_path'],
-        'annotation_file': config['data']['annotation_file'],
-        'image_size': config['data'].get('image_size', 640),
-        'batch_size': config['data'].get('batch_size', 8),
-        'num_workers': config['data'].get('num_workers', 4),
-        'model_name': config['data'].get('model_name')
-    }
-    
-    # Initialize data module
-    data_module_class = get_data_module_class(task)
-    data_module = data_module_class(config=data_config)
-    
-    # Set the data loaders directly
-    data_module.train_dataloader = lambda: train_loader
-    data_module.val_dataloader = lambda: val_loader
-    if test_loader:
-        data_module.test_dataloader = lambda: test_loader
-    
-    # Setup MLflow logger
-    mlflow_logger = setup_mlflow(experiment_name)
-    
-    # Setup trainer with initialized data module
-    trainer = UnifiedTrainer(
-        config=config,
-        model=model,
-        data_module=data_module,
-        logger=mlflow_logger  # Pass the MLflow logger to the trainer
-    )
-    
-    # Train model
-    trainer.train()
-    
-    # Test model if test loader is available
-    if test_loader:
-        test_results = trainer.trainer.test(model, datamodule=trainer.data_module)
-        
-        # Save test results
-        results_path = f"{volume_path}/results/{task}_test_results.yaml"
-        os.makedirs(os.path.dirname(results_path), exist_ok=True)
-        with open(results_path, 'w') as f:
-            yaml.dump(test_results, f)
-        
-        logger.info(f"Test results: {test_results}")
-    
-    return trainer
-
-def get_data_module_class(task: str):
-    """Get the appropriate data module class based on task."""
-    data_modules = {
-        'detection': DetectionDataModule,
-        'classification': ClassificationDataModule,
-        'semantic_segmentation': SemanticSegmentationDataModule,
-        'panoptic_segmentation': PanopticSegmentationDataModule,
-        'instance_segmentation': InstanceSegmentationDataModule
-    }
-    
-    if task not in data_modules:
-        raise ValueError(f"Unsupported task: {task}")
-    
-    return data_modules[task]
-
-# COMMAND ----------
-
-# DBTITLE 1,Example Usage
-# Example: Train detection model
-task = "detection"
-experiment_name = f"/Users/{dbutils.notebook.entry_point.getDbutils().notebook().getContext().userName().get()}/{task}_pipeline"
-
-# Setup MLflow experiment and autologging
-mlflow_logger = setup_mlflow(experiment_name)
-print(f"Using MLflow experiment: {experiment_name}")
-
-# Prepare data loaders (from previous notebook)
-train_loader, val_loader = prepare_data(task)
-
-# Train model
-trainer = train_model(
-    task=task,
-    train_loader=train_loader,
-    val_loader=val_loader,
-    experiment_name=experiment_name
-)
-
-# COMMAND ----------
-
-# MAGIC %md
-# MAGIC ## Next Steps
-# MAGIC 
-# MAGIC 1. Review training metrics in MLflow
-# MAGIC 2. Check model performance on test set
-# MAGIC 3. Proceed to hyperparameter tuning notebook 
-
-# COMMAND ----------
-
-# MAGIC %md
-# MAGIC ## Visualize Model Predictions
-# MAGIC 
-# MAGIC Let's load the best checkpoint and visualize predictions on a sample image.
-
-# COMMAND ----------
-
-# DBTITLE 1,Load Best Checkpoint and Visualize Predictions
-def visualize_predictions(model, image, target, prediction, class_names, original_height, original_width, save_path=None):
-    """Visualize model predictions against ground truth.
-    
-    Args:
-        model: The model used for prediction
-        image: Input image tensor
-        target: Ground truth target dictionary
-        prediction: Model prediction dictionary
-        class_names: List of class names
-        original_height: Original image height in pixels
-        original_width: Original image width in pixels
-        save_path: Optional path to save the annotated image
-    """
-    # Convert image to numpy array if it's a tensor
-    if isinstance(image, torch.Tensor):
-        image = image.cpu().numpy().transpose(1, 2, 0)
-        # Denormalize image using ImageNet stats
-        mean = np.array([0.485, 0.456, 0.406])
-        std = np.array([0.229, 0.224, 0.225])
-        image = std * image + mean
-        image = np.clip(image, 0, 1)
-    
-    # Resize image to a more manageable size for visualization
-    display_size = (800, 800)  # Increased from 400x400 to 800x800
-    image = cv2.resize(image, display_size)
-    
-    # Calculate scaling factors
-    scale_x = display_size[0] / original_width
-    scale_y = display_size[1] / original_height
-    
-    # Create figure and axis with larger size
-    dpi = 72  # Standard screen DPI
-    fig, ax = plt.subplots(1, figsize=(12, 12), dpi=dpi)  # Increased from 5x5 to 12x12
-    ax.imshow(image)
-    
-    # Plot ground truth boxes
-    if "boxes" in target and len(target["boxes"]) > 0:
-        # Handle different label field names
-        labels = target.get("class_labels", target.get("labels", []))
-        
-        # DETR target boxes are in [cx, cy, w, h] normalized format
-        # Convert to [x1, y1, x2, y2] absolute pixel coordinates
-        target_boxes = target["boxes"].clone()
-        
-        # First, denormalize by multiplying by original image size
-        target_boxes[:, [0, 2]] *= original_width  # cx, w
-        target_boxes[:, [1, 3]] *= original_height  # cy, h
-        
-        # Then convert from [cx, cy, w, h] to [x1, y1, x2, y2]
-        cx, cy, w, h = target_boxes.unbind(1)
-        x1 = cx - w / 2
-        y1 = cy - h / 2
-        x2 = cx + w / 2
-        y2 = cy + h / 2
-        target_boxes_xyxy = torch.stack([x1, y1, x2, y2], dim=1)
-        
-        for box, label in zip(target_boxes_xyxy, labels):
-            x1, y1, x2, y2 = box.cpu().numpy()
-            # Scale boxes to display size
-            x1 = x1 * scale_x
-            y1 = y1 * scale_y
-            x2 = x2 * scale_x
-            y2 = y2 * scale_y
-            
-            rect = patches.Rectangle(
-                (x1, y1), x2-x1, y2-y1,
-                linewidth=3, edgecolor='g', facecolor='none'  # Increased linewidth from 1 to 3
-            )
-            ax.add_patch(rect)
-            ax.text(x1, y1-5, class_names[label], color='g', fontsize=14, 
-                   bbox=dict(boxstyle="round,pad=0.3", facecolor='green', alpha=0.7))  # Increased fontsize and added background
-    
-    # Plot predicted boxes
-    if "boxes" in prediction and len(prediction["boxes"]) > 0:
-        # Handle different field names for predictions
-        boxes = prediction["boxes"]
-        labels = prediction.get("labels", [])
-        scores = prediction.get("scores", [])
-        
-        # Prediction boxes are already in [x1, y1, x2, y2] absolute pixel format
-        # from the output adapter's post-processing
-        
-        for i, box in enumerate(boxes):
-            if i < len(scores) and scores[i] > 0.5:  # Only show predictions with confidence > 0.5
-                x1, y1, x2, y2 = box.cpu().numpy()
-                # Scale boxes to display size
-                x1 = x1 * scale_x
-                y1 = y1 * scale_y
-                x2 = x2 * scale_x
-                y2 = y2 * scale_y
-                
-                rect = patches.Rectangle(
-                    (x1, y1), x2-x1, y2-y1,
-                    linewidth=3, edgecolor='r', facecolor='none'  # Increased linewidth from 1 to 3
-                )
-                ax.add_patch(rect)
-                
-                # Get label and score
-                label = labels[i] if i < len(labels) else 0
-                score = scores[i] if i < len(scores) else 0.0
-                
-                ax.text(
-                    x1, y1-5,
-                    f"{class_names[label]} ({score:.2f})",
-                    color='r', fontsize=14,  # Increased fontsize from 6 to 14
-                    bbox=dict(boxstyle="round,pad=0.3", facecolor='red', alpha=0.7)  # Added background
-                )
-    
-    plt.axis('off')
-    
-    # Save the figure if save_path is provided
-    if save_path:
-        os.makedirs(os.path.dirname(save_path), exist_ok=True)
-        plt.savefig(
-            save_path,
-            bbox_inches='tight',
-            pad_inches=0,
-            dpi=dpi,
-            format='png'
-        )
-        print(f"Saved annotated image to {save_path}")
-    
-    plt.show()
-
-# Load best checkpoint
-checkpoint_path = f"{volume_path}/checkpoints/{task}_model/best.ckpt"
-if os.path.exists(checkpoint_path):
-    # Load model from checkpoint
-    model = initialize_model(task, config)
-    model.load_state_dict(torch.load(checkpoint_path)['state_dict'])
-    model.eval()
-    
-    # Initialize data module with proper configuration
-    data_config = {
-        'data_path': config['data']['data_path'],
-        'annotation_file': config['data']['annotation_file'],
-        'batch_size': config['data'].get('batch_size', 2),
-        'num_workers': config['data'].get('num_workers', 4),
-        'model_name': config['data'].get('model_name')
-    }
-    
-    data_module = get_data_module_class(task)(data_config)
-    
-    # Set up the adapter before initializing datasets
-    adapter = get_adapter(
-        model_name=config['data'].get('model_name', 'facebook/detr-resnet-50'),
-        image_size=config['data'].get('image_size', [800])[0]
-    )
-    data_module.adapter = adapter
-    
-    data_module.setup('fit')  # Initialize datasets
-    
-    # Get a sample batch from validation dataloader
-    val_loader = data_module.val_dataloader()
-    sample_batch = next(iter(val_loader))
-    images = sample_batch["pixel_values"]
-    targets = sample_batch["labels"]
-    
-    # Get predictions
-    with torch.no_grad():
-        outputs = model(images)
-    
-    # Format predictions using model's output adapter
-    predictions = model._format_predictions(outputs, sample_batch)
-    
-    # Get class names from data module
-    class_names = data_module.class_names
-    
-    # Create target dictionary for first image
-    target = {
-        "boxes": targets[0]["boxes"],
-        "class_labels": targets[0]["class_labels"]
-    }
-    
-    # Get prediction for first image
-    prediction = predictions[0]
-    
-    # Get original image size for coordinate conversion
-    # Check if we have size information in the target
-    if "size" in targets[0]:
-        original_size = targets[0]["size"]
-        original_height, original_width = original_size[0].item(), original_size[1].item()
-    else:
-        # Fallback: use the processed image size
-        original_height, original_width = images[0].shape[1], images[0].shape[2]
-    
-    # Debug: Print coordinate information
-    print(f"Original image size: {original_width}x{original_height}")
-    print(f"Target boxes (DETR format [cx,cy,w,h] normalized): {target['boxes'].min():.3f} to {target['boxes'].max():.3f}")
-    print(f"Prediction boxes ([x1,y1,x2,y2] absolute): {prediction['boxes'].min():.3f} to {prediction['boxes'].max():.3f}")
-    
-    # Debug: Show a few converted target boxes
-    if len(target['boxes']) > 0:
-        target_boxes = target["boxes"].clone()
-        target_boxes[:, [0, 2]] *= original_width
-        target_boxes[:, [1, 3]] *= original_height
-        cx, cy, w, h = target_boxes.unbind(1)
-        x1 = cx - w / 2
-        y1 = cy - h / 2
-        x2 = cx + w / 2
-        y2 = cy + h / 2
-        target_boxes_xyxy = torch.stack([x1, y1, x2, y2], dim=1)
-        print(f"Converted target boxes (first 2): {target_boxes_xyxy[:2]}")
-    
-    # Create save path for annotated image
-    save_path = f"{volume_path}/results/{task}_predictions/annotated_image.png"
-    
-    # Visualize first image in batch
-    visualize_predictions(
-        model=model,
-        image=images[0],
-        target=target,
-        prediction=prediction,
-        class_names=class_names,
-        original_height=original_height,
-        original_width=original_width,
-        save_path=save_path
-    )
+# Load configuration
+if os.path.exists(CONFIG_PATH):
+    config = load_config(CONFIG_PATH)
 else:
-    print(f"No checkpoint found at {checkpoint_path}") 
+    print("⚠️  Config file not found. Using default detection config.")
+    from config import get_default_config
+    config = get_default_config("detection")
+
+print("✅ Configuration loaded successfully!")
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC ## 2. Model Initialization
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC ### Initialize DETR Model
+
+# COMMAND ----------
+
+def initialize_detr_model():
+    """Initialize DETR model with proper configuration."""
+    
+    print("🔧 Initializing DETR model...")
+    
+    try:
+        # Create detection model
+        model = DetectionModel(config)
+        
+        print(f"✅ Model initialized successfully!")
+        print(f"   Model name: {config['model']['model_name']}")
+        print(f"   Number of classes: {config['model']['num_classes']}")
+        print(f"   Task type: {config['model']['task_type']}")
+        
+        # Print model summary
+        total_params = sum(p.numel() for p in model.parameters())
+        trainable_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
+        
+        print(f"   Total parameters: {total_params:,}")
+        print(f"   Trainable parameters: {trainable_params:,}")
+        print(f"   Model size: {total_params * 4 / 1e6:.1f} MB")
+        
+        return model
+        
+    except Exception as e:
+        print(f"❌ Model initialization failed: {e}")
+        return None
+
+model = initialize_detr_model()
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC ### Model Architecture Analysis
+
+# COMMAND ----------
+
+def analyze_model_architecture(model):
+    """Analyze the DETR model architecture."""
+    
+    if not model:
+        return
+    
+    print("\n🏗️  DETR Architecture Analysis:")
+    
+    # Count layers by type
+    layer_counts = {}
+    for name, module in model.named_modules():
+        module_type = type(module).__name__
+        layer_counts[module_type] = layer_counts.get(module_type, 0) + 1
+    
+    print("   Layer distribution:")
+    for layer_type, count in sorted(layer_counts.items()):
+        if count > 1:  # Only show layers that appear multiple times
+            print(f"     {layer_type}: {count}")
+    
+    # Check for key DETR components
+    has_backbone = any('backbone' in name for name, _ in model.named_modules())
+    has_transformer = any('transformer' in name for name, _ in model.named_modules())
+    has_query = any('query' in name for name, _ in model.named_modules())
+    
+    print(f"\n   Key components:")
+    print(f"     Backbone (ResNet): {'✅' if has_backbone else '❌'}")
+    print(f"     Transformer: {'✅' if has_transformer else '❌'}")
+    print(f"     Object Queries: {'✅' if has_query else '❌'}")
+    
+    # Memory usage estimation
+    if torch.cuda.is_available():
+        model = model.cuda()
+        torch.cuda.empty_cache()
+        
+        # Test forward pass with dummy input
+        dummy_input = torch.randn(1, 3, 800, 800).cuda()
+        with torch.no_grad():
+            _ = model(dummy_input)
+        
+        memory_used = torch.cuda.memory_allocated() / 1e9
+        print(f"\n   Estimated GPU memory per forward pass: {memory_used:.2f} GB")
+        
+        # Move back to CPU for training setup
+        model = model.cpu()
+        torch.cuda.empty_cache()
+
+analyze_model_architecture(model)
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC ## 3. Data Module Setup
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC ### Initialize Data Module
+
+# COMMAND ----------
+
+def setup_data_module():
+    """Set up data module for training."""
+    
+    print("\n📊 Setting up data module...")
+    
+    try:
+        # Create data module
+        data_module = DetectionDataModule(config)
+        
+        # Setup for training
+        data_module.setup('fit')
+        
+        print(f"✅ Data module setup complete!")
+        print(f"   Train dataset: {len(data_module.train_dataset):,} samples")
+        print(f"   Val dataset: {len(data_module.val_dataset):,} samples")
+        print(f"   Test dataset: {len(data_module.test_dataset):,} samples")
+        print(f"   Number of classes: {len(data_module.train_dataset.class_names)}")
+        
+        # Test data loading
+        train_loader = data_module.train_dataloader()
+        val_loader = data_module.val_dataloader()
+        
+        print(f"   Train batches: {len(train_loader)}")
+        print(f"   Val batches: {len(val_loader)}")
+        print(f"   Batch size: {config['data']['batch_size']}")
+        print(f"   Workers: {config['data']['num_workers']}")
+        
+        return data_module
+        
+    except Exception as e:
+        print(f"❌ Data module setup failed: {e}")
+        return None
+
+data_module = setup_data_module()
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC ### Data Loading Performance Test
+
+# COMMAND ----------
+
+def test_data_loading_performance(data_module):
+    """Test data loading performance and memory usage."""
+    
+    if not data_module:
+        return
+    
+    print("\n⚡ Testing data loading performance...")
+    
+    import time
+    
+    # Test train loader performance
+    train_loader = data_module.train_dataloader()
+    
+    # Time a few batches
+    start_time = time.time()
+    batch_times = []
+    
+    for i, batch in enumerate(train_loader):
+        if i >= 5:  # Test 5 batches
+            break
+        
+        batch_start = time.time()
+        
+        # Move to GPU if available
+        if torch.cuda.is_available():
+            batch = {k: v.cuda() if isinstance(v, torch.Tensor) else v for k, v in batch.items()}
+        
+        batch_time = time.time() - batch_start
+        batch_times.append(batch_time)
+        
+        print(f"   Batch {i+1}: {batch_time:.3f}s")
+    
+    total_time = time.time() - start_time
+    avg_batch_time = np.mean(batch_times)
+    
+    print(f"\n📈 Performance Summary:")
+    print(f"   Average batch loading time: {avg_batch_time:.3f}s")
+    print(f"   Estimated batches per second: {1/avg_batch_time:.1f}")
+    print(f"   Total test time: {total_time:.2f}s")
+    
+    # Memory usage
+    if torch.cuda.is_available():
+        memory_used = torch.cuda.memory_allocated() / 1e9
+        print(f"   GPU memory used: {memory_used:.2f} GB")
+        
+        # Clear memory
+        torch.cuda.empty_cache()
+    
+    return avg_batch_time
+
+avg_batch_time = test_data_loading_performance(data_module)
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC ## 4. Training Configuration
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC ### Initialize Trainer with Callbacks
+
+# COMMAND ----------
+
+def setup_trainer():
+    """Set up Lightning trainer with callbacks and logging."""
+    
+    print("\n🚀 Setting up trainer...")
+    
+    try:
+        # Create trainer
+        trainer = UnifiedTrainer(config)
+        
+        print(f"✅ Trainer setup complete!")
+        print(f"   Max epochs: {config['training']['max_epochs']}")
+        print(f"   Learning rate: {config['training']['learning_rate']}")
+        print(f"   Weight decay: {config['training']['weight_decay']}")
+        print(f"   Scheduler: {config['training']['scheduler']}")
+        print(f"   Early stopping patience: {config['training']['early_stopping_patience']}")
+        print(f"   Monitor metric: {config['training']['monitor_metric']}")
+        print(f"   Monitor mode: {config['training']['monitor_mode']}")
+        
+        # Check GPU configuration
+        if torch.cuda.is_available():
+            num_gpus = torch.cuda.device_count()
+            print(f"   GPUs available: {num_gpus}")
+            print(f"   Distributed training: {config['training']['distributed']}")
+            
+            if config['training']['distributed']:
+                print(f"   Strategy: DDP")
+                print(f"   Sync batch norm: Enabled")
+        
+        return trainer
+        
+    except Exception as e:
+        print(f"❌ Trainer setup failed: {e}")
+        return None
+
+trainer = setup_trainer()
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC ### Training Callbacks and Monitoring
+
+# COMMAND ----------
+
+def setup_monitoring():
+    """Set up monitoring and logging."""
+    
+    print("\n📊 Setting up monitoring...")
+    
+    # Initialize logging
+    logger = setup_logger(
+        name="detr_training",
+        experiment_name=config['mlflow']['experiment_name'],
+        run_name=config['mlflow']['run_name'],
+        log_dir=f"{BASE_VOLUME_PATH}/logs"
+    )
+    
+    print(f"✅ Logging setup complete!")
+    print(f"   Experiment: {config['mlflow']['experiment_name']}")
+    print(f"   Run name: {config['mlflow']['run_name']}")
+    print(f"   Log directory: {BASE_VOLUME_PATH}/logs")
+    
+    # Log configuration
+    logger.info("Starting DETR training")
+    logger.info(f"Configuration: {config}")
+    logger.info(f"Model: {config['model']['model_name']}")
+    logger.info(f"Dataset: {len(data_module.train_dataset)} train, {len(data_module.val_dataset)} val")
+    
+    return logger
+
+logger = setup_monitoring()
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC ## 5. Training Execution
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC ### Start Training
+
+# COMMAND ----------
+
+def start_training(model, data_module, trainer, logger):
+    """Start the training process."""
+    
+    if not all([model, data_module, trainer, logger]):
+        print("❌ Cannot start training - missing components")
+        return False
+    
+    print("\n🎯 Starting DETR training...")
+    print("=" * 60)
+    
+    try:
+        # Log training start
+        logger.info("Training started")
+        
+        # Start training
+        trainer.fit(model, data_module)
+        
+        # Log training completion
+        logger.info("Training completed successfully")
+        
+        print("✅ Training completed successfully!")
+        
+        return True
+        
+    except Exception as e:
+        print(f"❌ Training failed: {e}")
+        logger.error(f"Training failed: {e}")
+        return False
+
+# Start training
+training_success = start_training(model, data_module, trainer, logger)
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC ### Training Progress Monitoring
+
+# COMMAND ----------
+
+def monitor_training_progress():
+    """Monitor training progress and metrics."""
+    
+    print("\n📈 Training Progress Monitoring:")
+    
+    # Check if training logs exist
+    log_dir = f"{BASE_VOLUME_PATH}/logs"
+    if os.path.exists(log_dir):
+        print(f"   Log directory: {log_dir}")
+        
+        # List log files
+        log_files = [f for f in os.listdir(log_dir) if f.endswith('.log')]
+        print(f"   Log files found: {len(log_files)}")
+        
+        for log_file in log_files:
+            print(f"     - {log_file}")
+    
+    # Check MLflow experiments
+    try:
+        experiment = mlflow.get_experiment_by_name(config['mlflow']['experiment_name'])
+        if experiment:
+            print(f"   MLflow experiment: {experiment.name}")
+            print(f"   Experiment ID: {experiment.experiment_id}")
+            
+            # Get latest run
+            runs = mlflow.search_runs(experiment.experiment_id, order_by=["start_time DESC"], max_results=1)
+            if not runs.empty:
+                latest_run = runs.iloc[0]
+                print(f"   Latest run: {latest_run['tags.mlflow.runName']}")
+                print(f"   Status: {latest_run['status']}")
+                
+                if latest_run['status'] == 'FINISHED':
+                    print(f"   Final loss: {latest_run.get('metrics.train_loss', 'N/A')}")
+                    print(f"   Final mAP: {latest_run.get('metrics.val_map', 'N/A')}")
+        else:
+            print("   MLflow experiment not found")
+            
+    except Exception as e:
+        print(f"   MLflow monitoring error: {e}")
+
+# Monitor progress (this would be called during training)
+if training_success:
+    monitor_training_progress()
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC ## 6. Model Evaluation and Saving
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC ### Evaluate Trained Model
+
+# COMMAND ----------
+
+def evaluate_model(model, data_module, trainer):
+    """Evaluate the trained model on validation set."""
+    
+    if not all([model, data_module, trainer]):
+        print("❌ Cannot evaluate - missing components")
+        return None
+    
+    print("\n🔍 Evaluating trained model...")
+    
+    try:
+        # Run evaluation
+        results = trainer.test(model, data_module)
+        
+        print("✅ Evaluation completed!")
+        print("📊 Test Results:")
+        
+        for metric, value in results[0].items():
+            print(f"   {metric}: {value:.4f}")
+        
+        return results
+        
+    except Exception as e:
+        print(f"❌ Evaluation failed: {e}")
+        return None
+
+# Evaluate model
+if training_success:
+    evaluation_results = evaluate_model(model, data_module, trainer)
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC ### Save and Register Model
+
+# COMMAND ----------
+
+def save_and_register_model(model, trainer, evaluation_results):
+    """Save the trained model and register it in MLflow."""
+    
+    if not model or not trainer:
+        print("❌ Cannot save model - missing components")
+        return False
+    
+    print("\n💾 Saving and registering model...")
+    
+    try:
+        # Get best model checkpoint
+        checkpoint_callback = None
+        for callback in trainer.callbacks:
+            if hasattr(callback, 'best_model_path'):
+                checkpoint_callback = callback
+                break
+        
+        if checkpoint_callback and hasattr(checkpoint_callback, 'best_model_path'):
+            best_model_path = checkpoint_callback.best_model_path
+            print(f"   Best model path: {best_model_path}")
+            
+            # Save model artifacts
+            model_dir = f"{BASE_VOLUME_PATH}/models/detr_final"
+            os.makedirs(model_dir, exist_ok=True)
+            
+            # Save model state dict
+            torch.save(model.state_dict(), f"{model_dir}/model.pth")
+            
+            # Save configuration
+            import yaml
+            with open(f"{model_dir}/config.yaml", 'w') as f:
+                yaml.dump(config, f)
+            
+            # Save evaluation results
+            if evaluation_results:
+                with open(f"{model_dir}/evaluation_results.yaml", 'w') as f:
+                    yaml.dump(evaluation_results[0], f)
+            
+            print(f"✅ Model saved to: {model_dir}")
+            
+            # Register in MLflow
+            try:
+                with mlflow.start_run():
+                    mlflow.log_artifact(model_dir, "model")
+                    mlflow.log_metrics(evaluation_results[0] if evaluation_results else {})
+                    print("✅ Model registered in MLflow")
+                    
+            except Exception as e:
+                print(f"⚠️  MLflow registration failed: {e}")
+            
+            return True
+        else:
+            print("⚠️  No checkpoint callback found")
+            return False
+            
+    except Exception as e:
+        print(f"❌ Model saving failed: {e}")
+        return False
+
+# Save and register model
+if training_success:
+    model_saved = save_and_register_model(model, trainer, evaluation_results)
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC ## 7. Training Summary and Analysis
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC ### Training Summary
+
+# COMMAND ----------
+
+print("=" * 60)
+print("DETR TRAINING SUMMARY")
+print("=" * 60)
+
+print(f"✅ Model Configuration:")
+print(f"   Model: {config['model']['model_name']}")
+print(f"   Task: {config['model']['task_type']}")
+print(f"   Classes: {config['model']['num_classes']}")
+
+print(f"\n✅ Training Configuration:")
+print(f"   Max epochs: {config['training']['max_epochs']}")
+print(f"   Learning rate: {config['training']['learning_rate']}")
+print(f"   Batch size: {config['data']['batch_size']}")
+print(f"   GPUs: {torch.cuda.device_count() if torch.cuda.is_available() else 0}")
+
+print(f"\n✅ Data Configuration:")
+print(f"   Train samples: {len(data_module.train_dataset) if data_module else 'N/A'}")
+print(f"   Val samples: {len(data_module.val_dataset) if data_module else 'N/A'}")
+print(f"   Test samples: {len(data_module.test_dataset) if data_module else 'N/A'}")
+
+print(f"\n✅ Training Results:")
+print(f"   Training success: {'Yes' if training_success else 'No'}")
+print(f"   Evaluation completed: {'Yes' if evaluation_results else 'No'}")
+print(f"   Model saved: {'Yes' if model_saved else 'No'}")
+
+if evaluation_results:
+    print(f"\n📊 Final Metrics:")
+    for metric, value in evaluation_results[0].items():
+        print(f"   {metric}: {value:.4f}")
+
+print(f"\n📁 Output Paths:")
+print(f"   Checkpoints: {config['training']['checkpoint_dir']}")
+print(f"   Results: {config['output']['results_dir']}")
+print(f"   Logs: {BASE_VOLUME_PATH}/logs")
+print(f"   Models: {BASE_VOLUME_PATH}/models")
+
+print("=" * 60)
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC ### Understanding DETR Training
+
+# MAGIC 
+# MAGIC ### Key Training Concepts:
+# MAGIC 
+# MAGIC **1. Bipartite Matching Loss:**
+# MAGIC - DETR uses Hungarian algorithm to match predictions to ground truth
+# MAGIC - Ensures unique predictions without NMS
+# MAGIC - Combines classification and bounding box losses
+# MAGIC 
+# MAGIC **2. Set Prediction:**
+# MAGIC - Treats detection as a set prediction problem
+# MAGIC - All predictions made simultaneously (not autoregressive)
+# MAGIC - Uses learned object queries to "query" the image
+# MAGIC 
+# MAGIC **3. Transformer Training:**
+# MAGIC - Self-attention captures global relationships
+# MAGIC - Cross-attention between queries and image features
+# MAGIC - Position embeddings help with spatial understanding
+# MAGIC 
+# MAGIC **4. Training Strategy:**
+# MAGIC - **Learning Rate**: Start with 1e-4, use cosine annealing
+# MAGIC - **Batch Size**: 16 total (4 per GPU on 4-GPU setup)
+# MAGIC - **Epochs**: 50-300 depending on dataset size
+# MAGIC - **Auxiliary Losses**: Help with convergence
+# MAGIC 
+# MAGIC **5. Monitoring Metrics:**
+# MAGIC - **mAP**: Mean Average Precision (primary metric)
+# MAGIC - **Loss**: Total loss (classification + bbox)
+# MAGIC - **Learning Rate**: Current learning rate
+# MAGIC - **GPU Memory**: Memory usage per GPU
+# MAGIC 
+# MAGIC **6. Best Practices:**
+# MAGIC - Use gradient clipping to prevent exploding gradients
+# MAGIC - Monitor loss curves for convergence
+# MAGIC - Use early stopping to prevent overfitting
+# MAGIC - Save best model based on validation mAP
+# MAGIC - Use mixed precision for memory efficiency
+# MAGIC 
+# MAGIC The training process leverages DETR's unique approach to object detection, using transformers and set prediction to achieve state-of-the-art results on COCO! 

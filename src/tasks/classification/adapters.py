@@ -21,8 +21,8 @@ class BaseAdapter(ABC):
         """
         pass
 
-class NoOpAdapter(BaseAdapter):
-    """A "No-Operation" adapter.
+class NoOpInputAdapter(BaseAdapter):
+    """A "No-Operation" input adapter.
     - Converts image to a tensor
     - Keeps targets in standard format
     - Suitable for models like torchvision's ResNet
@@ -30,8 +30,8 @@ class NoOpAdapter(BaseAdapter):
     def __call__(self, image: Image.Image, target: Dict) -> Tuple[torch.Tensor, Dict]:
         return F.to_tensor(image), target
 
-class ViTAdapter(BaseAdapter):
-    """Adapter for ViT-like models (ViT, DeiT, etc.).
+class ViTInputAdapter(BaseAdapter):
+    """Input adapter for ViT-like models (ViT, DeiT, etc.).
     - Converts image to a tensor
     - Handles image resizing and preprocessing
     - Uses Hugging Face's AutoImageProcessor
@@ -60,8 +60,8 @@ class ViTAdapter(BaseAdapter):
         
         return processed.pixel_values.squeeze(0), target
 
-class ConvNeXTAdapter(BaseAdapter):
-    """Adapter for ConvNeXT models.
+class ConvNeXTInputAdapter(BaseAdapter):
+    """Input adapter for ConvNeXT models.
     - Similar to ViT but optimized for ConvNeXT architecture
     - Handles image resizing and preprocessing
     """
@@ -89,8 +89,8 @@ class ConvNeXTAdapter(BaseAdapter):
         
         return processed.pixel_values.squeeze(0), target
 
-class SwinAdapter(BaseAdapter):
-    """Adapter for Swin Transformer models.
+class SwinInputAdapter(BaseAdapter):
+    """Input adapter for Swin Transformer models.
     - Handles image resizing and preprocessing for Swin architecture
     - Uses specific preprocessing for hierarchical vision transformers
     """
@@ -465,18 +465,18 @@ class ResNetOutputAdapter(OutputAdapter):
             })
         return target_list
 
-def get_adapter(model_name: str, image_size: int = 224) -> BaseAdapter:
-    """Get the appropriate adapter for a model."""
+def get_input_adapter(model_name: str, image_size: int = 224) -> BaseAdapter:
+    """Get the appropriate input adapter for a model."""
     model_name_lower = model_name.lower()
     
     if "vit" in model_name_lower:
-        return ViTAdapter(model_name=model_name, image_size=image_size)
+        return ViTInputAdapter(model_name=model_name, image_size=image_size)
     elif "convnext" in model_name_lower:
-        return ConvNeXTAdapter(model_name=model_name, image_size=image_size)
+        return ConvNeXTInputAdapter(model_name=model_name, image_size=image_size)
     elif "swin" in model_name_lower:
-        return SwinAdapter(model_name=model_name, image_size=image_size)
+        return SwinInputAdapter(model_name=model_name, image_size=image_size)
     else:
-        return NoOpAdapter()
+        return NoOpInputAdapter()
 
 def get_output_adapter(model_name: str) -> OutputAdapter:
     """Get the appropriate output adapter for a model."""
@@ -492,4 +492,9 @@ def get_output_adapter(model_name: str) -> OutputAdapter:
         return ResNetOutputAdapter()
     else:
         # Default to ViT adapter for unknown models
-        return ViTOutputAdapter() 
+        return ViTOutputAdapter()
+
+# Keep the old function for backward compatibility
+def get_adapter(model_name: str, image_size: int = 224) -> BaseAdapter:
+    """Get the appropriate adapter for a model."""
+    return get_input_adapter(model_name, image_size) 

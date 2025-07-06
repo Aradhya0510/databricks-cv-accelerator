@@ -3,12 +3,12 @@ from dataclasses import dataclass
 
 import torch
 from torch.utils.data import Dataset, DataLoader
-import pytorch_lightning as pl
+import lightning as pl
 from PIL import Image
 import numpy as np
 from pathlib import Path
 from transformers import AutoFeatureExtractor
-from .adapters import get_adapter
+from .adapters import get_input_adapter
 
 @dataclass
 class ClassificationDataConfig:
@@ -83,6 +83,7 @@ class ClassificationDataModule(pl.LightningDataModule):
         if isinstance(config, dict):
             config = ClassificationDataConfig(**config)
         self.config = config
+        self.save_hyperparameters(config.__dict__)
         self.adapter = None  # Will be set after initialization
     
     def setup(self, stage: Optional[str] = None):

@@ -1,6 +1,6 @@
 # Model Configuration
 model:
-  model_name: "hustvl/yolos-base"
+  model_name: "facebook/detr-resnet-50"
   task_type: "detection"
   num_classes: 80  # COCO dataset has 80 classes
   pretrained: true
@@ -9,7 +9,7 @@ model:
   confidence_threshold: 0.7
   iou_threshold: 0.5
   max_detections: 100
-  image_size: 800  # YOLOS default image size
+  image_size: 800  # DETR's default image size
   
   # Training hyperparameters
   learning_rate: 1e-4
@@ -33,7 +33,7 @@ data:
   # Data loading parameters
   batch_size: 16
   num_workers: 4
-  model_name: "hustvl/yolos-base"  # For adapter initialization
+  model_name: "facebook/detr-resnet-50"  # For adapter initialization
   
   # Image processing
   image_size: [800, 800]
@@ -84,11 +84,11 @@ training:
 # MLflow Configuration
 mlflow:
   experiment_name: "detection_training"
-  run_name: "yolos_base"
+  run_name: "detr_resnet50"
   log_model: true
   tags:
     framework: "lightning"
-    model: "yolos"
+    model: "detr"
     dataset: "coco"
 
 # Output Configuration

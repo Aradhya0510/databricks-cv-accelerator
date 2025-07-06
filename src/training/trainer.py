@@ -1,8 +1,8 @@
 import os
 import yaml
 import torch
-import pytorch_lightning as pl
-from pytorch_lightning.callbacks import ModelCheckpoint, EarlyStopping
+import lightning as pl
+from lightning.callbacks import ModelCheckpoint, EarlyStopping
 import mlflow
 import ray
 from ray import train
@@ -171,7 +171,7 @@ class UnifiedTrainer:
                 max_epochs=self.config.max_epochs,
                 accelerator="gpu" if self.config.use_gpu else "cpu",
                 devices=self.config.num_workers if self.config.use_gpu else 1,
-                strategy="ddp_notebook" if self.config.use_gpu and self.config.num_workers > 1 else None,
+                strategy="ddp_notebook" if self.config.use_gpu and self.config.num_workers > 1 else "auto",
                 callbacks=callbacks,
                 log_every_n_steps=self.config.log_every_n_steps,
                 enable_progress_bar=True,
@@ -182,7 +182,8 @@ class UnifiedTrainer:
                 limit_val_batches=None,  # Validate on all batches
                 limit_test_batches=None,  # Test on all batches
                 deterministic=False,  # Allow non-deterministic behavior for better performance
-                benchmark=True  # Enable cuDNN benchmarking for better performance
+                benchmark=True,  # Enable cuDNN benchmarking for better performance
+                sync_batchnorm=True if self.config.use_gpu and self.config.num_workers > 1 else False
             )
     
     def train(self):

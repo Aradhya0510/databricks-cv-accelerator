@@ -26,8 +26,8 @@ class BaseAdapter(ABC):
         """
         pass
 
-class NoOpAdapter(BaseAdapter):
-    """A "No-Operation" adapter.
+class NoOpInputAdapter(BaseAdapter):
+    """A "No-Operation" input adapter.
     - Converts image to a tensor
     - Keeps targets in the standard [x1, y1, x2, y2] absolute pixel format
     - Suitable for models like torchvision's Faster R-CNN
@@ -36,8 +36,8 @@ class NoOpAdapter(BaseAdapter):
         target["class_labels"] = target["labels"]  # Rename for consistency
         return F.to_tensor(image), target
 
-class DETRAdapter(BaseAdapter):
-    """Adapter for DETR-like models (DETR, YOLOS, etc.).
+class DETRInputAdapter(BaseAdapter):
+    """Input adapter for DETR-like models (DETR, YOLOS, etc.).
     - Converts image to a tensor
     - Converts bounding boxes from [x1, y1, x2, y2] absolute pixels to
       [cx, cy, w, h] normalized format
@@ -98,8 +98,8 @@ class DETRAdapter(BaseAdapter):
         b = [(x1 + x2) / 2, (y1 + y2) / 2, (x2 - x1), (y2 - y1)]
         return torch.stack(b, dim=-1)
 
-class YOLOSAdapter(BaseAdapter):
-    """Adapter for YOLOS models.
+class YOLOSInputAdapter(BaseAdapter):
+    """Input adapter for YOLOS models.
     - Similar to DETR but optimized for YOLOS architecture
     - Converts image to a tensor
     - Converts bounding boxes from [x1, y1, x2, y2] absolute pixels to
@@ -386,16 +386,16 @@ class YOLOSOutputAdapter:
         
         return formatted_targets
 
-def get_adapter(model_name: str, image_size: int = 800) -> BaseAdapter:
-    """Get the appropriate adapter for a model."""
+def get_input_adapter(model_name: str, image_size: int = 800) -> BaseAdapter:
+    """Get the appropriate input adapter for a model."""
     model_name_lower = model_name.lower()
     
     if "yolos" in model_name_lower:
-        return YOLOSAdapter(model_name=model_name, image_size=image_size)
+        return YOLOSInputAdapter(model_name=model_name, image_size=image_size)
     elif "detr" in model_name_lower:
-        return DETRAdapter(model_name=model_name, image_size=image_size)
+        return DETRInputAdapter(model_name=model_name, image_size=image_size)
     else:
-        return NoOpAdapter()
+        return NoOpInputAdapter()
 
 def get_output_adapter(model_name: str, image_size: int = 800):
     """Get the appropriate output adapter for a model."""
@@ -407,4 +407,9 @@ def get_output_adapter(model_name: str, image_size: int = 800):
         return DETROutputAdapter(model_name=model_name, image_size=image_size)
     else:
         # For other models, use DETR adapter as fallback
-        return DETROutputAdapter(model_name=model_name, image_size=image_size) 
+        return DETROutputAdapter(model_name=model_name, image_size=image_size)
+
+# Keep the old function for backward compatibility
+def get_adapter(model_name: str, image_size: int = 800) -> BaseAdapter:
+    """Get the appropriate adapter for a model."""
+    return get_input_adapter(model_name, image_size) 

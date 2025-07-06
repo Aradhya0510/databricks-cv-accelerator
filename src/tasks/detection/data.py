@@ -5,11 +5,12 @@ from pathlib import Path
 
 import torch
 from torch.utils.data import DataLoader
-import pytorch_lightning as pl
+import lightning as pl
 from pycocotools.coco import COCO
 import cv2
 import numpy as np
 from PIL import Image
+from .adapters import get_input_adapter
 
 @dataclass
 class DetectionDataConfig:
@@ -154,7 +155,8 @@ class DetectionDataModule(pl.LightningDataModule):
             shuffle=True,
             num_workers=self.config.num_workers,
             collate_fn=self._collate_fn,
-            pin_memory=True
+            pin_memory=True,
+            persistent_workers=True if self.config.num_workers > 0 else False
         )
     
     def val_dataloader(self) -> DataLoader:
@@ -164,7 +166,8 @@ class DetectionDataModule(pl.LightningDataModule):
             shuffle=False,
             num_workers=self.config.num_workers,
             collate_fn=self._collate_fn,
-            pin_memory=True
+            pin_memory=True,
+            persistent_workers=True if self.config.num_workers > 0 else False
         )
     
     def test_dataloader(self) -> DataLoader:
@@ -174,7 +177,8 @@ class DetectionDataModule(pl.LightningDataModule):
             shuffle=False,
             num_workers=self.config.num_workers,
             collate_fn=self._collate_fn,
-            pin_memory=True
+            pin_memory=True,
+            persistent_workers=True if self.config.num_workers > 0 else False
         )
     
     @staticmethod

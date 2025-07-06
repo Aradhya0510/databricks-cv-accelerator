@@ -1,15 +1,14 @@
 # Model Configuration
 model:
-  model_name: "hustvl/yolos-base"
-  task_type: "detection"
-  num_classes: 80  # COCO dataset has 80 classes
+  model_name: "facebook/mask2former-swin-base-coco-panoptic"
+  task_type: "panoptic_segmentation"
+  num_classes: 133  # COCO panoptic has 133 classes (80 things + 53 stuff)
   pretrained: true
   
-  # Detection-specific settings
-  confidence_threshold: 0.7
-  iou_threshold: 0.5
-  max_detections: 100
-  image_size: 800  # YOLOS default image size
+  # Segmentation-specific settings
+  segmentation_type: "panoptic"
+  aux_loss_weight: 0.4
+  mask_threshold: 0.5
   
   # Training hyperparameters
   learning_rate: 1e-4
@@ -18,22 +17,22 @@ model:
   scheduler_params:
     T_max: 300
     eta_min: 1e-6
-  epochs: 50
+  epochs: 300
 
 # Data Configuration
 data:
   # Dataset paths
   train_data_path: "/Volumes/<catalog>/<schema>/<volume>/<path>/data/train2017/"
-  train_annotation_file: "/Volumes/<catalog>/<schema>/<volume>/<path>/data/instances_train2017.json"
+  train_annotation_file: "/Volumes/<catalog>/<schema>/<volume>/<path>/data/panoptic_train2017.json"
   val_data_path: "/Volumes/<catalog>/<schema>/<volume>/<path>/data/val2017/"
-  val_annotation_file: "/Volumes/<catalog>/<schema>/<volume>/<path>/data/instances_val2017.json"
+  val_annotation_file: "/Volumes/<catalog>/<schema>/<volume>/<path>/data/panoptic_val2017.json"
   test_data_path: "/Volumes/<catalog>/<schema>/<volume>/<path>/data/test2017/"
-  test_annotation_file: "/Volumes/<catalog>/<schema>/<volume>/<path>/data/instances_test2017.json"
+  test_annotation_file: "/Volumes/<catalog>/<schema>/<volume>/<path>/data/panoptic_test2017.json"
   
   # Data loading parameters
-  batch_size: 16
+  batch_size: 8
   num_workers: 4
-  model_name: "hustvl/yolos-base"  # For adapter initialization
+  model_name: "facebook/mask2former-swin-base-coco-panoptic"  # For adapter initialization
   
   # Image processing
   image_size: [800, 800]
@@ -46,13 +45,18 @@ data:
     horizontal_flip: true
     vertical_flip: false
     rotation: 10
-    brightness_contrast: 0.2
-    hue_saturation: 0.1
+    color_jitter:
+      brightness: 0.2
+      contrast: 0.2
+      saturation: 0.2
+      hue: 0.1
+    random_crop: true
+    random_resize: [0.8, 1.2]
 
 # Training Configuration
 training:
   # Basic training parameters
-  max_epochs: 50
+  max_epochs: 300
   
   # Learning rate and optimization
   learning_rate: 1e-4
@@ -63,12 +67,12 @@ training:
     eta_min: 1e-6
   
   # Early stopping
-  early_stopping_patience: 20
-  monitor_metric: "val_map"
+  early_stopping_patience: 30
+  monitor_metric: "val_pq"
   monitor_mode: "max"
   
   # Checkpointing
-  checkpoint_dir: "/Volumes/<catalog>/<schema>/<volume>/<path>/checkpoints/detection"
+  checkpoint_dir: "/Volumes/<catalog>/<schema>/<volume>/<path>/checkpoints/panoptic_segmentation"
   save_top_k: 3
   
   # Logging
@@ -83,19 +87,18 @@ training:
 
 # MLflow Configuration
 mlflow:
-  experiment_name: "detection_training"
-  run_name: "yolos_base"
+  experiment_name: "panoptic_segmentation_training"
+  run_name: "mask2former_swin_base_panoptic"
   log_model: true
   tags:
     framework: "lightning"
-    model: "yolos"
-    dataset: "coco"
+    model: "mask2former"
+    dataset: "coco_panoptic"
 
 # Output Configuration
 output:
-  results_dir: "/Volumes/<catalog>/<schema>/<volume>/<path>/results/detection"
+  results_dir: "/Volumes/<catalog>/<schema>/<volume>/<path>/results/panoptic_segmentation"
   save_predictions: true
   visualization:
     save_images: true
-    confidence_threshold: 0.5
-    max_boxes: 20 
+    max_images: 10 

@@ -4,7 +4,7 @@ from dataclasses import dataclass
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-import pytorch_lightning as pl
+import lightning as pl
 from torchmetrics.classification import Dice, JaccardIndex, Accuracy, Precision, Recall
 from torchmetrics.detection import MeanAveragePrecision
 from transformers import (
@@ -12,7 +12,7 @@ from transformers import (
     AutoConfig,
     PreTrainedModel
 )
-from .adapters import get_instance_adapter, InstanceSegmentationOutputAdapter
+from .adapters import get_input_adapter, get_output_adapter
 
 @dataclass
 class InstanceSegmentationModelConfig:
@@ -45,7 +45,7 @@ class InstanceSegmentationModel(pl.LightningModule):
         self._init_metrics()
         
         # Initialize output adapter
-        self.output_adapter = InstanceSegmentationOutputAdapter()
+        self.output_adapter = get_output_adapter(config.model_name)
     
     def _init_model(self) -> None:
         """Initialize the model architecture."""
