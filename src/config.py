@@ -49,8 +49,8 @@ class DataConfig:
     """Data configuration."""
     # Dataset paths
     train_data_path: str
-    train_annotation_file: Optional[str] = None
     val_data_path: str
+    train_annotation_file: Optional[str] = None
     val_annotation_file: Optional[str] = None
     test_data_path: Optional[str] = None
     test_annotation_file: Optional[str] = None

@@ -88,107 +88,90 @@ model:
 
 ---
 
-## 🚦 Getting Started
+## 🚀 Getting Started
 
 ### Prerequisites
 
-* Databricks workspace with Unity Catalog enabled
-* Python 3.8+ or higher
-* Access to GPU resources for training performance
+Before you begin, ensure you have:
+- Access to a Databricks workspace with Unity Catalog enabled
+- A COCO format dataset uploaded to your Unity Catalog volume
+- Appropriate compute resources (GPU recommended for training)
 
-### Installation
+### Step 1: Repository Setup
+
+Clone this repository in your Databricks workspace:
 
 ```bash
 git clone https://github.com/Aradhya0510/databricks-cv-architecture.git
 cd databricks-cv-architecture
-pip install -r requirements.txt
 ```
 
-### Data Setup
+### Step 2: Unity Catalog Volume Structure
 
-Prepare your COCO dataset:
-
-```
-/path/to/dataset/
-├── images/
-├── annotations.json
-```
-
-Upload to Unity Catalog volume:
+Organize your Unity Catalog volume with the following structure:
 
 ```
 /Volumes/your_catalog/your_schema/your_volume/
 ├── data/
+│   ├── train/
+│   │   ├── images/
+│   │   └── annotations.json
+│   ├── val/
+│   │   ├── images/
+│   │   └── annotations.json
+│   └── test/
+│       ├── images/
+│       └── annotations.json
 ├── configs/
 ├── checkpoints/
 ├── logs/
 └── results/
 ```
 
-**📖 For detailed information on configuring train/validation/test splits, see [Data Configuration Guide](docs/DATA_CONFIGURATION.md)**
+### Step 3: Configuration Management
 
-### Configuration Example
+1. **Create a configs folder** in your Unity Catalog volume for your project/experiment
+2. **Select the appropriate config file** from the `configs/` directory in the cloned repository based on your task (detection, classification, segmentation) and model choice
+3. **Customize the configuration** by updating:
+   - Data paths to point to your Unity Catalog volume
+   - Model parameters (batch size, learning rate, epochs)
+   - Training settings (checkpoint directory, monitoring metrics)
+   - Compute-specific parameters (GPU settings, distributed training options)
 
+Example configuration:
 ```yaml
 model:
   model_name: "facebook/detr-resnet-50"
-  ...
+  task_type: "detection"
+  num_classes: 80
+
 data:
-  # New format with separate train/val/test paths (recommended)
-  train_data_path: ".../train/images"
-  train_annotation_file: ".../train/annotations.json"
-  val_data_path: ".../val/images"
-  val_annotation_file: ".../val/annotations.json"
-  test_data_path: ".../test/images"
-  test_annotation_file: ".../test/annotations.json"
+  train_data_path: "/Volumes/your_catalog/your_schema/your_volume/data/train/images"
+  train_annotation_file: "/Volumes/your_catalog/your_schema/your_volume/data/train/annotations.json"
+  val_data_path: "/Volumes/your_catalog/your_schema/your_volume/data/val/images"
+  val_annotation_file: "/Volumes/your_catalog/your_schema/your_volume/data/val/annotations.json"
+  batch_size: 16
+  num_workers: 4
+
 training:
   max_epochs: 300
-  early_stopping_patience: 20
-  monitor_metric: "val_map"
-  monitor_mode: "max"
-  checkpoint_dir: "..."
-  save_top_k: 3
-  distributed: true
-  use_gpu: true
+  learning_rate: 1e-4
+  checkpoint_dir: "/Volumes/your_catalog/your_schema/your_volume/checkpoints"
 ```
 
-### Training Examples
+### Step 4: Notebook Workflow
 
-**Object Detection:**
-```python
-from src.tasks.detection.model import DetectionModel
-from src.tasks.detection.data import DetectionDataModule
-from src.training.trainer import UnifiedTrainer
-...
-trainer.train()
-```
+Follow the provided reference notebooks in sequence. For object detection, start by copying and customizing `detection_detr_config.yaml` to your Unity Catalog configs folder.
 
-**Semantic Segmentation:**
-```python
-from src.tasks.semantic_segmentation.model import SemanticSegmentationModel
-from src.tasks.semantic_segmentation.data import SemanticSegmentationDataModule
-from src.training.trainer import UnifiedTrainer
-...
-trainer.train()
-```
+**Recommended Notebook Sequence:**
+1. **`00_setup_and_config.py`** - Environment validation and configuration setup
+2. **`01_data_preparation.py`** - Dataset analysis and preprocessing validation
+3. **`02_model_training.py`** - Model training with MLflow tracking
+4. **`03_hparam_tuning.py`** - Hyperparameter optimization (optional)
+5. **`04_model_evaluation.py`** - Comprehensive model evaluation
+6. **`05_model_registration_deployment.py`** - Model deployment and serving setup
 
-**Instance Segmentation:**
-```python
-from src.tasks.instance_segmentation.model import InstanceSegmentationModel
-from src.tasks.instance_segmentation.data import InstanceSegmentationDataModule
-from src.training.trainer import UnifiedTrainer
-...
-trainer.train()
-```
-
-**Panoptic Segmentation:**
-```python
-from src.tasks.panoptic_segmentation.model import PanopticSegmentationModel
-from src.tasks.panoptic_segmentation.data import PanopticSegmentationDataModule
-from src.training.trainer import UnifiedTrainer
-...
-trainer.train()
-```
+**Important:** Ensure your configuration parameters align with your available compute resources, particularly GPU memory, batch size, and training duration.
 
 ---
 
