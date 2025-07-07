@@ -97,8 +97,12 @@ def initialize_detr_model():
     print("🔧 Initializing DETR model...")
     
     try:
+        # Prepare model config with num_workers from data config
+        model_config = config["model"].copy()
+        model_config["num_workers"] = config["data"]["num_workers"]
+        
         # Create detection model
-        model = DetectionModel(config)
+        model = DetectionModel(model_config)
         
         print(f"✅ Model initialized successfully!")
         print(f"   Model name: {config['model']['model_name']}")
@@ -194,8 +198,18 @@ def setup_data_module():
     print("\n📊 Setting up data module...")
     
     try:
-        # Create data module
-        data_module = DetectionDataModule(config)
+        # Setup adapter first
+        from tasks.detection.adapters import get_input_adapter
+        adapter = get_input_adapter(config["model"]["model_name"], image_size=config["data"].get("image_size", 800))
+        if adapter is None:
+            print("❌ Failed to create adapter")
+            return None
+        
+        # Create data module with data config only
+        data_module = DetectionDataModule(config["data"])
+        
+        # Assign adapter to data module
+        data_module.adapter = adapter
         
         # Setup for training
         data_module.setup('fit')

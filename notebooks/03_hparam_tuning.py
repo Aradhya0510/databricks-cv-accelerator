@@ -270,11 +270,28 @@ def train_trial(config_dict):
         trial_config['model']['model_name'] = 'facebook/detr-resnet-50'
     
     try:
-        # Initialize model
-        model = DetectionModel(trial_config)
+        # Prepare model config with num_workers from data config
+        model_config = trial_config["model"].copy()
+        model_config["num_workers"] = trial_config["data"]["num_workers"]
         
-        # Initialize data module
-        data_module = DetectionDataModule(trial_config)
+        # Initialize model
+        model = DetectionModel(model_config)
+        
+        # Setup adapter first
+        from tasks.detection.adapters import get_input_adapter
+        adapter = get_input_adapter(trial_config["model"]["model_name"], image_size=trial_config["data"].get("image_size", 800))
+        if adapter is None:
+            print("❌ Failed to create adapter")
+            tune.report(val_map=0.0, val_loss=float('inf'))
+            return
+        
+        # Initialize data module with data config only
+        data_module = DetectionDataModule(trial_config["data"])
+        
+        # Assign adapter to data module
+        data_module.adapter = adapter
+        
+        # Setup for training
         data_module.setup('fit')
         
         # Initialize trainer

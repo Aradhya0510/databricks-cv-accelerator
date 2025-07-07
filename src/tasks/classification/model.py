@@ -2,8 +2,6 @@ from typing import Dict, Any, Optional, Union, List
 from dataclasses import dataclass
 
 import torch
-import torch.nn as nn
-import torch.nn.functional as F
 import lightning as pl
 from torchmetrics.classification import Accuracy, F1Score, Precision, Recall
 from transformers import AutoModelForImageClassification, AutoConfig, PreTrainedModel

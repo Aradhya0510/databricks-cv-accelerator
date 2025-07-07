@@ -134,7 +134,11 @@ def load_trained_model():
             print(f"✅ Found checkpoint: {best_checkpoint}")
             
             # Load model
-            model = DetectionModel.load_from_checkpoint(best_checkpoint, config=config)
+            # Prepare model config with num_workers from data config
+            model_config = config["model"].copy()
+            model_config["num_workers"] = config["data"]["num_workers"]
+            
+            model = DetectionModel.load_from_checkpoint(best_checkpoint, config=model_config)
             model.eval()
             
             print(f"✅ Model loaded successfully")

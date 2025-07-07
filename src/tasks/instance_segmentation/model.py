@@ -2,10 +2,8 @@ from typing import Dict, Any, Optional, Union, List
 from dataclasses import dataclass
 
 import torch
-import torch.nn as nn
-import torch.nn.functional as F
 import lightning as pl
-from torchmetrics.classification import Dice, JaccardIndex, Accuracy, Precision, Recall
+from torchmetrics.classification import Accuracy, F1Score, Precision, Recall, Dice, JaccardIndex
 from torchmetrics.detection import MeanAveragePrecision
 from transformers import (
     AutoModelForInstanceSegmentation,

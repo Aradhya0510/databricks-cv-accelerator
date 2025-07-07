@@ -261,13 +261,26 @@ val_valid = validate_coco_format(val_data, "Validation") if val_data else False
 # COMMAND ----------
 
 def test_data_loading():
-    """Test data loading and preprocessing with a small sample."""
+    """Test data loading and preprocessing pipeline."""
     
     print("\n🧪 Testing data loading and preprocessing...")
     
     try:
-        # Create data module
-        data_module = DetectionDataModule(config)
+        # Setup adapter first
+        from tasks.detection.adapters import get_input_adapter
+        adapter = get_input_adapter(config["model"]["model_name"], image_size=config["data"].get("image_size", 800))
+        if adapter is None:
+            print("❌ Failed to create adapter")
+            return False
+        
+        # Create data module with data config only
+        data_module = DetectionDataModule(config["data"])
+        
+        # Assign adapter to data module
+        data_module.adapter = adapter
+        
+        # Setup the data module to create datasets
+        data_module.setup()
         
         # Test train dataloader
         train_loader = data_module.train_dataloader()
@@ -484,7 +497,21 @@ def optimize_data_loading():
     
     # Test optimized configuration
     try:
-        data_module = DetectionDataModule(config)
+        # Setup adapter first
+        from tasks.detection.adapters import get_input_adapter
+        adapter = get_input_adapter(config["model"]["model_name"], image_size=config["data"].get("image_size", 800))
+        if adapter is None:
+            print("❌ Failed to create adapter")
+            return False
+        
+        # Create data module with data config only
+        data_module = DetectionDataModule(config["data"])
+        
+        # Assign adapter to data module
+        data_module.adapter = adapter
+        
+        # Setup the data module to create datasets
+        data_module.setup()
         
         # Test train dataloader
         train_loader = data_module.train_dataloader()
@@ -514,12 +541,27 @@ def analyze_memory_usage():
     print("\n💾 Analyzing memory usage...")
     
     try:
-        # Create data module
-        data_module = DetectionDataModule(config)
+        # Setup adapter first
+        from tasks.detection.adapters import get_input_adapter
+        adapter = get_input_adapter(config["model"]["model_name"], image_size=config["data"].get("image_size", 800))
+        if adapter is None:
+            print("❌ Failed to create adapter")
+            return False
+        
+        # Create data module with data config only
+        data_module = DetectionDataModule(config["data"])
+        
+        # Assign adapter to data module
+        data_module.adapter = adapter
+        
+        # Setup the data module to create datasets
+        data_module.setup()
         
         # Test memory usage with a few batches
         train_loader = data_module.train_dataloader()
         
+        # Get GPU count
+        num_gpus = torch.cuda.device_count()
         # Get GPU memory before loading
         if torch.cuda.is_available():
             torch.cuda.empty_cache()

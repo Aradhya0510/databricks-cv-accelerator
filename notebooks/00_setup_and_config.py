@@ -318,12 +318,29 @@ def check_framework_compatibility():
     """Check if all framework components are compatible."""
     
     try:
+        # Prepare model config with num_workers from data config
+        model_config = config["model"].copy()
+        model_config["num_workers"] = config["data"]["num_workers"]
+        
         # Test model creation
-        model = DetectionModel(config)
+        model = DetectionModel(model_config)
         print("✅ DetectionModel created successfully")
         
-        # Test data module creation
-        data_module = DetectionDataModule(config)
+        # Setup adapter first
+        from tasks.detection.adapters import get_input_adapter
+        adapter = get_input_adapter(config["model"]["model_name"], image_size=config["data"].get("image_size", 800))
+        if adapter is None:
+            print("❌ Failed to create adapter")
+            return False
+        
+        # Create data module with data config only
+        data_module = DetectionDataModule(config["data"])
+        
+        # Assign adapter to data module
+        data_module.adapter = adapter
+        
+        # Setup the data module to create datasets
+        data_module.setup()
         print("✅ DetectionDataModule created successfully")
         
         # Test trainer creation

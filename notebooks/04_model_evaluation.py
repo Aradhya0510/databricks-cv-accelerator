@@ -51,6 +51,7 @@ from src.utils.coco_handler import COCOHandler
 from src.tasks.detection.model import DetectionModel
 from src.tasks.detection.data import DetectionDataModule
 from src.tasks.detection.evaluate import DetectionEvaluator
+from src.tasks.detection.adapters import get_input_adapter
 
 # COMMAND ----------
 
@@ -137,13 +138,29 @@ def load_model_and_data():
     if checkpoint_type == "mlflow_production":
         model = best_checkpoint  # Already loaded
     else:
-        model = DetectionModel.load_from_checkpoint(best_checkpoint, config=config)
+        # Prepare model config with num_workers from data config
+        model_config = config["model"].copy()
+        model_config["num_workers"] = config["data"]["num_workers"]
+        
+        model = DetectionModel.load_from_checkpoint(best_checkpoint, config=model_config)
     
     model.eval()
     model.to(device)
     
     # Prepare data module
-    data_module = DetectionDataModule(config)
+    # Setup adapter first
+    adapter = get_input_adapter(config["model"]["model_name"], image_size=config["data"].get("image_size", 800))
+    if adapter is None:
+        print("❌ Failed to create adapter")
+        return None, None
+    
+    # Create data module with data config only
+    data_module = DetectionDataModule(config["data"])
+    
+    # Assign adapter to data module
+    data_module.adapter = adapter
+    
+    # Setup for testing
     data_module.setup(stage='test')
     
     print(f"✅ Model loaded successfully")
