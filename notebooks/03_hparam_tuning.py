@@ -34,6 +34,12 @@
 
 # COMMAND ----------
 
+# (Databricks only) Install requirements and restart Python if running interactively
+# %pip install -r "../requirements.txt"
+# dbutils.library.restartPython()
+
+# COMMAND ----------
+
 # MAGIC %md
 # MAGIC ## 1. Import Dependencies and Setup
 

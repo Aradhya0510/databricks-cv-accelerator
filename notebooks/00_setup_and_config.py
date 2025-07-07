@@ -41,8 +41,9 @@
 
 # COMMAND ----------
 
-# MAGIC %pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu118
-# MAGIC %pip install lightning transformers albumentations pycocotools mlflow ray[tune] timm
+# (Databricks only) Install requirements and restart Python if running interactively
+# %pip install -r "../requirements.txt"
+# dbutils.library.restartPython()
 
 # COMMAND ----------
 

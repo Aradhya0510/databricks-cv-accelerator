@@ -169,9 +169,9 @@ class UnifiedTrainer:
             # Local training with PyTorch Lightning
             self.trainer = pl.Trainer(
                 max_epochs=self.config.max_epochs,
-                accelerator="gpu" if self.config.use_gpu else "cpu",
-                devices=self.config.num_workers if self.config.use_gpu else 1,
-                strategy="ddp_notebook" if self.config.use_gpu and self.config.num_workers > 1 else "auto",
+                accelerator="auto",
+                devices="auto",
+                strategy="auto",
                 callbacks=callbacks,
                 log_every_n_steps=self.config.log_every_n_steps,
                 enable_progress_bar=True,
