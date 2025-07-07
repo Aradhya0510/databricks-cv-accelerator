@@ -173,6 +173,21 @@ Follow the provided reference notebooks in sequence. For object detection, start
 
 **Important:** Ensure your configuration parameters align with your available compute resources, particularly GPU memory, batch size, and training duration.
 
+### Step 5: MLflow Integration
+
+**Critical for Databricks Managed MLflow:** The framework uses MLflow autolog for PyTorch Lightning to ensure proper integration with Databricks managed MLflow. This is automatically enabled in the training notebooks, but if you're creating custom training scripts, make sure to add:
+
+```python
+import mlflow
+mlflow.pytorch.autolog()
+```
+
+This enables automatic logging of:
+- Training and validation metrics
+- Model parameters and hyperparameters
+- Model artifacts and checkpoints
+- Model signatures for deployment
+
 ---
 
 ## 📊 Current Features

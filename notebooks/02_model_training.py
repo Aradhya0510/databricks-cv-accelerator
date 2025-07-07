@@ -51,6 +51,9 @@ import numpy as np
 import matplotlib.pyplot as plt
 from pathlib import Path
 
+# Enable MLflow autolog for PyTorch Lightning
+mlflow.pytorch.autolog()
+
 # Add the src directory to Python path
 sys.path.append('/Workspace/Repos/your-repo/Databricks_CV_ref/src')
 
@@ -398,6 +401,9 @@ def setup_monitoring():
     # Set experiment name dynamically based on user and task
     experiment_name = f"/Users/{dbutils.notebook.entry_point.getDbutils().notebook().getContext().userName().get()}/{task}_pipeline"
     
+    # Set MLflow experiment
+    mlflow.set_experiment(experiment_name)
+    
     # Initialize Lightning logger for MLflow
     logger = create_databricks_logger(
         experiment_name=experiment_name,
@@ -407,6 +413,7 @@ def setup_monitoring():
     print(f"✅ Logging setup complete!")
     print(f"   Experiment: {experiment_name}")
     print(f"   Run name: {config['mlflow']['run_name']}")
+    print(f"   MLflow autolog enabled: ✅")
     
     # Log configuration using print (since this is a Lightning logger, not a general logger)
     print("Starting DETR training")
@@ -453,17 +460,35 @@ def start_training(model, data_module, trainer, logger):
         trainer.data_module = data_module
         trainer.logger = logger
         
-        # Start training using the correct method
-        result = trainer.train()
-        
-        print("✅ Training completed successfully!")
-        
-        # Final memory cleanup
-        if torch.cuda.is_available():
-            torch.cuda.empty_cache()
-            final_allocated = torch.cuda.memory_allocated() / 1e9
-            final_reserved = torch.cuda.memory_reserved() / 1e9
-            print(f"🧹 Final GPU memory - Allocated: {final_allocated:.2f} GB, Reserved: {final_reserved:.2f} GB")
+        # Start MLflow run for training
+        with mlflow.start_run(run_name=config['mlflow']['run_name']):
+            # Log training configuration
+            mlflow.log_params({
+                'model_name': config['model']['model_name'],
+                'task_type': config['model']['task_type'],
+                'num_classes': config['model']['num_classes'],
+                'max_epochs': config['training']['max_epochs'],
+                'learning_rate': config['training']['learning_rate'],
+                'weight_decay': config['training']['weight_decay'],
+                'batch_size': config['data']['batch_size'],
+                'num_workers': config['data']['num_workers']
+            })
+            
+            # Start training using the correct method
+            result = trainer.train()
+            
+            print("✅ Training completed successfully!")
+            
+            # Log final metrics
+            if hasattr(result, 'metrics'):
+                mlflow.log_metrics(result.metrics)
+            
+            # Final memory cleanup
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
+                final_allocated = torch.cuda.memory_allocated() / 1e9
+                final_reserved = torch.cuda.memory_reserved() / 1e9
+                print(f"🧹 Final GPU memory - Allocated: {final_allocated:.2f} GB, Reserved: {final_reserved:.2f} GB")
         
         return True
         
