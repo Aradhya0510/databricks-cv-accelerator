@@ -34,6 +34,7 @@ class InstanceSegmentationDataConfig:
     brightness_contrast: float = 0.2
     hue_saturation: float = 0.2
     model_name: Optional[str] = None
+    augmentations: Optional[Dict[str, Any]] = None
 
 class COCOInstanceSegmentationDataset(torch.utils.data.Dataset):
     def __init__(
@@ -167,7 +168,8 @@ class InstanceSegmentationDataModule(pl.LightningDataModule):
             shuffle=True,
             num_workers=self.config.num_workers,
             pin_memory=True,
-            collate_fn=self._collate_fn
+            collate_fn=self._collate_fn,
+            persistent_workers=True if self.config.num_workers > 0 else False
         )
     
     def val_dataloader(self) -> DataLoader:
@@ -177,7 +179,8 @@ class InstanceSegmentationDataModule(pl.LightningDataModule):
             shuffle=False,
             num_workers=self.config.num_workers,
             pin_memory=True,
-            collate_fn=self._collate_fn
+            collate_fn=self._collate_fn,
+            persistent_workers=True if self.config.num_workers > 0 else False
         )
     
     def test_dataloader(self) -> DataLoader:
@@ -187,7 +190,8 @@ class InstanceSegmentationDataModule(pl.LightningDataModule):
             shuffle=False,
             num_workers=self.config.num_workers,
             pin_memory=True,
-            collate_fn=self._collate_fn
+            collate_fn=self._collate_fn,
+            persistent_workers=True if self.config.num_workers > 0 else False
         )
     
     def _collate_fn(self, batch):
@@ -201,6 +205,9 @@ class InstanceSegmentationDataModule(pl.LightningDataModule):
             "class_labels": [item["labels"]["class_labels"] for item in batch],
             "image_id": torch.stack([item["labels"]["image_id"] for item in batch])
         }
+        
+        # Memory management: Clear individual items from memory
+        del batch
         
         return {
             "pixel_values": pixel_values,

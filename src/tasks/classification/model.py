@@ -161,7 +161,23 @@ class ClassificationModel(pl.LightningModule):
         for k, v in outputs["loss_dict"].items():
             self.log(f"train_{k}", v, on_step=True, on_epoch=True)
         
+        # Memory management: Clear intermediate tensors
+        if hasattr(outputs, 'logits'):
+            del outputs['logits']
+        
         return outputs["loss"]
+    
+    def on_train_batch_end(self, outputs, batch, batch_idx: int) -> None:
+        """Called at the end of training batch for memory cleanup."""
+        # Clear batch from GPU memory
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+    
+    def on_validation_batch_end(self, outputs, batch, batch_idx: int) -> None:
+        """Called at the end of validation batch for memory cleanup."""
+        # Clear batch from GPU memory
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
     
     def on_train_epoch_end(self) -> None:
         """Calculate and log metrics at the end of training epoch."""
@@ -169,6 +185,12 @@ class ClassificationModel(pl.LightningModule):
         self.log("train_f1", self.train_f1.compute())
         self.log("train_precision", self.train_precision.compute())
         self.log("train_recall", self.train_recall.compute())
+        
+        # Reset metrics
+        self.train_accuracy.reset()
+        self.train_f1.reset()
+        self.train_precision.reset()
+        self.train_recall.reset()
     
     def validation_step(self, batch: Dict[str, torch.Tensor], batch_idx: int) -> None:
         """Validation step.
@@ -195,6 +217,10 @@ class ClassificationModel(pl.LightningModule):
         
         # Log metrics
         self.log("val_loss", outputs["loss"], on_step=True, on_epoch=True, prog_bar=True)
+        
+        # Memory management: Clear intermediate tensors
+        if hasattr(outputs, 'logits'):
+            del outputs['logits']
     
     def on_validation_epoch_end(self) -> None:
         """Calculate and log metrics at the end of validation epoch."""
@@ -202,6 +228,12 @@ class ClassificationModel(pl.LightningModule):
         self.log("val_f1", self.val_f1.compute())
         self.log("val_precision", self.val_precision.compute())
         self.log("val_recall", self.val_recall.compute())
+        
+        # Reset metrics
+        self.val_accuracy.reset()
+        self.val_f1.reset()
+        self.val_precision.reset()
+        self.val_recall.reset()
     
     def test_step(self, batch: Dict[str, torch.Tensor], batch_idx: int) -> None:
         """Test step.
@@ -228,8 +260,10 @@ class ClassificationModel(pl.LightningModule):
         
         # Log metrics
         self.log("test_loss", outputs["loss"], on_step=True, on_epoch=True, prog_bar=True)
-        for k, v in outputs["loss_dict"].items():
-            self.log(f"test_{k}", v, on_step=True, on_epoch=True)
+        
+        # Memory management: Clear intermediate tensors
+        if hasattr(outputs, 'logits'):
+            del outputs['logits']
     
     def on_test_epoch_end(self) -> None:
         """Calculate and log metrics at the end of test epoch."""
@@ -237,6 +271,12 @@ class ClassificationModel(pl.LightningModule):
         self.log("test_f1", self.test_f1.compute())
         self.log("test_precision", self.test_precision.compute())
         self.log("test_recall", self.test_recall.compute())
+        
+        # Reset metrics
+        self.test_accuracy.reset()
+        self.test_f1.reset()
+        self.test_precision.reset()
+        self.test_recall.reset()
     
     def configure_optimizers(self):
         """Configure optimizers and learning rate schedulers."""

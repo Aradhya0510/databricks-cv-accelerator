@@ -29,6 +29,7 @@ class ClassificationDataConfig:
     brightness_contrast: float = 0.2
     hue_saturation: float = 0.2
     model_name: Optional[str] = None
+    augmentations: Optional[Dict[str, Any]] = None
 
 class ClassificationDataset(Dataset):
     def __init__(
@@ -120,7 +121,8 @@ class ClassificationDataModule(pl.LightningDataModule):
             batch_size=self.config.batch_size,
             num_workers=self.config.num_workers,
             shuffle=True,
-            pin_memory=True
+            pin_memory=True,
+            persistent_workers=True if self.config.num_workers > 0 else False
         )
     
     def val_dataloader(self) -> DataLoader:
@@ -129,7 +131,8 @@ class ClassificationDataModule(pl.LightningDataModule):
             batch_size=self.config.batch_size,
             num_workers=self.config.num_workers,
             shuffle=False,
-            pin_memory=True
+            pin_memory=True,
+            persistent_workers=True if self.config.num_workers > 0 else False
         )
     
     def test_dataloader(self) -> DataLoader:
@@ -138,7 +141,8 @@ class ClassificationDataModule(pl.LightningDataModule):
             batch_size=self.config.batch_size,
             num_workers=self.config.num_workers,
             shuffle=False,
-            pin_memory=True
+            pin_memory=True,
+            persistent_workers=True if self.config.num_workers > 0 else False
         )
     
     @property

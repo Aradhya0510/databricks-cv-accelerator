@@ -46,7 +46,7 @@ project_root = "/Volumes/<catalog>/<schema>/<volume>/<path>"
 sys.path.append(project_root)
 
 # Import project modules
-from src.utils.logging import setup_logger
+from src.utils.logging import create_databricks_logger
 from src.utils.coco_handler import COCOHandler
 from src.tasks.detection.model import DetectionModel
 from src.tasks.detection.data import DetectionDataModule
@@ -60,7 +60,7 @@ volume_path = os.getenv("UNITY_CATALOG_VOLUME", project_root)
 log_dir = f"{volume_path}/logs"
 os.makedirs(log_dir, exist_ok=True)
 
-logger = setup_logger(
+logger = create_databricks_logger(
     name="model_evaluation",
     log_file=f"{log_dir}/evaluation.log"
 )

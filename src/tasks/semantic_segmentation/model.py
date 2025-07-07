@@ -171,23 +171,17 @@ class SemanticSegmentationModel(pl.LightningModule):
         # Log loss
         self.log("train_loss", outputs["loss"], prog_bar=True)
         
+        # Memory management: Clear intermediate tensors
+        if hasattr(outputs, 'logits'):
+            del outputs['logits']
+        
         return outputs["loss"]
     
-    def on_train_epoch_end(self) -> None:
-        """Called at the end of training epoch."""
-        # Log metrics
-        self.log("train_dice", self.train_dice.compute(), prog_bar=True)
-        self.log("train_iou", self.train_iou.compute(), prog_bar=True)
-        self.log("train_accuracy", self.train_accuracy.compute(), prog_bar=True)
-        self.log("train_precision", self.train_precision.compute(), prog_bar=True)
-        self.log("train_recall", self.train_recall.compute(), prog_bar=True)
-        
-        # Reset metrics
-        self.train_dice.reset()
-        self.train_iou.reset()
-        self.train_accuracy.reset()
-        self.train_precision.reset()
-        self.train_recall.reset()
+    def on_train_batch_end(self, outputs, batch, batch_idx: int) -> None:
+        """Called at the end of training batch for memory cleanup."""
+        # Clear batch from GPU memory
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
     
     def validation_step(self, batch: Dict[str, torch.Tensor], batch_idx: int) -> None:
         """Validation step.
@@ -218,6 +212,10 @@ class SemanticSegmentationModel(pl.LightningModule):
         
         # Log loss
         self.log("val_loss", outputs["loss"], prog_bar=True)
+        
+        # Memory management: Clear intermediate tensors
+        if hasattr(outputs, 'logits'):
+            del outputs['logits']
     
     def on_validation_epoch_end(self) -> None:
         """Called at the end of validation epoch."""
@@ -264,6 +262,10 @@ class SemanticSegmentationModel(pl.LightningModule):
         
         # Log loss
         self.log("test_loss", outputs["loss"], prog_bar=True)
+        
+        # Memory management: Clear intermediate tensors
+        if hasattr(outputs, 'logits'):
+            del outputs['logits']
     
     def on_test_epoch_end(self) -> None:
         """Called at the end of test epoch."""
@@ -357,4 +359,26 @@ class SemanticSegmentationModel(pl.LightningModule):
         """Called when loading a checkpoint."""
         # Load model configuration from checkpoint
         if "model_config" in checkpoint:
-            self.config = SemanticSegmentationModelConfig(**checkpoint["model_config"]) 
+            self.config = SemanticSegmentationModelConfig(**checkpoint["model_config"])
+    
+    def on_train_epoch_end(self) -> None:
+        """Called at the end of training epoch."""
+        # Log metrics
+        self.log("train_dice", self.train_dice.compute(), prog_bar=True)
+        self.log("train_iou", self.train_iou.compute(), prog_bar=True)
+        self.log("train_accuracy", self.train_accuracy.compute(), prog_bar=True)
+        self.log("train_precision", self.train_precision.compute(), prog_bar=True)
+        self.log("train_recall", self.train_recall.compute(), prog_bar=True)
+        
+        # Reset metrics
+        self.train_dice.reset()
+        self.train_iou.reset()
+        self.train_accuracy.reset()
+        self.train_precision.reset()
+        self.train_recall.reset()
+    
+    def on_validation_batch_end(self, outputs, batch, batch_idx: int) -> None:
+        """Called at the end of validation batch for memory cleanup."""
+        # Clear batch from GPU memory
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache() 

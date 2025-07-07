@@ -30,6 +30,7 @@ class DetectionDataConfig:
     normalize_mean: Optional[List[float]] = None
     normalize_std: Optional[List[float]] = None
     augment: Optional[Dict[str, Any]] = None
+    augmentations: Optional[Dict[str, Any]] = None
 
 class COCODetectionDataset(torch.utils.data.Dataset):
     """A PyTorch Dataset for COCO-formatted object detection datasets.
@@ -207,6 +208,9 @@ class DetectionDataModule(pl.LightningDataModule):
             'pixel_values': pixel_values,
             'labels': targets
         }
+        
+        # Memory management: Clear individual images from memory
+        del images
         
         return batch_dict
     

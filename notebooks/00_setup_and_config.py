@@ -194,7 +194,7 @@ from config import load_config, get_default_config
 from tasks.detection.model import DetectionModel
 from tasks.detection.data import DetectionDataModule
 from training.trainer import UnifiedTrainer
-from utils.logging import setup_logger
+from utils.logging import create_databricks_logger
 
 print("✅ Framework components imported successfully!")
 
@@ -249,11 +249,11 @@ config = load_and_validate_config()
 # COMMAND ----------
 
 # Set up logging
-logger = setup_logger(
+logger = create_databricks_logger(
     name="detr_training",
     experiment_name=config['mlflow']['experiment_name'],
     run_name=config['mlflow']['run_name'],
-    log_dir=LOGS_DIR
+    log_file=f"{LOGS_DIR}/training.log"
 )
 
 logger.info("DETR Training Setup Complete")

@@ -58,7 +58,7 @@ sys.path.append('/Workspace/Repos/your-repo/Databricks_CV_ref/src')
 from config import load_config
 from tasks.detection.data import DetectionDataModule
 from tasks.detection.adapters import get_input_adapter
-from utils.logging import setup_logger
+from utils.logging import create_databricks_logger
 
 # Load configuration from previous notebook
 # (In a real scenario, you'd load this from the previous notebook's output)
@@ -268,7 +268,7 @@ def test_data_loading():
     try:
         # Setup adapter first
         from tasks.detection.adapters import get_input_adapter
-        adapter = get_input_adapter(config["model"]["model_name"], image_size=config["data"].get("image_size", 800))
+        adapter = get_input_adapter(config["model"]["model_name"], image_size=config["data"].get("image_size", [800,800])[0])
         if adapter is None:
             print("❌ Failed to create adapter")
             return False
@@ -301,7 +301,15 @@ def test_data_loading():
         if 'pixel_values' in sample_batch:
             print(f"   Image tensor shape: {sample_batch['pixel_values'].shape}")
         if 'labels' in sample_batch:
-            print(f"   Labels tensor shape: {sample_batch['labels'].shape}")
+            labels = sample_batch['labels']
+            print(f"   Labels batch type: {type(labels)}, length: {len(labels)}")
+            if len(labels) > 0:
+                print(f"   First label keys: {list(labels[0].keys())}")
+                for k, v in labels[0].items():
+                    if hasattr(v, 'shape'):
+                        print(f"      {k}: {v.shape}")
+                    else:
+                        print(f"      {k}: {type(v)}")
         
         return True
         
@@ -543,7 +551,7 @@ def analyze_memory_usage():
     try:
         # Setup adapter first
         from tasks.detection.adapters import get_input_adapter
-        adapter = get_input_adapter(config["model"]["model_name"], image_size=config["data"].get("image_size", 800))
+        adapter = get_input_adapter(config["model"]["model_name"], image_size=config["data"].get("image_size", [800,800])[0])
         if adapter is None:
             print("❌ Failed to create adapter")
             return False

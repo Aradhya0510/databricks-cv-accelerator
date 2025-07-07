@@ -2,7 +2,8 @@ import os
 import yaml
 import torch
 import lightning as pl
-from lightning.callbacks import ModelCheckpoint, EarlyStopping
+from lightning.pytorch.callbacks import ModelCheckpoint, EarlyStopping
+from lightning.pytorch.loggers import Logger
 import mlflow
 import ray
 from ray import train
@@ -71,7 +72,7 @@ class UnifiedTrainer:
         config: Union[Dict[str, Any], UnifiedTrainerConfig],
         model: Optional[pl.LightningModule] = None,
         data_module: Optional[pl.LightningDataModule] = None,
-        logger: Optional[pl.loggers.Logger] = None
+        logger: Optional[Logger] = None
     ):
         """Initialize the trainer.
         
@@ -133,6 +134,13 @@ class UnifiedTrainer:
             patience=self.config.early_stopping_patience
         )
         callbacks.append(early_stopping)
+        
+        # Enhanced logging callbacks with volume checkpoint support
+        from utils.logging import create_enhanced_logging_callbacks
+        enhanced_callbacks = create_enhanced_logging_callbacks(
+            volume_checkpoint_dir=self.config.checkpoint_dir
+        )
+        callbacks.extend(enhanced_callbacks)
         
         # Ray train report callback (only for distributed training)
         if self.config.distributed:
@@ -322,6 +330,32 @@ class UnifiedTrainer:
         )
         
         return best_trial.config
+    
+    def test(self, model=None, data_module=None):
+        """Test the model using the underlying PyTorch Lightning trainer.
+        
+        Args:
+            model: Optional model to test (uses self.model if not provided)
+            data_module: Optional data module to test with (uses self.data_module if not provided)
+            
+        Returns:
+            List of test results
+        """
+        if model is not None:
+            self.model = model
+        if data_module is not None:
+            self.data_module = data_module
+            
+        if self.model is None or self.data_module is None:
+            raise ValueError("Model and data module must be provided before testing")
+        
+        # Initialize trainer if not already done
+        if self.trainer is None:
+            self._init_trainer()
+        
+        # Run test
+        results = self.trainer.test(self.model, datamodule=self.data_module)
+        return results
     
     def get_metrics(self):
         """Get training metrics from MLflow."""

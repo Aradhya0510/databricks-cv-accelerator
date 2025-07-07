@@ -138,9 +138,49 @@ class OutputConfig:
     })
 
 def load_config(config_path: str) -> Dict[str, Any]:
-    """Load configuration from YAML file."""
+    """Load configuration from YAML file with proper type conversion."""
     with open(config_path, 'r') as f:
         config = yaml.safe_load(f)
+    
+    # Convert types at the source
+    if 'model' in config:
+        # Integer fields
+        for key in ['epochs', 'num_classes', 'max_detections']:
+            if key in config['model']:
+                config['model'][key] = int(config['model'][key])
+        
+        # Float fields
+        for key in ['learning_rate', 'weight_decay', 'confidence_threshold', 'iou_threshold']:
+            if key in config['model']:
+                config['model'][key] = float(config['model'][key])
+        
+        # Boolean fields
+        for key in ['pretrained']:
+            if key in config['model']:
+                config['model'][key] = bool(config['model'][key])
+    
+    if 'data' in config:
+        # Integer fields
+        for key in ['batch_size', 'num_workers']:
+            if key in config['data']:
+                config['data'][key] = int(config['data'][key])
+    
+    if 'training' in config:
+        # Integer fields
+        for key in ['max_epochs', 'early_stopping_patience', 'save_top_k', 'log_every_n_steps']:
+            if key in config['training']:
+                config['training'][key] = int(config['training'][key])
+        
+        # Float fields
+        for key in ['learning_rate', 'weight_decay']:
+            if key in config['training']:
+                config['training'][key] = float(config['training'][key])
+        
+        # Boolean fields
+        for key in ['distributed', 'use_gpu']:
+            if key in config['training']:
+                config['training'][key] = bool(config['training'][key])
+    
     return config
 
 def save_config(config: Dict[str, Any], config_path: str):

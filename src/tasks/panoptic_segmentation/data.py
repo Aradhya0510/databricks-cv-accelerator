@@ -34,6 +34,7 @@ class PanopticSegmentationDataConfig:
     brightness_contrast: float = 0.2
     hue_saturation: float = 0.2
     model_name: Optional[str] = None
+    augmentations: Optional[Dict[str, Any]] = None
 
 class COCOPanopticSegmentationDataset(torch.utils.data.Dataset):
     def __init__(
@@ -213,7 +214,8 @@ class PanopticSegmentationDataModule(pl.LightningDataModule):
             shuffle=True,
             num_workers=self.config.num_workers,
             pin_memory=True,
-            collate_fn=self._collate_fn
+            collate_fn=self._collate_fn,
+            persistent_workers=True if self.config.num_workers > 0 else False
         )
     
     def val_dataloader(self) -> DataLoader:
@@ -223,7 +225,8 @@ class PanopticSegmentationDataModule(pl.LightningDataModule):
             shuffle=False,
             num_workers=self.config.num_workers,
             pin_memory=True,
-            collate_fn=self._collate_fn
+            collate_fn=self._collate_fn,
+            persistent_workers=True if self.config.num_workers > 0 else False
         )
     
     def test_dataloader(self) -> DataLoader:
@@ -233,7 +236,8 @@ class PanopticSegmentationDataModule(pl.LightningDataModule):
             shuffle=False,
             num_workers=self.config.num_workers,
             pin_memory=True,
-            collate_fn=self._collate_fn
+            collate_fn=self._collate_fn,
+            persistent_workers=True if self.config.num_workers > 0 else False
         )
     
     def _collate_fn(self, batch):
@@ -242,11 +246,15 @@ class PanopticSegmentationDataModule(pl.LightningDataModule):
         
         # Handle variable number of instances
         labels = {
-            "panoptic_masks": torch.stack([item["labels"]["panoptic_masks"] for item in batch]),
+            "panoptic_masks": [item["labels"]["panoptic_masks"] for item in batch],
+            "instance_masks": [item["labels"]["instance_masks"] for item in batch],
             "bounding_boxes": [item["labels"]["bounding_boxes"] for item in batch],
             "class_labels": [item["labels"]["class_labels"] for item in batch],
             "image_id": torch.stack([item["labels"]["image_id"] for item in batch])
         }
+        
+        # Memory management: Clear individual items from memory
+        del batch
         
         return {
             "pixel_values": pixel_values,

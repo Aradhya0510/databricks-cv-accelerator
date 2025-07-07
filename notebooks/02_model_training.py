@@ -58,7 +58,7 @@ from config import load_config
 from tasks.detection.model import DetectionModel
 from tasks.detection.data import DetectionDataModule
 from training.trainer import UnifiedTrainer
-from utils.logging import setup_logger
+from utils.logging import create_databricks_logger
 
 # Load configuration from previous notebooks
 CATALOG = "your_catalog"
@@ -69,15 +69,35 @@ PROJECT_PATH = "cv_detr_training"
 BASE_VOLUME_PATH = f"/Volumes/{CATALOG}/{SCHEMA}/{VOLUME}/{PROJECT_PATH}"
 CONFIG_PATH = f"{BASE_VOLUME_PATH}/configs/detection_detr_config.yaml"
 
+# Set up volume directories
+CHECKPOINT_DIR = f"{BASE_VOLUME_PATH}/checkpoints"
+RESULTS_DIR = f"{BASE_VOLUME_PATH}/results"
+LOGS_DIR = f"{BASE_VOLUME_PATH}/logs"
+
+# Create directories
+os.makedirs(CHECKPOINT_DIR, exist_ok=True)
+os.makedirs(RESULTS_DIR, exist_ok=True)
+os.makedirs(LOGS_DIR, exist_ok=True)
+
+print(f"📁 Volume directories created:")
+print(f"   Checkpoints: {CHECKPOINT_DIR}")
+print(f"   Results: {RESULTS_DIR}")
+print(f"   Logs: {LOGS_DIR}")
+
 # Load configuration
 if os.path.exists(CONFIG_PATH):
     config = load_config(CONFIG_PATH)
+    # Update checkpoint directory to use volume path
+    config['training']['checkpoint_dir'] = CHECKPOINT_DIR
 else:
     print("⚠️  Config file not found. Using default detection config.")
     from config import get_default_config
     config = get_default_config("detection")
+    # Update checkpoint directory to use volume path
+    config['training']['checkpoint_dir'] = CHECKPOINT_DIR
 
 print("✅ Configuration loaded successfully!")
+print(f"📁 Checkpoint directory: {config['training']['checkpoint_dir']}")
 
 # COMMAND ----------
 
@@ -200,7 +220,7 @@ def setup_data_module():
     try:
         # Setup adapter first
         from tasks.detection.adapters import get_input_adapter
-        adapter = get_input_adapter(config["model"]["model_name"], image_size=config["data"].get("image_size", 800))
+        adapter = get_input_adapter(config["model"]["model_name"], image_size=config["data"].get("image_size", [800,800])[0])
         if adapter is None:
             print("❌ Failed to create adapter")
             return None
@@ -217,7 +237,7 @@ def setup_data_module():
         print(f"✅ Data module setup complete!")
         print(f"   Train dataset: {len(data_module.train_dataset):,} samples")
         print(f"   Val dataset: {len(data_module.val_dataset):,} samples")
-        print(f"   Test dataset: {len(data_module.test_dataset):,} samples")
+        # print(f"   Test dataset: {len(data_module.test_dataset):,} samples")
         print(f"   Number of classes: {len(data_module.train_dataset.class_names)}")
         
         # Test data loading
@@ -254,7 +274,23 @@ def test_data_loading_performance(data_module):
     
     import time
     
-    # Test train loader performance
+    # Setup adapter first
+    from tasks.detection.adapters import get_input_adapter
+    adapter = get_input_adapter(config["model"]["model_name"], image_size=config["data"].get("image_size", [800,800])[0])
+    if adapter is None:
+        print("❌ Failed to create adapter")
+        return False
+    
+    # Create data module with data config only
+    data_module = DetectionDataModule(config["data"])
+    
+    # Assign adapter to data module
+    data_module.adapter = adapter
+    
+    # Setup the data module to create datasets
+    data_module.setup()
+    
+    # Test memory usage with a few batches
     train_loader = data_module.train_dataloader()
     
     # Time a few batches
@@ -314,7 +350,7 @@ def setup_trainer():
     print("\n🚀 Setting up trainer...")
     
     try:
-        # Create trainer
+        # Create trainer (will be initialized with model and data_module later)
         trainer = UnifiedTrainer(config)
         
         print(f"✅ Trainer setup complete!")
@@ -356,24 +392,26 @@ def setup_monitoring():
     
     print("\n📊 Setting up monitoring...")
     
-    # Initialize logging
-    logger = setup_logger(
-        name="detr_training",
-        experiment_name=config['mlflow']['experiment_name'],
-        run_name=config['mlflow']['run_name'],
-        log_dir=f"{BASE_VOLUME_PATH}/logs"
+    # Get task from config
+    task = config['model']['task_type']
+    
+    # Set experiment name dynamically based on user and task
+    experiment_name = f"/Users/{dbutils.notebook.entry_point.getDbutils().notebook().getContext().userName().get()}/{task}_pipeline"
+    
+    # Initialize Lightning logger for MLflow
+    logger = create_databricks_logger(
+        experiment_name=experiment_name,
+        run_name=config['mlflow']['run_name']
     )
     
     print(f"✅ Logging setup complete!")
-    print(f"   Experiment: {config['mlflow']['experiment_name']}")
+    print(f"   Experiment: {experiment_name}")
     print(f"   Run name: {config['mlflow']['run_name']}")
-    print(f"   Log directory: {BASE_VOLUME_PATH}/logs")
     
-    # Log configuration
-    logger.info("Starting DETR training")
-    logger.info(f"Configuration: {config}")
-    logger.info(f"Model: {config['model']['model_name']}")
-    logger.info(f"Dataset: {len(data_module.train_dataset)} train, {len(data_module.val_dataset)} val")
+    # Log configuration using print (since this is a Lightning logger, not a general logger)
+    print("Starting DETR training")
+    print(f"Model: {config['model']['model_name']}")
+    print(f"Dataset: {len(data_module.train_dataset)} train, {len(data_module.val_dataset)} val")
     
     return logger
 
@@ -394,30 +432,43 @@ logger = setup_monitoring()
 def start_training(model, data_module, trainer, logger):
     """Start the training process."""
     
-    if not all([model, data_module, trainer, logger]):
+    if not all([model, data_module, trainer]):
         print("❌ Cannot start training - missing components")
         return False
     
     print("\n🎯 Starting DETR training...")
     print("=" * 60)
     
+    # Memory cleanup before training
+    if torch.cuda.is_available():
+        torch.cuda.empty_cache()
+        torch.cuda.reset_peak_memory_stats()
+        print(f"🧹 GPU memory cleared before training")
+        print(f"   Initial allocated: {torch.cuda.memory_allocated() / 1e9:.2f} GB")
+        print(f"   Initial reserved: {torch.cuda.memory_reserved() / 1e9:.2f} GB")
+    
     try:
-        # Log training start
-        logger.info("Training started")
+        # Initialize trainer with model and data module
+        trainer.model = model
+        trainer.data_module = data_module
+        trainer.logger = logger
         
-        # Start training
-        trainer.fit(model, data_module)
-        
-        # Log training completion
-        logger.info("Training completed successfully")
+        # Start training using the correct method
+        result = trainer.train()
         
         print("✅ Training completed successfully!")
+        
+        # Final memory cleanup
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+            final_allocated = torch.cuda.memory_allocated() / 1e9
+            final_reserved = torch.cuda.memory_reserved() / 1e9
+            print(f"🧹 Final GPU memory - Allocated: {final_allocated:.2f} GB, Reserved: {final_reserved:.2f} GB")
         
         return True
         
     except Exception as e:
         print(f"❌ Training failed: {e}")
-        logger.error(f"Training failed: {e}")
         return False
 
 # Start training
@@ -496,14 +547,17 @@ def evaluate_model(model, data_module, trainer):
     print("\n🔍 Evaluating trained model...")
     
     try:
-        # Run evaluation
+        # Use the UnifiedTrainer's test method
         results = trainer.test(model, data_module)
         
         print("✅ Evaluation completed!")
         print("📊 Test Results:")
         
-        for metric, value in results[0].items():
-            print(f"   {metric}: {value:.4f}")
+        if results and len(results) > 0:
+            for metric, value in results[0].items():
+                print(f"   {metric}: {value:.4f}")
+        else:
+            print("   No results available")
         
         return results
         
@@ -532,12 +586,13 @@ def save_and_register_model(model, trainer, evaluation_results):
     print("\n💾 Saving and registering model...")
     
     try:
-        # Get best model checkpoint
+        # Get best model checkpoint from the underlying PyTorch Lightning trainer
         checkpoint_callback = None
-        for callback in trainer.callbacks:
-            if hasattr(callback, 'best_model_path'):
-                checkpoint_callback = callback
-                break
+        if hasattr(trainer, 'trainer') and trainer.trainer is not None:
+            for callback in trainer.trainer.callbacks:
+                if hasattr(callback, 'best_model_path'):
+                    checkpoint_callback = callback
+                    break
         
         if checkpoint_callback and hasattr(checkpoint_callback, 'best_model_path'):
             best_model_path = checkpoint_callback.best_model_path

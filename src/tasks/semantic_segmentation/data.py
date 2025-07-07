@@ -34,6 +34,7 @@ class SemanticSegmentationDataConfig:
     brightness_contrast: float = 0.2
     hue_saturation: float = 0.2
     model_name: Optional[str] = None
+    augmentations: Optional[Dict[str, Any]] = None
 
 class COCOSemanticSegmentationDataset(torch.utils.data.Dataset):
     def __init__(
@@ -144,7 +145,8 @@ class SemanticSegmentationDataModule(pl.LightningDataModule):
             batch_size=self.config.batch_size,
             shuffle=True,
             num_workers=self.config.num_workers,
-            pin_memory=True
+            pin_memory=True,
+            persistent_workers=True if self.config.num_workers > 0 else False
         )
     
     def val_dataloader(self) -> DataLoader:
@@ -153,7 +155,8 @@ class SemanticSegmentationDataModule(pl.LightningDataModule):
             batch_size=self.config.batch_size,
             shuffle=False,
             num_workers=self.config.num_workers,
-            pin_memory=True
+            pin_memory=True,
+            persistent_workers=True if self.config.num_workers > 0 else False
         )
     
     def test_dataloader(self) -> DataLoader:
@@ -162,7 +165,8 @@ class SemanticSegmentationDataModule(pl.LightningDataModule):
             batch_size=self.config.batch_size,
             shuffle=False,
             num_workers=self.config.num_workers,
-            pin_memory=True
+            pin_memory=True,
+            persistent_workers=True if self.config.num_workers > 0 else False
         )
     
     @property

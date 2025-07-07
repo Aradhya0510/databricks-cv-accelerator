@@ -65,7 +65,7 @@ from config import load_config, get_default_config
 from tasks.detection.model import DetectionModel
 from tasks.detection.data import DetectionDataModule
 from training.trainer import UnifiedTrainer
-from utils.logging import setup_logger
+from utils.logging import create_databricks_logger
 
 # Load configuration
 CATALOG = "your_catalog"

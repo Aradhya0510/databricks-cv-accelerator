@@ -209,7 +209,25 @@ class PanopticSegmentationModel(pl.LightningModule):
         # Log loss
         self.log("train_loss", outputs["loss"], prog_bar=True)
         
+        # Memory management: Clear intermediate tensors
+        if hasattr(outputs, 'logits'):
+            del outputs['logits']
+        if hasattr(outputs, 'pred_boxes'):
+            del outputs['pred_boxes']
+        
         return outputs["loss"]
+    
+    def on_train_batch_end(self, outputs, batch, batch_idx: int) -> None:
+        """Called at the end of training batch for memory cleanup."""
+        # Clear batch from GPU memory
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+    
+    def on_validation_batch_end(self, outputs, batch, batch_idx: int) -> None:
+        """Called at the end of validation batch for memory cleanup."""
+        # Clear batch from GPU memory
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
     
     def on_train_epoch_end(self) -> None:
         """Called at the end of training epoch."""
@@ -275,6 +293,12 @@ class PanopticSegmentationModel(pl.LightningModule):
         
         # Log loss
         self.log("val_loss", outputs["loss"], prog_bar=True)
+        
+        # Memory management: Clear intermediate tensors
+        if hasattr(outputs, 'logits'):
+            del outputs['logits']
+        if hasattr(outputs, 'pred_boxes'):
+            del outputs['pred_boxes']
     
     def on_validation_epoch_end(self) -> None:
         """Called at the end of validation epoch."""
@@ -340,6 +364,12 @@ class PanopticSegmentationModel(pl.LightningModule):
         
         # Log loss
         self.log("test_loss", outputs["loss"], prog_bar=True)
+        
+        # Memory management: Clear intermediate tensors
+        if hasattr(outputs, 'logits'):
+            del outputs['logits']
+        if hasattr(outputs, 'pred_boxes'):
+            del outputs['pred_boxes']
     
     def on_test_epoch_end(self) -> None:
         """Called at the end of test epoch."""

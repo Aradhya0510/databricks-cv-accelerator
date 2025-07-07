@@ -194,7 +194,25 @@ class DetectionModel(pl.LightningModule):
         for k, v in outputs["loss_dict"].items():
             self.log(f"train_{k}", v, on_step=True, on_epoch=True, sync_dist=self.config.sync_dist_flag)
         
+        # Memory management: Clear intermediate tensors
+        if hasattr(outputs, 'logits'):
+            del outputs['logits']
+        if hasattr(outputs, 'pred_boxes'):
+            del outputs['pred_boxes']
+        
         return outputs["loss"]
+    
+    def on_train_batch_end(self, outputs, batch, batch_idx: int) -> None:
+        """Called at the end of training batch for memory cleanup."""
+        # Clear batch from GPU memory
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+    
+    def on_validation_batch_end(self, outputs, batch, batch_idx: int) -> None:
+        """Called at the end of validation batch for memory cleanup."""
+        # Clear batch from GPU memory
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
     
     def on_train_epoch_end(self) -> None:
         """Calculate and log mAP metrics at the end of training epoch."""
