@@ -82,4 +82,7 @@ site/
 *.tmp
 *.bak
 *.swp
-*~.nib 
+*~.nib
+
+# Backup information
+BACKUP_INFO.md 
