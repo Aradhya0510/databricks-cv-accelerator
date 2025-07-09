@@ -250,15 +250,15 @@ config = load_and_validate_config()
 
 # Set up logging
 logger = create_databricks_logger(
-    name="detr_training",
     experiment_name=config['mlflow']['experiment_name'],
     run_name=config['mlflow']['run_name'],
-    log_file=f"{LOGS_DIR}/training.log"
+    tags={"task": "detection", "model": config['model']['model_name']}
 )
 
-logger.info("DETR Training Setup Complete")
-logger.info(f"Configuration loaded: {config['model']['model_name']}")
-logger.info(f"Training on {torch.cuda.device_count()} GPUs")
+print("✅ Logging setup complete!")
+print(f"Experiment: {config['mlflow']['experiment_name']}")
+print(f"Run name: {config['mlflow']['run_name']}")
+print(f"Training on {torch.cuda.device_count()} GPUs")
 
 # COMMAND ----------
 
