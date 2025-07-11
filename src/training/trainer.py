@@ -126,6 +126,7 @@ class UnifiedTrainer:
             auto_insert_metric_name=False  # Disable auto-insertion of metric name
         )
         callbacks.append(checkpoint_callback)
+        print(f"✅ Model checkpoint callback added (monitor: {self.config.monitor_metric})")
         
         # Early stopping
         early_stopping = EarlyStopping(
@@ -134,6 +135,7 @@ class UnifiedTrainer:
             patience=self.config.early_stopping_patience
         )
         callbacks.append(early_stopping)
+        print(f"✅ Early stopping callback added (patience: {self.config.early_stopping_patience})")
         
         # Enhanced logging callbacks with volume checkpoint support
         from utils.logging import create_enhanced_logging_callbacks
@@ -146,7 +148,9 @@ class UnifiedTrainer:
         if self.config.distributed:
             ray_report_callback = RayTrainReportCallback()
             callbacks.append(ray_report_callback)
+            print("✅ Ray train report callback added")
         
+        print(f"✅ Total callbacks initialized: {len(callbacks)}")
         return callbacks
     
     def _init_trainer(self):
@@ -201,6 +205,10 @@ class UnifiedTrainer:
         
         self._init_trainer()
         
+        # Lightning will automatically log parameters and metrics through the logger
+        if self.logger is not None:
+            print("✅ Lightning MLflowLogger will handle all logging automatically")
+        
         if self.config.distributed:
             # Set up Ray cluster for distributed training
             try:
@@ -247,6 +255,11 @@ class UnifiedTrainer:
         else:
             # Local training
             self.trainer.fit(self.model, datamodule=self.data_module)
+            
+            # Lightning automatically handles all logging through the logger
+            if self.logger is not None:
+                print("✅ Training completed - all metrics logged by Lightning MLflowLogger")
+            
             result = type('Result', (), {'metrics': self.trainer.callback_metrics})
         
         return result

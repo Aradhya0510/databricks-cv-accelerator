@@ -51,9 +51,6 @@ import numpy as np
 import matplotlib.pyplot as plt
 from pathlib import Path
 
-# Enable MLflow autolog for PyTorch Lightning
-mlflow.pytorch.autolog()
-
 # Add the src directory to Python path
 sys.path.append('/Workspace/Repos/your-repo/Databricks_CV_ref/src')
 
@@ -61,7 +58,7 @@ from config import load_config
 from tasks.detection.model import DetectionModel
 from tasks.detection.data import DetectionDataModule
 from training.trainer import UnifiedTrainer
-from utils.logging import create_databricks_logger
+from lightning.pytorch.loggers import MLFlowLogger
 
 # Load configuration from previous notebooks
 CATALOG = "your_catalog"
@@ -414,8 +411,9 @@ trainer = setup_trainer()
 
 # COMMAND ----------
 
-def setup_monitoring():
-    """Set up monitoring and logging."""
+# Set up MLflowLogger following Lightning documentation
+def setup_monitoring(data_module=None):
+    """Set up monitoring and logging with proper MLflowLogger integration."""
     
     print("\n📊 Setting up monitoring...")
     
@@ -425,32 +423,39 @@ def setup_monitoring():
     # Set experiment name dynamically based on user and task
     experiment_name = f"/Users/{dbutils.notebook.entry_point.getDbutils().notebook().getContext().userName().get()}/{task}_pipeline"
     
-    # Set MLflow experiment
-    mlflow.set_experiment(experiment_name)
-    
-    # Start MLflow run
-    mlflow.start_run(run_name=config['mlflow']['run_name'])
-    
-    # Initialize Lightning logger for MLflow
-    logger = create_databricks_logger(
+    # Create MLflowLogger following Lightning documentation
+    mlf_logger = MLFlowLogger(
         experiment_name=experiment_name,
-        run_name=config['mlflow']['run_name']
+        run_name=config['mlflow']['run_name'],
+        tags={
+            'framework': 'lightning',
+            'model': config['model']['model_name'],
+            'task': task,
+            'dataset': 'coco'
+        },
+        log_model=True  # Log checkpoints as MLflow artifacts
     )
     
-    print(f"✅ Logging setup complete!")
+    print(f"✅ MLflowLogger setup complete!")
     print(f"   Experiment: {experiment_name}")
     print(f"   Run name: {config['mlflow']['run_name']}")
-    print(f"   MLflow autolog enabled: ✅")
-    print(f"   Active run ID: {mlflow.active_run().info.run_id}")
+    print(f"   Log model: True")
+    print(f"   Run ID: {mlf_logger.run_id}")
     
-    # Log configuration using print (since this is a Lightning logger, not a general logger)
+    # Log configuration using print
     print("Starting DETR training")
     print(f"Model: {config['model']['model_name']}")
-    print(f"Dataset: {len(data_module.train_dataset)} train, {len(data_module.val_dataset)} val")
     
-    return logger
+    # Only log dataset info if data_module is provided
+    if data_module:
+        print(f"Dataset: {len(data_module.train_dataset)} train, {len(data_module.val_dataset)} val")
+    else:
+        print("Dataset: Will be loaded during training")
+    
+    return mlf_logger
 
-logger = setup_monitoring()
+# Set up monitoring with data module
+logger = setup_monitoring(data_module)
 
 # COMMAND ----------
 
@@ -465,7 +470,7 @@ logger = setup_monitoring()
 # COMMAND ----------
 
 def start_training(model, data_module, trainer, logger):
-    """Start the training process."""
+    """Start the training process with proper logging integration."""
     
     if not all([model, data_module, trainer]):
         print("❌ Cannot start training - missing components")
@@ -496,32 +501,11 @@ def start_training(model, data_module, trainer, logger):
         print(f"   Data module: {type(data_module).__name__}")
         print(f"   Logger: {type(logger).__name__}")
         
-        # Log training configuration to MLflow (without creating a new run context)
-        if mlflow.active_run() is not None:
-            print(f"📊 Logging parameters to MLflow run: {mlflow.active_run().info.run_id}")
-            mlflow.log_params({
-                'model_name': config['model']['model_name'],
-                'task_type': config['model']['task_type'],
-                'num_classes': config['model']['num_classes'],
-                'max_epochs': config['training']['max_epochs'],
-                'learning_rate': config['training']['learning_rate'],
-                'weight_decay': config['training']['weight_decay'],
-                'batch_size': config['data']['batch_size'],
-                'num_workers': config['data']['num_workers']
-            })
-        else:
-            print("⚠️  No active MLflow run - skipping parameter logging")
-        
         # Start training using the correct method
         print("🚀 Starting training...")
         result = trainer.train()
         
         print("✅ Training completed successfully!")
-        
-        # Log final metrics (if there's an active run)
-        if hasattr(result, 'metrics') and mlflow.active_run() is not None:
-            print(f"📊 Logging final metrics to MLflow")
-            mlflow.log_metrics(result.metrics)
         
         # Final memory cleanup
         if torch.cuda.is_available():
@@ -540,11 +524,6 @@ def start_training(model, data_module, trainer, logger):
 
 # Start training
 training_success = start_training(model, data_module, trainer, logger)
-
-# Clean up MLflow run
-if mlflow.active_run() is not None:
-    mlflow.end_run()
-    print("✅ MLflow run ended successfully")
 
 # COMMAND ----------
 

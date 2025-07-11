@@ -190,9 +190,15 @@ class DetectionModel(pl.LightningModule):
         self.train_map.update(preds=preds, target=targets)
         
         # Log metrics with sync_dist flag and batch_size
-        self.log("train_loss", outputs["loss"], on_step=True, on_epoch=True, prog_bar=True, sync_dist=self.config.sync_dist_flag)
+        # Get batch size from input data safely
+        try:
+            batch_size = batch["pixel_values"].shape[0] if "pixel_values" in batch else None
+        except (KeyError, AttributeError, IndexError):
+            batch_size = None
+        
+        self.log("train_loss", outputs["loss"], on_step=True, on_epoch=True, prog_bar=True, sync_dist=self.config.sync_dist_flag, batch_size=batch_size)
         for k, v in outputs["loss_dict"].items():
-            self.log(f"train_{k}", v, on_step=True, on_epoch=True, sync_dist=self.config.sync_dist_flag)
+            self.log(f"train_{k}", v, on_step=True, on_epoch=True, sync_dist=self.config.sync_dist_flag, batch_size=batch_size)
         
         # Memory management: Clear intermediate tensors
         if hasattr(outputs, 'logits'):
@@ -262,9 +268,15 @@ class DetectionModel(pl.LightningModule):
         self.val_map.update(preds=preds, target=targets)
         
         # Log metrics with sync_dist flag and batch_size
-        self.log("val_loss", outputs["loss"], on_step=True, on_epoch=True, prog_bar=True, sync_dist=self.config.sync_dist_flag)
+        # Get batch size from input data safely
+        try:
+            batch_size = batch["pixel_values"].shape[0] if "pixel_values" in batch else None
+        except (KeyError, AttributeError, IndexError):
+            batch_size = None
+        
+        self.log("val_loss", outputs["loss"], on_step=True, on_epoch=True, prog_bar=True, sync_dist=self.config.sync_dist_flag, batch_size=batch_size)
         for k, v in outputs["loss_dict"].items():
-            self.log(f"val_{k}", v, on_step=True, on_epoch=True, sync_dist=self.config.sync_dist_flag)
+            self.log(f"val_{k}", v, on_step=True, on_epoch=True, sync_dist=self.config.sync_dist_flag, batch_size=batch_size)
     
     def on_validation_epoch_end(self) -> None:
         """Calculate and log mAP metrics at the end of validation epoch."""
@@ -314,9 +326,15 @@ class DetectionModel(pl.LightningModule):
         self.test_map.update(preds=preds, target=targets)
         
         # Log metrics with sync_dist flag and batch_size
-        self.log("test_loss", outputs["loss"], on_step=True, on_epoch=True, prog_bar=True, sync_dist=self.config.sync_dist_flag)
+        # Get batch size from input data safely
+        try:
+            batch_size = batch["pixel_values"].shape[0] if "pixel_values" in batch else None
+        except (KeyError, AttributeError, IndexError):
+            batch_size = None
+        
+        self.log("test_loss", outputs["loss"], on_step=True, on_epoch=True, prog_bar=True, sync_dist=self.config.sync_dist_flag, batch_size=batch_size)
         for k, v in outputs["loss_dict"].items():
-            self.log(f"test_{k}", v, on_step=True, on_epoch=True, sync_dist=self.config.sync_dist_flag)
+            self.log(f"test_{k}", v, on_step=True, on_epoch=True, sync_dist=self.config.sync_dist_flag, batch_size=batch_size)
     
     def on_test_epoch_end(self) -> None:
         """Calculate and log mAP metrics at the end of test epoch."""
