@@ -88,7 +88,7 @@ class UnifiedTrainer:
             trainer_config = {
                 'task': config['model']['task_type'],
                 'model_name': config['model']['model_name'],
-                'max_epochs': config['model']['epochs'],
+                'max_epochs': config['training']['max_epochs'],
                 'log_every_n_steps': config['training']['log_every_n_steps'],
                 'monitor_metric': config['training']['monitor_metric'],
                 'monitor_mode': config['training']['monitor_mode'],

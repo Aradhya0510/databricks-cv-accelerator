@@ -18,7 +18,6 @@ model:
   scheduler_params:
     T_max: 300
     eta_min: 1e-6
-  epochs: 50
 
 # Data Configuration
 data:

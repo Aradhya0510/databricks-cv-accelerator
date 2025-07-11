@@ -92,6 +92,13 @@ if os.path.exists(CONFIG_PATH):
     config = load_config(CONFIG_PATH)
     # Update checkpoint directory to use volume path
     config['training']['checkpoint_dir'] = CHECKPOINT_DIR
+    
+    # Fix config structure - move epochs from model to training if needed
+    if 'model' in config and 'epochs' in config['model']:
+        if 'training' not in config:
+            config['training'] = {}
+        config['training']['max_epochs'] = config['model']['epochs']
+        print(f"✅ Fixed config: moved epochs ({config['model']['epochs']}) from model to training.max_epochs")
 else:
     print("⚠️  Config file not found. Using default detection config.")
     from config import get_default_config
@@ -101,6 +108,23 @@ else:
 
 print("✅ Configuration loaded successfully!")
 print(f"📁 Checkpoint directory: {config['training']['checkpoint_dir']}")
+
+# Validate required config fields
+required_fields = {
+    'model': ['model_name', 'task_type', 'num_classes'],
+    'training': ['max_epochs', 'learning_rate', 'monitor_metric'],
+    'data': ['batch_size', 'num_workers']
+}
+
+for section, fields in required_fields.items():
+    if section not in config:
+        print(f"❌ Missing config section: {section}")
+        continue
+    for field in fields:
+        if field not in config[section]:
+            print(f"❌ Missing config field: {section}.{field}")
+        else:
+            print(f"✅ {section}.{field}: {config[section][field]}")
 
 # COMMAND ----------
 
@@ -404,6 +428,9 @@ def setup_monitoring():
     # Set MLflow experiment
     mlflow.set_experiment(experiment_name)
     
+    # Start MLflow run
+    mlflow.start_run(run_name=config['mlflow']['run_name'])
+    
     # Initialize Lightning logger for MLflow
     logger = create_databricks_logger(
         experiment_name=experiment_name,
@@ -414,6 +441,7 @@ def setup_monitoring():
     print(f"   Experiment: {experiment_name}")
     print(f"   Run name: {config['mlflow']['run_name']}")
     print(f"   MLflow autolog enabled: ✅")
+    print(f"   Active run ID: {mlflow.active_run().info.run_id}")
     
     # Log configuration using print (since this is a Lightning logger, not a general logger)
     print("Starting DETR training")
@@ -441,6 +469,9 @@ def start_training(model, data_module, trainer, logger):
     
     if not all([model, data_module, trainer]):
         print("❌ Cannot start training - missing components")
+        print(f"   Model: {'✅' if model else '❌'}")
+        print(f"   Data module: {'✅' if data_module else '❌'}")
+        print(f"   Trainer: {'✅' if trainer else '❌'}")
         return False
     
     print("\n🎯 Starting DETR training...")
@@ -460,9 +491,14 @@ def start_training(model, data_module, trainer, logger):
         trainer.data_module = data_module
         trainer.logger = logger
         
-        # Start MLflow run for training
-        with mlflow.start_run(run_name=config['mlflow']['run_name']):
-            # Log training configuration
+        print(f"✅ Trainer initialized with:")
+        print(f"   Model: {type(model).__name__}")
+        print(f"   Data module: {type(data_module).__name__}")
+        print(f"   Logger: {type(logger).__name__}")
+        
+        # Log training configuration to MLflow (without creating a new run context)
+        if mlflow.active_run() is not None:
+            print(f"📊 Logging parameters to MLflow run: {mlflow.active_run().info.run_id}")
             mlflow.log_params({
                 'model_name': config['model']['model_name'],
                 'task_type': config['model']['task_type'],
@@ -473,31 +509,42 @@ def start_training(model, data_module, trainer, logger):
                 'batch_size': config['data']['batch_size'],
                 'num_workers': config['data']['num_workers']
             })
-            
-            # Start training using the correct method
-            result = trainer.train()
-            
-            print("✅ Training completed successfully!")
-            
-            # Log final metrics
-            if hasattr(result, 'metrics'):
-                mlflow.log_metrics(result.metrics)
-            
-            # Final memory cleanup
-            if torch.cuda.is_available():
-                torch.cuda.empty_cache()
-                final_allocated = torch.cuda.memory_allocated() / 1e9
-                final_reserved = torch.cuda.memory_reserved() / 1e9
-                print(f"🧹 Final GPU memory - Allocated: {final_allocated:.2f} GB, Reserved: {final_reserved:.2f} GB")
+        else:
+            print("⚠️  No active MLflow run - skipping parameter logging")
+        
+        # Start training using the correct method
+        print("🚀 Starting training...")
+        result = trainer.train()
+        
+        print("✅ Training completed successfully!")
+        
+        # Log final metrics (if there's an active run)
+        if hasattr(result, 'metrics') and mlflow.active_run() is not None:
+            print(f"📊 Logging final metrics to MLflow")
+            mlflow.log_metrics(result.metrics)
+        
+        # Final memory cleanup
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+            final_allocated = torch.cuda.memory_allocated() / 1e9
+            final_reserved = torch.cuda.memory_reserved() / 1e9
+            print(f"🧹 Final GPU memory - Allocated: {final_allocated:.2f} GB, Reserved: {final_reserved:.2f} GB")
         
         return True
         
     except Exception as e:
         print(f"❌ Training failed: {e}")
+        import traceback
+        traceback.print_exc()
         return False
 
 # Start training
 training_success = start_training(model, data_module, trainer, logger)
+
+# Clean up MLflow run
+if mlflow.active_run() is not None:
+    mlflow.end_run()
+    print("✅ MLflow run ended successfully")
 
 # COMMAND ----------
 
@@ -642,12 +689,15 @@ def save_and_register_model(model, trainer, evaluation_results):
             
             print(f"✅ Model saved to: {model_dir}")
             
-            # Register in MLflow
+            # Register in MLflow (use existing run if available)
             try:
-                with mlflow.start_run():
+                if mlflow.active_run() is not None:
                     mlflow.log_artifact(model_dir, "model")
-                    mlflow.log_metrics(evaluation_results[0] if evaluation_results else {})
+                    if evaluation_results:
+                        mlflow.log_metrics(evaluation_results[0])
                     print("✅ Model registered in MLflow")
+                else:
+                    print("⚠️  No active MLflow run to register model")
                     
             except Exception as e:
                 print(f"⚠️  MLflow registration failed: {e}")
