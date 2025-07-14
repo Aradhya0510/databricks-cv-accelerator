@@ -1,223 +1,169 @@
-from typing import Optional, Dict, Any
-from lightning.pytorch.loggers import MLFlowLogger
-from lightning.pytorch.callbacks import Callback
-import mlflow
 import os
+import shutil
+from typing import Optional, Dict, Any, Union, Literal
+
+import mlflow
 import torch
+from lightning.pytorch import LightningModule, Trainer
+from lightning.pytorch.callbacks import Callback, ModelCheckpoint, LearningRateMonitor
+from lightning.pytorch.loggers import MLFlowLogger
 
-
-class MLflowCheckpointCallback(Callback):
-    """Callback to log checkpoints to MLflow with volume path support."""
-    
-    def __init__(self, volume_checkpoint_dir: Optional[str] = None, log_every_n_epochs: int = 1):
-        self.volume_checkpoint_dir = volume_checkpoint_dir
-        self.log_every_n_epochs = log_every_n_epochs
-        
-        # Create volume checkpoint directory if provided
-        if self.volume_checkpoint_dir:
-            os.makedirs(self.volume_checkpoint_dir, exist_ok=True)
-            print(f"📁 Volume checkpoint directory: {self.volume_checkpoint_dir}")
-        
-    def on_train_epoch_end(self, trainer, pl_module):
-        """Log checkpoint at the end of training epochs."""
-        if trainer.current_epoch % self.log_every_n_epochs == 0:
-            # Get the best model path from the checkpoint callback
-            checkpoint_path = None
-            for callback in trainer.callbacks:
-                if hasattr(callback, 'best_model_path') and callback.best_model_path:
-                    checkpoint_path = callback.best_model_path
-                    break
-            
-            if checkpoint_path and os.path.exists(checkpoint_path):
-                # Use Lightning's logger to log artifacts instead of direct MLflow calls
-                if hasattr(trainer, 'loggers') and trainer.loggers:
-                    for logger in trainer.loggers:
-                        if isinstance(logger, MLFlowLogger):
-                            try:
-                                # Use the logger's experiment to log artifacts
-                                logger.experiment.log_artifact(
-                                    logger.run_id,
-                                    checkpoint_path,
-                                    f"checkpoints/epoch_{trainer.current_epoch}"
-                                )
-                                print(f"📊 Logged checkpoint to MLflow: epoch_{trainer.current_epoch}")
-                            except Exception as e:
-                                print(f"⚠️  Failed to log checkpoint to MLflow: {e}")
-                            break
-                
-                # Also copy to volume directory if specified
-                if self.volume_checkpoint_dir:
-                    import shutil
-                    volume_checkpoint_path = os.path.join(
-                        self.volume_checkpoint_dir, 
-                        f"epoch_{trainer.current_epoch}_{os.path.basename(checkpoint_path)}"
-                    )
-                    try:
-                        shutil.copy2(checkpoint_path, volume_checkpoint_path)
-                        print(f"💾 Saved checkpoint to volume: {volume_checkpoint_path}")
-                    except Exception as e:
-                        print(f"⚠️  Failed to save checkpoint to volume: {e}")
-    
-    def on_validation_end(self, trainer, pl_module):
-        """Log checkpoint after validation if it's the best so far."""
-        checkpoint_path = None
-        for callback in trainer.callbacks:
-            if hasattr(callback, 'best_model_path') and callback.best_model_path:
-                checkpoint_path = callback.best_model_path
-                break
-        
-        if checkpoint_path and os.path.exists(checkpoint_path):
-            # Use Lightning's logger to log artifacts instead of direct MLflow calls
-            if hasattr(trainer, 'loggers') and trainer.loggers:
-                for logger in trainer.loggers:
-                    if isinstance(logger, MLFlowLogger):
-                        try:
-                            # Use the logger's experiment to log artifacts
-                            logger.experiment.log_artifact(
-                                logger.run_id,
-                                checkpoint_path,
-                                "checkpoints/best_model"
-                            )
-                            print(f"🏆 Logged best model to MLflow")
-                        except Exception as e:
-                            print(f"⚠️  Failed to log best model to MLflow: {e}")
-                        break
-            
-            # Also copy to volume directory if specified
-            if self.volume_checkpoint_dir:
-                import shutil
-                volume_best_path = os.path.join(
-                    self.volume_checkpoint_dir, 
-                    f"best_{os.path.basename(checkpoint_path)}"
-                )
-                try:
-                    shutil.copy2(checkpoint_path, volume_best_path)
-                    print(f"🏆 Saved best model to volume: {volume_best_path}")
-                except Exception as e:
-                    print(f"⚠️  Failed to save best model to volume: {e}")
-
-
+# --- 1. Simplified Logger Creation ---
 def create_databricks_logger(
-    experiment_name: Optional[str] = None,
-    tracking_uri: Optional[str] = None,
+    experiment_name: str,
     run_name: Optional[str] = None,
+    log_model: Union[bool, Literal["all"]] = "all",  # Use "all" to log every checkpoint, True for only the best
     tags: Optional[Dict[str, Any]] = None,
-    log_model: bool = True
 ) -> MLFlowLogger:
-    """Create an MLflow logger for Databricks environment.
+    """
+    Creates and configures an MLFlowLogger for Databricks.
+    
+    The tracking URI is automatically detected by MLflow when running in a
+    Databricks notebook.
     
     Args:
-        experiment_name: MLflow experiment name
-        tracking_uri: MLflow tracking URI (auto-detected in Databricks)
-        run_name: MLflow run name
-        tags: MLflow tags
-        log_model: Whether to log model artifacts
-        
-    Returns:
-        MLFlowLogger instance
+        experiment_name: The MLflow experiment name
+        run_name: Optional run name for this training session
+        log_model: "all" to log every checkpoint, True for only the best, False for none
+        tags: Optional dictionary of tags for the run
     """
-    try:
-        # Ensure experiment exists
-        if experiment_name:
-            mlflow.set_experiment(experiment_name)
-        
-        # Create MLflowLogger with proper configuration
-        logger = MLFlowLogger(
-            experiment_name=experiment_name,
-            tracking_uri=tracking_uri,
-            run_name=run_name,
-            tags=tags,
-            log_model=log_model
-        )
-        
-        print(f"✅ MLflowLogger created successfully")
-        print(f"   Experiment: {experiment_name}")
-        print(f"   Run name: {run_name}")
-        print(f"   Log model: {log_model}")
-        
-        return logger
-        
-    except Exception as e:
-        print(f"❌ Failed to create MLflowLogger: {e}")
-        # Return a dummy logger as fallback
-        return None
+    # On Databricks, this sets the experiment in the UI, which is a good practice.
+    mlflow.set_experiment(experiment_name)
+    
+    logger = MLFlowLogger(
+        experiment_name=experiment_name,
+        run_name=run_name,
+        tags=tags,
+        log_model=log_model,  # This is key for automatic checkpoint logging!
+        # The 'mlflow-skinny' package is recommended for a lighter client
+        save_dir='./mlruns'  # Optional: local save dir
+    )
+    print(f"✅ MLflowLogger created for experiment '{experiment_name}'")
+    print(f"   Run name: {run_name}")
+    print(f"   Log model: {log_model}")
+    print(f"   Run ID: {logger.run_id}")
+    return logger
 
 
-def create_enhanced_logging_callbacks(volume_checkpoint_dir: Optional[str] = None):
-    """Create enhanced logging callbacks for better monitoring.
-    
-    Args:
-        volume_checkpoint_dir: Optional volume path for storing checkpoints
+# --- 2. A New, Focused Callback for Volume Copying ---
+# This callback has a single responsibility: copying checkpoints to a volume.
+# It doesn't interact with MLflow at all, preventing conflicts.
+
+class VolumeCheckpoint(Callback):
     """
-    from lightning.pytorch.callbacks import LearningRateMonitor, DeviceStatsMonitor
+    A lightweight callback to copy saved checkpoints to a persistent volume.
+    Relies on the ModelCheckpoint callback to have already saved the file.
+    """
+    def __init__(self, volume_dir: str):
+        super().__init__()
+        self.volume_dir = volume_dir
+        os.makedirs(self.volume_dir, exist_ok=True)
+        print(f"📁 Checkpoints will be copied to volume: {self.volume_dir}")
+
+    def on_train_epoch_end(self, trainer: Trainer, pl_module: LightningModule) -> None:
+        # Check if ModelCheckpoint has saved a checkpoint in this epoch
+        if trainer.checkpoint_callback and hasattr(trainer.checkpoint_callback, 'last_model_path'):
+            last_ckpt_path = trainer.checkpoint_callback.last_model_path
+            if os.path.exists(last_ckpt_path):
+                try:
+                    # Create a clear filename for the copy
+                    dest_path = os.path.join(self.volume_dir, os.path.basename(last_ckpt_path))
+                    shutil.copy2(last_ckpt_path, dest_path)
+                    print(f"💾 Copied checkpoint to volume: {dest_path}")
+                except Exception as e:
+                    print(f"⚠️ Failed to copy checkpoint to volume: {e}")
+
+
+# --- 3. Centralized Callback Setup ---
+# A clean way to assemble all necessary callbacks.
+
+def get_training_callbacks(
+    checkpoint_dir: str,
+    monitor_metric: str = "val_loss",
+    monitor_mode: str = "min",
+    save_top_k: int = 3,
+    volume_checkpoint_dir: Optional[str] = None
+) -> list:
+    """Assembles all necessary callbacks for training."""
     
-    callbacks = []
+    # The main checkpoint callback that saves files locally
+    # MLFlowLogger will watch this one!
+    checkpoint_callback = ModelCheckpoint(
+        dirpath=checkpoint_dir,
+        filename="{epoch}-{step}-{"+monitor_metric+":.2f}",
+        save_top_k=save_top_k,
+        monitor=monitor_metric,
+        mode=monitor_mode,
+        save_last=True
+    )
     
-    # Learning rate monitoring
-    try:
-        lr_monitor = LearningRateMonitor(logging_interval='step')
-        callbacks.append(lr_monitor)
-        print("✅ Learning rate monitor added")
-    except Exception as e:
-        print(f"⚠️  Failed to add learning rate monitor: {e}")
+    callbacks = [
+        checkpoint_callback,
+        LearningRateMonitor(logging_interval='step')
+    ]
     
-    # Device stats monitoring (GPU memory, etc.)
+    # Add the volume copy callback ONLY if a directory is provided
+    if volume_checkpoint_dir:
+        callbacks.append(VolumeCheckpoint(volume_dir=volume_checkpoint_dir))
+        
     if torch.cuda.is_available():
-        try:
-            device_monitor = DeviceStatsMonitor()
-            callbacks.append(device_monitor)
-            print("✅ Device stats monitor added")
-        except Exception as e:
-            print(f"⚠️  Failed to add device stats monitor: {e}")
-    
-    # Note: MLflow checkpoint logging is now handled automatically by Lightning's MLflowLogger
-    # when log_model=True is set in the logger configuration
-    
+        from lightning.pytorch.callbacks import DeviceStatsMonitor
+        callbacks.append(DeviceStatsMonitor())
+
+    print("✅ Assembled training callbacks.")
     return callbacks
 
 
-def log_training_parameters(config: Dict[str, Any]):
-    """Log training parameters to MLflow if there's an active run."""
-    if mlflow.active_run() is not None:
-        try:
-            # Log model parameters
-            if 'model' in config:
-                mlflow.log_params({
-                    'model_name': config['model'].get('model_name', 'unknown'),
-                    'task_type': config['model'].get('task_type', 'unknown'),
-                    'num_classes': config['model'].get('num_classes', 0),
-                    'pretrained': config['model'].get('pretrained', True)
-                })
-            
-            # Log training parameters
-            if 'training' in config:
-                mlflow.log_params({
-                    'max_epochs': config['training'].get('max_epochs', 0),
-                    'learning_rate': config['training'].get('learning_rate', 0.0),
-                    'weight_decay': config['training'].get('weight_decay', 0.0),
-                    'monitor_metric': config['training'].get('monitor_metric', 'val_loss'),
-                    'monitor_mode': config['training'].get('monitor_mode', 'min')
-                })
-            
-            # Log data parameters
-            if 'data' in config:
-                mlflow.log_params({
-                    'batch_size': config['data'].get('batch_size', 0),
-                    'num_workers': config['data'].get('num_workers', 0),
-                    'image_size': str(config['data'].get('image_size', [512, 512]))
-                })
-            
-            print("✅ Training parameters logged to MLflow")
-            
-        except Exception as e:
-            print(f"⚠️  Failed to log parameters to MLflow: {e}")
-
-
-def log_final_metrics(metrics: Dict[str, float]):
-    """Log final metrics to MLflow if there's an active run."""
-    if mlflow.active_run() is not None and metrics:
-        try:
-            mlflow.log_metrics(metrics)
-            print("✅ Final metrics logged to MLflow")
-        except Exception as e:
-            print(f"⚠️  Failed to log final metrics to MLflow: {e}") 
+# --- 4. Helper function for creating logger with common Databricks patterns ---
+def create_databricks_logger_for_task(
+    task: str,
+    model_name: str,
+    run_name: Optional[str] = None,
+    log_model: str = "all",
+    additional_tags: Optional[Dict[str, Any]] = None
+) -> MLFlowLogger:
+    """
+    Creates a Databricks logger with common patterns for computer vision tasks.
+    
+    Args:
+        task: The task type (e.g., 'detection', 'classification', 'segmentation')
+        model_name: The model name (e.g., 'detr-resnet50')
+        run_name: Optional custom run name
+        log_model: Model logging strategy
+        additional_tags: Additional tags to add
+    """
+    # Create experiment name using Databricks user pattern
+    try:
+        import dbutils
+        username = dbutils.notebook.entry_point.getDbutils().notebook().getContext().userName().get()
+    except:
+        username = "unknown_user"
+    
+    experiment_name = f"/Users/{username}/{task}_pipeline"
+    
+    # Create default tags
+    tags = {
+        'framework': 'lightning',
+        'model': model_name,
+        'task': task,
+        'dataset': 'coco',  # Default dataset
+        'architecture': 'modular_cv_framework'
+    }
+    
+    # Add additional tags if provided
+    if additional_tags:
+        tags.update(additional_tags)
+    
+    # Create run name if not provided
+    if not run_name:
+        # Generate a simple run name without starting a new run
+        import time
+        timestamp = int(time.time())
+        run_name = f"{model_name}-{task}-{timestamp}"
+    
+    return create_databricks_logger(
+        experiment_name=experiment_name,
+        run_name=run_name,
+        log_model=log_model,
+        tags=tags
+    )

@@ -175,18 +175,39 @@ Follow the provided reference notebooks in sequence. For object detection, start
 
 ### Step 5: MLflow Integration
 
-**Critical for Databricks Managed MLflow:** The framework uses MLflow autolog for PyTorch Lightning to ensure proper integration with Databricks managed MLflow. This is automatically enabled in the training notebooks, but if you're creating custom training scripts, make sure to add:
+**Simplified MLflow Integration:** The framework uses a simplified MLflow integration approach that removes redundant checkpoint logging and relies on the native integration between MLFlowLogger and Lightning's ModelCheckpoint callback. This provides more reliable and maintainable logging.
 
+**Key Features:**
+- Automatic checkpoint logging with `log_model="all"`
+- Centralized logger creation with `create_databricks_logger_for_task()`
+- Automatic parameter logging from LightningModule's `save_hyperparameters()`
+- Volume checkpointing for persistent storage
+
+**Usage Example:**
 ```python
-import mlflow
-mlflow.pytorch.autolog()
+from utils.logging import create_databricks_logger_for_task
+from training.trainer import UnifiedTrainer
+
+# Create logger with automatic integration
+mlf_logger = create_databricks_logger_for_task(
+    task="detection",
+    model_name="detr-resnet50",
+    log_model="all"  # Automatically log all checkpoints
+)
+
+# Initialize trainer with logger
+unified_trainer = UnifiedTrainer(
+    config=config,
+    model=model,
+    data_module=data_module,
+    logger=mlf_logger
+)
+
+# Start training - all logging handled automatically
+result = unified_trainer.train()
 ```
 
-This enables automatic logging of:
-- Training and validation metrics
-- Model parameters and hyperparameters
-- Model artifacts and checkpoints
-- Model signatures for deployment
+**For more details, see:** [`SIMPLIFIED_MLFLOW_INTEGRATION.md`](SIMPLIFIED_MLFLOW_INTEGRATION.md)
 
 ---
 

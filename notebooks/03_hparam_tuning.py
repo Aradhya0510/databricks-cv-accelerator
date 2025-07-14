@@ -41,7 +41,7 @@
 # COMMAND ----------
 
 # MAGIC %md
-# MAGIC ## 1. Import Dependencies and Setup
+# MAGIC ## 1. Import Dependencies and Load Configuration
 
 # COMMAND ----------
 
@@ -57,6 +57,8 @@ import numpy as np
 import matplotlib.pyplot as plt
 import pandas as pd
 from pathlib import Path
+import yaml
+import json
 
 # Add the src directory to Python path
 sys.path.append('/Workspace/Repos/your-repo/Databricks_CV_ref/src')
@@ -67,7 +69,7 @@ from tasks.detection.data import DetectionDataModule
 from training.trainer import UnifiedTrainer
 from utils.logging import create_databricks_logger
 
-# Load configuration
+# Load configuration from previous notebooks
 CATALOG = "your_catalog"
 SCHEMA = "your_schema"  
 VOLUME = "your_volume"
@@ -76,13 +78,32 @@ PROJECT_PATH = "cv_detr_training"
 BASE_VOLUME_PATH = f"/Volumes/{CATALOG}/{SCHEMA}/{VOLUME}/{PROJECT_PATH}"
 CONFIG_PATH = f"{BASE_VOLUME_PATH}/configs/detection_detr_config.yaml"
 
+# Set up volume directories
+TUNING_RESULTS_DIR = f"{BASE_VOLUME_PATH}/tuning_results"
+TUNING_LOGS_DIR = f"{BASE_VOLUME_PATH}/logs"
+
+# Create directories
+os.makedirs(TUNING_RESULTS_DIR, exist_ok=True)
+os.makedirs(TUNING_LOGS_DIR, exist_ok=True)
+
+print(f"📁 Volume directories created:")
+print(f"   Tuning Results: {TUNING_RESULTS_DIR}")
+print(f"   Tuning Logs: {TUNING_LOGS_DIR}")
+
 # Load base configuration
 if os.path.exists(CONFIG_PATH):
     base_config = load_config(CONFIG_PATH)
+    # Update checkpoint directory to use volume path
+    base_config['training']['checkpoint_dir'] = f"{BASE_VOLUME_PATH}/checkpoints"
+    print(f"✅ Fixed config: updated checkpoint directory")
 else:
+    print("⚠️  Config file not found. Using default detection config.")
     base_config = get_default_config("detection")
+    # Update checkpoint directory to use volume path
+    base_config['training']['checkpoint_dir'] = f"{BASE_VOLUME_PATH}/checkpoints"
 
 print("✅ Base configuration loaded successfully!")
+print(f"📁 Checkpoint directory: {base_config['training']['checkpoint_dir']}")
 
 # COMMAND ----------
 
@@ -198,32 +219,32 @@ def setup_search_algorithm():
                 "learning_rate": 1e-4,
                 "batch_size": 16,
                 "weight_decay": 1e-4,
-                "scheduler_t_max": 200,
+                "scheduler_t_max": 300,
                 "scheduler_eta_min": 1e-6,
                 "backbone": "resnet50",
                 "max_epochs": 100,
                 "augment_strength": 0.2,
-                "dropout": 0.2
+                "dropout": 0.1,
             }
         ]
     )
     
     # ASHA scheduler for early stopping
     scheduler = ASHAScheduler(
-        time_attr="training_iteration",
         metric="val_map",
         mode="max",
-        max_t=100,  # Maximum epochs per trial
-        grace_period=10,  # Minimum epochs before stopping
-        reduction_factor=2
+        max_t=300,  # Maximum epochs
+        grace_period=10,  # Minimum epochs before early stopping
+        reduction_factor=2,  # Reduce trials by factor of 2
+        brackets=3  # Number of brackets for ASHA
     )
     
     print("✅ Search algorithm configured:")
     print(f"   Algorithm: Bayesian Optimization")
+    print(f"   Scheduler: ASHA (Asynchronous Successive Halving)")
     print(f"   Metric: val_map (maximize)")
-    print(f"   Scheduler: ASHA (early stopping)")
     print(f"   Grace period: 10 epochs")
-    print(f"   Max epochs per trial: 100")
+    print(f"   Max trials: 300 epochs")
     
     return search_alg, scheduler
 
@@ -232,176 +253,179 @@ search_alg, scheduler = setup_search_algorithm()
 # COMMAND ----------
 
 # MAGIC %md
-# MAGIC ## 4. Trial Configuration
+# MAGIC ## 4. Training Trial Function
 
 # COMMAND ----------
 
 # MAGIC %md
-# MAGIC ### Training Function for Trials
+# MAGIC ### Define Training Trial
 
 # COMMAND ----------
 
 def train_trial(config_dict):
-    """Training function for individual trials."""
+    """Training function for a single hyperparameter trial."""
     
-    # Update base config with trial hyperparameters
-    trial_config = base_config.copy()
-    
-    # Update model configuration
-    trial_config['model']['learning_rate'] = config_dict['learning_rate']
-    trial_config['model']['weight_decay'] = config_dict['weight_decay']
-    trial_config['model']['dropout'] = config_dict['dropout']
-    
-    # Update data configuration
-    trial_config['data']['batch_size'] = config_dict['batch_size']
-    trial_config['data']['augment_strength'] = config_dict['augment_strength']
-    
-    # Update training configuration
-    trial_config['training']['max_epochs'] = config_dict['max_epochs']
-    trial_config['training']['scheduler_params'] = {
-        'T_max': config_dict['scheduler_t_max'],
-        'eta_min': config_dict['scheduler_eta_min']
-    }
-    
-    # Update model name based on backbone
-    if config_dict['backbone'] == 'resnet101':
-        trial_config['model']['model_name'] = 'facebook/detr-resnet-101'
-    else:
-        trial_config['model']['model_name'] = 'facebook/detr-resnet-50'
+    print(f"🎯 Starting trial with config: {config_dict}")
     
     try:
-        # Prepare model config with num_workers from data config
-        model_config = trial_config["model"].copy()
-        model_config["num_workers"] = trial_config["data"]["num_workers"]
+        # Create a copy of base config and update with trial parameters
+        trial_config = base_config.copy()
         
-        # Initialize model
-        model = DetectionModel(model_config)
+        # Update training parameters
+        trial_config['training']['learning_rate'] = config_dict['learning_rate']
+        trial_config['training']['max_epochs'] = config_dict['max_epochs']
+        trial_config['training']['weight_decay'] = config_dict['weight_decay']
         
-        # Setup adapter first
-        from tasks.detection.adapters import get_input_adapter
-        adapter = get_input_adapter(trial_config["model"]["model_name"], image_size=trial_config["data"].get("image_size", 800))
-        if adapter is None:
-            print("❌ Failed to create adapter")
-            tune.report(val_map=0.0, val_loss=float('inf'))
-            return
+        # Update data parameters
+        trial_config['data']['batch_size'] = config_dict['batch_size']
         
-        # Initialize data module with data config only
-        data_module = DetectionDataModule(trial_config["data"])
+        # Update model parameters
+        trial_config['model']['model_name'] = f"facebook/detr-{config_dict['backbone']}"
+        trial_config['model']['dropout'] = config_dict['dropout']
         
-        # Assign adapter to data module
-        data_module.adapter = adapter
+        # Update scheduler parameters
+        trial_config['training']['scheduler_params'] = {
+            'T_max': config_dict['scheduler_t_max'],
+            'eta_min': config_dict['scheduler_eta_min']
+        }
         
-        # Setup for training
-        data_module.setup('fit')
+        # Update augmentation parameters
+        trial_config['data']['augmentations']['strength'] = config_dict['augment_strength']
         
-        # Initialize trainer
+        # Create model
+        model = DetectionModel(trial_config['model'])
+        
+        # Create data module
+        data_module = DetectionDataModule(trial_config['data'])
+        
+        # Create trainer
         trainer = UnifiedTrainer(trial_config)
         
         # Train the model
-        trainer.fit(model, data_module)
+        result = trainer.train()
         
-        # Evaluate on validation set
-        results = trainer.test(model, data_module)
+        # Extract metrics
+        metrics = {
+            'val_map': result.metrics.get('val_map', 0.0),
+            'val_loss': result.metrics.get('val_loss', float('inf')),
+            'train_loss': result.metrics.get('train_loss', float('inf')),
+            'learning_rate': config_dict['learning_rate'],
+            'batch_size': config_dict['batch_size'],
+            'backbone': config_dict['backbone']
+        }
+        
+        print(f"✅ Trial completed - val_map: {metrics['val_map']:.4f}")
         
         # Report metrics to Ray Tune
-        tune.report(
-            val_map=results[0].get('test_map', 0.0),
-            val_loss=results[0].get('test_loss', float('inf')),
-            train_loss=results[0].get('train_loss', float('inf')),
-            learning_rate=config_dict['learning_rate'],
-            batch_size=config_dict['batch_size']
-        )
+        tune.report(**metrics)
         
     except Exception as e:
-        print(f"Trial failed: {e}")
-        # Report failure
-        tune.report(val_map=0.0, val_loss=float('inf'))
+        print(f"❌ Trial failed: {e}")
+        # Report failure to Ray Tune
+        tune.report(
+            val_map=0.0,
+            val_loss=float('inf'),
+            train_loss=float('inf'),
+            error=str(e)
+        )
 
 # COMMAND ----------
 
 # MAGIC %md
-# MAGIC ### Resource Configuration
+# MAGIC ## 5. Resource Configuration
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC ### Setup Resource Allocation
 
 # COMMAND ----------
 
 def setup_resources():
     """Configure resources for hyperparameter tuning."""
     
-    print("\n💻 Setting up resource configuration...")
+    print("⚙️  Setting up resource allocation...")
     
-    # Calculate resources per trial
+    # Get available resources
     num_gpus = torch.cuda.device_count() if torch.cuda.is_available() else 0
-    num_cpus = os.cpu_count()
+    num_cpus = os.cpu_count() or 4
     
-    # Resource allocation per trial
+    # Configure resources per trial
     resources_per_trial = {
-        "cpu": max(1, num_cpus // 4),  # 1/4 of CPUs per trial
-        "gpu": max(0.25, 1.0 / min(4, num_gpus)) if num_gpus > 0 else 0  # 1 GPU per trial, max 4 trials
+        "cpu": 2,  # CPUs per trial
+        "gpu": 1 if num_gpus > 0 else 0,  # GPUs per trial
+        "memory": 8 * 1024 * 1024 * 1024  # 8GB memory per trial
     }
     
-    print(f"✅ Resource configuration:")
-    print(f"   Total CPUs: {num_cpus}")
-    print(f"   Total GPUs: {num_gpus}")
-    print(f"   CPUs per trial: {resources_per_trial['cpu']}")
-    print(f"   GPUs per trial: {resources_per_trial['gpu']}")
-    
     # Calculate max concurrent trials
-    max_trials = min(
-        num_cpus // resources_per_trial['cpu'],
-        int(num_gpus / resources_per_trial['gpu']) if num_gpus > 0 else 4
+    max_concurrent_trials = min(
+        num_gpus,  # Limited by GPU count
+        num_cpus // resources_per_trial["cpu"],  # Limited by CPU count
+        4  # Reasonable limit for stability
     )
     
-    print(f"   Max concurrent trials: {max_trials}")
+    print(f"✅ Resource configuration:")
+    print(f"   Available GPUs: {num_gpus}")
+    print(f"   Available CPUs: {num_cpus}")
+    print(f"   Resources per trial: {resources_per_trial}")
+    print(f"   Max concurrent trials: {max_concurrent_trials}")
     
-    return resources_per_trial, max_trials
+    return resources_per_trial, max_concurrent_trials
 
-resources_per_trial, max_trials = setup_resources()
-
-# COMMAND ----------
-
-# MAGIC %md
-# MAGIC ## 5. Run Hyperparameter Optimization
+resources_per_trial, max_concurrent_trials = setup_resources()
 
 # COMMAND ----------
 
 # MAGIC %md
-# MAGIC ### Start Optimization
+# MAGIC ## 6. Run Hyperparameter Optimization
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC ### Execute Optimization
 
 # COMMAND ----------
 
 def run_hyperparameter_optimization():
     """Run the hyperparameter optimization process."""
     
-    print("\n🎯 Starting hyperparameter optimization...")
-    print("=" * 60)
-    
-    try:
-        # Run optimization
-        analysis = tune.run(
-            train_trial,
-            config=search_space,
-            num_samples=20,  # Total number of trials
-            scheduler=scheduler,
-            search_alg=search_alg,
-            resources_per_trial=resources_per_trial,
-            max_concurrent_trials=max_trials,
-            local_dir=f"{BASE_VOLUME_PATH}/ray_results",
-            name="detr_hyperparameter_tuning",
-            verbose=2,
-            fail_fast=True,
-            checkpoint_at_end=True
-        )
-        
-        print("✅ Hyperparameter optimization completed!")
-        
-        return analysis
-        
-    except Exception as e:
-        print(f"❌ Optimization failed: {e}")
+    if not ray_ready:
+        print("❌ Ray not initialized. Cannot run optimization.")
         return None
+    
+    print("🚀 Starting hyperparameter optimization...")
+    
+    # Configure MLflow experiment for tuning
+    experiment_name = f"/Users/{dbutils.notebook.entry_point.getDbutils().notebook().getContext().userName().get()}/detection_tuning"
+    mlflow.set_experiment(experiment_name)
+    
+    # Run optimization
+    analysis = tune.run(
+        train_trial,
+        config=search_space,
+        num_samples=20,  # Number of trials
+        scheduler=scheduler,
+        search_alg=search_alg,
+        resources_per_trial=resources_per_trial,
+        max_concurrent_trials=max_concurrent_trials,
+        local_dir=TUNING_RESULTS_DIR,
+        name="detr_hyperparameter_tuning",
+        log_to_file=True,
+        verbose=2
+    )
+    
+    print("✅ Hyperparameter optimization completed!")
+    print(f"   Results saved to: {TUNING_RESULTS_DIR}")
+    
+    return analysis
 
 # Run optimization
 analysis = run_hyperparameter_optimization()
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC ## 7. Monitor and Analyze Results
 
 # COMMAND ----------
 
@@ -414,9 +438,10 @@ def monitor_optimization_progress(analysis):
     """Monitor the progress of hyperparameter optimization."""
     
     if not analysis:
+        print("❌ No analysis results available")
         return
     
-    print("\n📊 Optimization Progress:")
+    print("📊 Optimization Progress Analysis:")
     
     # Get best trial
     best_trial = analysis.get_best_trial("val_map", "max")
@@ -426,28 +451,22 @@ def monitor_optimization_progress(analysis):
     
     # Get all trials
     trials = analysis.trials
-    print(f"   Total trials completed: {len(trials)}")
+    print(f"   Total trials: {len(trials)}")
     
-    # Calculate success rate
-    successful_trials = [t for t in trials if t.last_result.get('val_map', 0) > 0]
-    success_rate = len(successful_trials) / len(trials) * 100
-    print(f"   Success rate: {success_rate:.1f}%")
+    # Calculate statistics
+    val_maps = [trial.last_result.get('val_map', 0) for trial in trials]
+    print(f"   Mean val_map: {np.mean(val_maps):.4f}")
+    print(f"   Std val_map: {np.std(val_maps):.4f}")
+    print(f"   Min val_map: {np.min(val_maps):.4f}")
+    print(f"   Max val_map: {np.max(val_maps):.4f}")
     
-    # Show top 5 trials
-    print(f"\n🏆 Top 5 Trials:")
-    sorted_trials = sorted(trials, key=lambda t: t.last_result.get('val_map', 0), reverse=True)
+    # Failed trials
+    failed_trials = [trial for trial in trials if trial.status == 'FAILED']
+    print(f"   Failed trials: {len(failed_trials)}")
     
-    for i, trial in enumerate(sorted_trials[:5]):
-        print(f"   {i+1}. Trial {trial.trial_id}: val_map={trial.last_result.get('val_map', 0):.4f}")
-        print(f"      Config: {trial.config}")
+    return best_trial
 
-if analysis:
-    monitor_optimization_progress(analysis)
-
-# COMMAND ----------
-
-# MAGIC %md
-# MAGIC ## 6. Result Analysis and Visualization
+best_trial = monitor_optimization_progress(analysis)
 
 # COMMAND ----------
 
@@ -457,50 +476,57 @@ if analysis:
 # COMMAND ----------
 
 def analyze_optimization_results(analysis):
-    """Analyze and visualize the optimization results."""
+    """Analyze the results of hyperparameter optimization."""
     
     if not analysis:
-        return
+        print("❌ No analysis results available")
+        return None
     
-    print("\n📈 Analyzing optimization results...")
+    print("🔍 Analyzing optimization results...")
     
-    # Get all trials
-    trials = analysis.trials
+    # Convert results to DataFrame
+    results_df = analysis.results_df
     
-    # Extract results
-    results = []
-    for trial in trials:
-        if trial.last_result:
-            result = {
-                'trial_id': trial.trial_id,
-                'val_map': trial.last_result.get('val_map', 0),
-                'val_loss': trial.last_result.get('val_loss', float('inf')),
-                'train_loss': trial.last_result.get('train_loss', float('inf')),
-                'learning_rate': trial.config.get('learning_rate', 0),
-                'batch_size': trial.config.get('batch_size', 0),
-                'weight_decay': trial.config.get('weight_decay', 0),
-                'backbone': trial.config.get('backbone', ''),
-                'max_epochs': trial.config.get('max_epochs', 0)
-            }
-            results.append(result)
+    # Filter out failed trials
+    successful_trials = results_df[results_df['val_map'] > 0]
     
-    # Create DataFrame
-    df = pd.DataFrame(results)
+    if len(successful_trials) == 0:
+        print("❌ No successful trials found")
+        return None
     
-    print(f"✅ Analysis complete!")
-    print(f"   Total trials: {len(df)}")
-    print(f"   Mean val_map: {df['val_map'].mean():.4f}")
-    print(f"   Best val_map: {df['val_map'].max():.4f}")
-    print(f"   Std val_map: {df['val_map'].std():.4f}")
+    print(f"✅ Analysis completed:")
+    print(f"   Successful trials: {len(successful_trials)}")
+    print(f"   Failed trials: {len(results_df) - len(successful_trials)}")
     
-    return df
+    # Parameter importance analysis
+    print("\n📈 Parameter Importance Analysis:")
+    
+    # Analyze learning rate impact
+    lr_groups = successful_trials.groupby('learning_rate')['val_map'].agg(['mean', 'std', 'count'])
+    print("   Learning Rate Impact:")
+    for lr, stats in lr_groups.iterrows():
+        print(f"     {lr:.2e}: mean={stats['mean']:.4f}, std={stats['std']:.4f}, count={stats['count']}")
+    
+    # Analyze batch size impact
+    bs_groups = successful_trials.groupby('batch_size')['val_map'].agg(['mean', 'std', 'count'])
+    print("   Batch Size Impact:")
+    for bs, stats in bs_groups.iterrows():
+        print(f"     {bs}: mean={stats['mean']:.4f}, std={stats['std']:.4f}, count={stats['count']}")
+    
+    # Analyze backbone impact
+    backbone_groups = successful_trials.groupby('backbone')['val_map'].agg(['mean', 'std', 'count'])
+    print("   Backbone Impact:")
+    for backbone, stats in backbone_groups.iterrows():
+        print(f"     {backbone}: mean={stats['mean']:.4f}, std={stats['std']:.4f}, count={stats['count']}")
+    
+    return successful_trials
 
 results_df = analyze_optimization_results(analysis)
 
 # COMMAND ----------
 
 # MAGIC %md
-# MAGIC ### Visualize Results
+# MAGIC ### Visualize Optimization Results
 
 # COMMAND ----------
 
@@ -508,52 +534,59 @@ def visualize_optimization_results(results_df):
     """Create visualizations of the optimization results."""
     
     if results_df is None or len(results_df) == 0:
+        print("❌ No results to visualize")
         return
     
-    print("\n📊 Creating visualizations...")
+    print("📊 Creating visualizations...")
     
-    # Create subplots
+    # Set up the plot
     fig, axes = plt.subplots(2, 2, figsize=(15, 12))
+    fig.suptitle('DETR Hyperparameter Optimization Results', fontsize=16)
     
     # 1. Learning rate vs val_map
     axes[0, 0].scatter(results_df['learning_rate'], results_df['val_map'], alpha=0.6)
+    axes[0, 0].set_xscale('log')
     axes[0, 0].set_xlabel('Learning Rate')
     axes[0, 0].set_ylabel('Validation mAP')
     axes[0, 0].set_title('Learning Rate vs Validation mAP')
-    axes[0, 0].set_xscale('log')
+    axes[0, 0].grid(True, alpha=0.3)
     
     # 2. Batch size vs val_map
     axes[0, 1].scatter(results_df['batch_size'], results_df['val_map'], alpha=0.6)
     axes[0, 1].set_xlabel('Batch Size')
     axes[0, 1].set_ylabel('Validation mAP')
     axes[0, 1].set_title('Batch Size vs Validation mAP')
+    axes[0, 1].grid(True, alpha=0.3)
     
-    # 3. Weight decay vs val_map
-    axes[1, 0].scatter(results_df['weight_decay'], results_df['val_map'], alpha=0.6)
-    axes[1, 0].set_xlabel('Weight Decay')
+    # 3. Training loss vs validation mAP
+    axes[1, 0].scatter(results_df['train_loss'], results_df['val_map'], alpha=0.6)
+    axes[1, 0].set_xlabel('Training Loss')
     axes[1, 0].set_ylabel('Validation mAP')
-    axes[1, 0].set_title('Weight Decay vs Validation mAP')
-    axes[1, 0].set_xscale('log')
+    axes[1, 0].set_title('Training Loss vs Validation mAP')
+    axes[1, 0].grid(True, alpha=0.3)
     
-    # 4. Backbone vs val_map
-    backbone_results = results_df.groupby('backbone')['val_map'].mean()
-    axes[1, 1].bar(backbone_results.index, backbone_results.values)
-    axes[1, 1].set_xlabel('Backbone')
-    axes[1, 1].set_ylabel('Mean Validation mAP')
-    axes[1, 1].set_title('Backbone vs Mean Validation mAP')
+    # 4. Validation loss vs validation mAP
+    axes[1, 1].scatter(results_df['val_loss'], results_df['val_map'], alpha=0.6)
+    axes[1, 1].set_xlabel('Validation Loss')
+    axes[1, 1].set_ylabel('Validation mAP')
+    axes[1, 1].set_title('Validation Loss vs Validation mAP')
+    axes[1, 1].grid(True, alpha=0.3)
     
     plt.tight_layout()
-    plt.show()
     
-    print("✅ Visualizations created!")
+    # Save the plot
+    plot_path = f"{TUNING_RESULTS_DIR}/optimization_results.png"
+    plt.savefig(plot_path, dpi=300, bbox_inches='tight')
+    print(f"✅ Visualization saved to: {plot_path}")
+    
+    plt.show()
 
-if results_df is not None:
-    visualize_optimization_results(results_df)
+visualize_optimization_results(results_df)
 
 # COMMAND ----------
 
 # MAGIC %md
-# MAGIC ### Parameter Importance Analysis
+# MAGIC ### Analyze Parameter Importance
 
 # COMMAND ----------
 
@@ -561,53 +594,52 @@ def analyze_parameter_importance(results_df):
     """Analyze the importance of different hyperparameters."""
     
     if results_df is None or len(results_df) == 0:
+        print("❌ No results to analyze")
         return
     
-    print("\n🔍 Analyzing parameter importance...")
+    print("🎯 Parameter Importance Analysis:")
     
-    # Calculate correlations
-    numeric_cols = ['learning_rate', 'batch_size', 'weight_decay', 'max_epochs']
-    correlations = results_df[numeric_cols + ['val_map']].corr()['val_map'].abs()
+    # Calculate correlation with val_map
+    correlations = {}
+    for col in results_df.columns:
+        if col != 'val_map' and col in ['learning_rate', 'batch_size', 'weight_decay', 'dropout', 'augment_strength']:
+            try:
+                corr = results_df[col].corr(results_df['val_map'])
+                correlations[col] = abs(corr)
+            except:
+                pass
     
-    print("📊 Parameter Correlations with val_map:")
-    for param, corr in correlations.items():
-        if param != 'val_map':
-            print(f"   {param}: {corr:.4f}")
+    # Sort by correlation strength
+    sorted_correlations = sorted(correlations.items(), key=lambda x: x[1], reverse=True)
     
-    # Find best configuration for each parameter
-    print(f"\n🏆 Best configurations:")
+    print("   Parameter correlations with val_map:")
+    for param, corr in sorted_correlations:
+        print(f"     {param}: {corr:.4f}")
     
-    # Best learning rate
-    best_lr_idx = results_df['val_map'].idxmax()
-    best_lr = results_df.loc[best_lr_idx, 'learning_rate']
-    print(f"   Best learning rate: {best_lr:.2e}")
+    # Analyze best configurations
+    top_5_trials = results_df.nlargest(5, 'val_map')
+    print(f"\n🏆 Top 5 Configurations:")
+    for i, (_, trial) in enumerate(top_5_trials.iterrows(), 1):
+        print(f"   {i}. val_map={trial['val_map']:.4f}")
+        print(f"      learning_rate={trial['learning_rate']:.2e}")
+        print(f"      batch_size={trial['batch_size']}")
+        print(f"      backbone={trial['backbone']}")
+        print(f"      weight_decay={trial['weight_decay']:.2e}")
+        print()
     
-    # Best batch size
-    best_bs_idx = results_df['val_map'].idxmax()
-    best_bs = results_df.loc[best_bs_idx, 'batch_size']
-    print(f"   Best batch size: {best_bs}")
-    
-    # Best weight decay
-    best_wd_idx = results_df['val_map'].idxmax()
-    best_wd = results_df.loc[best_wd_idx, 'weight_decay']
-    print(f"   Best weight decay: {best_wd:.2e}")
-    
-    # Best backbone
-    best_backbone = results_df.groupby('backbone')['val_map'].mean().idxmax()
-    print(f"   Best backbone: {best_backbone}")
+    return sorted_correlations
 
-if results_df is not None:
-    analyze_parameter_importance(results_df)
+parameter_importance = analyze_parameter_importance(results_df)
 
 # COMMAND ----------
 
 # MAGIC %md
-# MAGIC ## 7. Save Best Configuration
+# MAGIC ## 8. Save Best Configuration
 
 # COMMAND ----------
 
 # MAGIC %md
-# MAGIC ### Export Best Configuration
+# MAGIC ### Save Best Configuration
 
 # COMMAND ----------
 
@@ -615,77 +647,78 @@ def save_best_configuration(analysis, results_df):
     """Save the best configuration found during optimization."""
     
     if not analysis or results_df is None:
-        return
+        print("❌ No analysis results available")
+        return False
     
-    print("\n💾 Saving best configuration...")
+    print("💾 Saving best configuration...")
     
     # Get best trial
     best_trial = analysis.get_best_trial("val_map", "max")
     best_config = best_trial.config
+    best_metrics = best_trial.last_result
     
     # Create optimized config
     optimized_config = base_config.copy()
     
-    # Update with best hyperparameters
-    optimized_config['model']['learning_rate'] = best_config['learning_rate']
-    optimized_config['model']['weight_decay'] = best_config['weight_decay']
-    optimized_config['model']['dropout'] = best_config['dropout']
-    
-    optimized_config['data']['batch_size'] = best_config['batch_size']
-    optimized_config['data']['augment_strength'] = best_config['augment_strength']
-    
+    # Update with best parameters
+    optimized_config['training']['learning_rate'] = best_config['learning_rate']
     optimized_config['training']['max_epochs'] = best_config['max_epochs']
+    optimized_config['training']['weight_decay'] = best_config['weight_decay']
+    optimized_config['data']['batch_size'] = best_config['batch_size']
+    optimized_config['model']['model_name'] = f"facebook/detr-{best_config['backbone']}"
+    optimized_config['model']['dropout'] = best_config['dropout']
     optimized_config['training']['scheduler_params'] = {
         'T_max': best_config['scheduler_t_max'],
         'eta_min': best_config['scheduler_eta_min']
     }
+    optimized_config['data']['augmentations']['strength'] = best_config['augment_strength']
     
-    if best_config['backbone'] == 'resnet101':
-        optimized_config['model']['model_name'] = 'facebook/detr-resnet-101'
-    
-    # Save optimized config
-    import yaml
-    optimized_config_path = f"{BASE_VOLUME_PATH}/configs/detection_detr_optimized.yaml"
-    
-    with open(optimized_config_path, 'w') as f:
-        yaml.dump(optimized_config, f)
-    
-    print(f"✅ Optimized configuration saved to: {optimized_config_path}")
-    print(f"   Best val_map: {best_trial.last_result['val_map']:.4f}")
-    print(f"   Best config: {best_config}")
-    
-    # Save results summary
-    results_summary = {
-        'best_config': best_config,
-        'best_val_map': best_trial.last_result['val_map'],
+    # Add optimization metadata
+    optimized_config['optimization'] = {
+        'best_val_map': best_metrics['val_map'],
+        'best_val_loss': best_metrics['val_loss'],
+        'trial_id': best_trial.trial_id,
         'total_trials': len(results_df),
-        'mean_val_map': results_df['val_map'].mean(),
-        'std_val_map': results_df['val_map'].std(),
-        'all_results': results_df.to_dict('records')
+        'optimization_date': str(pd.Timestamp.now()),
+        'parameter_importance': dict(parameter_importance) if 'parameter_importance' in locals() else {}
     }
     
-    summary_path = f"{BASE_VOLUME_PATH}/results/hyperparameter_tuning_summary.yaml"
-    os.makedirs(os.path.dirname(summary_path), exist_ok=True)
+    # Save optimized config
+    config_path = f"{TUNING_RESULTS_DIR}/optimized_detr_config.yaml"
+    with open(config_path, 'w') as f:
+        yaml.dump(optimized_config, f, default_flow_style=False)
+    
+    print(f"✅ Optimized configuration saved to: {config_path}")
+    print(f"   Best val_map: {best_metrics['val_map']:.4f}")
+    print(f"   Best learning_rate: {best_config['learning_rate']:.2e}")
+    print(f"   Best batch_size: {best_config['batch_size']}")
+    print(f"   Best backbone: {best_config['backbone']}")
+    
+    # Save results summary
+    summary_path = f"{TUNING_RESULTS_DIR}/optimization_summary.json"
+    summary = {
+        'best_config': best_config,
+        'best_metrics': best_metrics,
+        'total_trials': len(results_df),
+        'successful_trials': len(results_df[results_df['val_map'] > 0]),
+        'parameter_importance': dict(parameter_importance) if 'parameter_importance' in locals() else {},
+        'optimization_date': str(pd.Timestamp.now())
+    }
     
     with open(summary_path, 'w') as f:
-        yaml.dump(results_summary, f)
+        json.dump(summary, f, indent=2)
     
-    print(f"✅ Results summary saved to: {summary_path}")
+    print(f"✅ Optimization summary saved to: {summary_path}")
     
-    return optimized_config
+    return True
 
-if analysis and results_df is not None:
-    optimized_config = save_best_configuration(analysis, results_df)
+# Save best configuration
+config_saved = save_best_configuration(analysis, results_df)
 
 # COMMAND ----------
 
 # MAGIC %md
-# MAGIC ## 8. Summary and Next Steps
-
-# COMMAND ----------
-
-# MAGIC %md
-# MAGIC ### Hyperparameter Tuning Summary
+# MAGIC ## 9. Summary and Next Steps
 
 # COMMAND ----------
 
@@ -696,69 +729,26 @@ print("=" * 60)
 if analysis and results_df is not None:
     best_trial = analysis.get_best_trial("val_map", "max")
     
-    print(f"✅ Optimization Results:")
+    print(f"✅ Optimization completed successfully!")
     print(f"   Total trials: {len(results_df)}")
+    print(f"   Successful trials: {len(results_df[results_df['val_map'] > 0])}")
     print(f"   Best val_map: {best_trial.last_result['val_map']:.4f}")
-    print(f"   Mean val_map: {results_df['val_map'].mean():.4f}")
-    print(f"   Std val_map: {results_df['val_map'].std():.4f}")
+    print(f"   Best learning rate: {best_trial.config['learning_rate']:.2e}")
+    print(f"   Best batch size: {best_trial.config['batch_size']}")
+    print(f"   Best backbone: {best_trial.config['backbone']}")
     
-    print(f"\n🏆 Best Configuration:")
-    best_config = best_trial.config
-    for param, value in best_config.items():
-        print(f"   {param}: {value}")
+    print(f"\n📁 Results saved to:")
+    print(f"   Tuning results: {TUNING_RESULTS_DIR}")
+    print(f"   Optimized config: {TUNING_RESULTS_DIR}/optimized_detr_config.yaml")
+    print(f"   Summary: {TUNING_RESULTS_DIR}/optimization_summary.json")
     
-    print(f"\n📁 Output Files:")
-    print(f"   Optimized config: {BASE_VOLUME_PATH}/configs/detection_detr_optimized.yaml")
-    print(f"   Results summary: {BASE_VOLUME_PATH}/results/hyperparameter_tuning_summary.yaml")
-    print(f"   Ray results: {BASE_VOLUME_PATH}/ray_results/")
+    print(f"\n🎯 Next steps:")
+    print(f"   1. Use the optimized configuration for final training")
+    print(f"   2. Run the training notebook with the new config")
+    print(f"   3. Compare results with the baseline model")
     
-    print(f"\n🎯 Next Steps:")
-    print(f"   1. Use optimized configuration for final training")
-    print(f"   2. Run notebook 02_model_training.py with optimized config")
-    print(f"   3. Compare results with baseline configuration")
-    print(f"   4. Consider additional tuning if needed")
 else:
     print("❌ Optimization failed or no results available")
+    print("   Check the logs for error details")
 
-print("=" * 60)
-
-# COMMAND ----------
-
-# MAGIC %md
-# MAGIC ### Understanding Hyperparameter Tuning for DETR
-
-# MAGIC 
-# MAGIC ### Key Insights:
-# MAGIC 
-# MAGIC **1. Learning Rate Sensitivity:**
-# MAGIC - DETR is sensitive to learning rate choice
-# MAGIC - Too high: training instability, poor convergence
-# MAGIC - Too low: slow convergence, suboptimal results
-# MAGIC - Optimal range: 1e-5 to 1e-3 (log scale)
-# MAGIC 
-# MAGIC **2. Batch Size Considerations:**
-# MAGIC - Larger batches: better gradient estimates, but memory constraints
-# MAGIC - Smaller batches: more noise, but better generalization
-# MAGIC - Optimal: 16-32 for most setups
-# MAGIC 
-# MAGIC **3. Weight Decay Impact:**
-# MAGIC - Prevents overfitting on COCO dataset
-# MAGIC - Critical for transformer-based models
-# MAGIC - Optimal range: 1e-5 to 1e-3
-# MAGIC 
-# MAGIC **4. Architecture Choices:**
-# MAGIC - ResNet-50 vs ResNet-101: trade-off between speed and accuracy
-# MAGIC - ResNet-101: better accuracy, slower training
-# MAGIC - ResNet-50: faster training, slightly lower accuracy
-# MAGIC 
-# MAGIC **5. Training Duration:**
-# MAGIC - DETR benefits from longer training
-# MAGIC - Early stopping prevents overfitting
-# MAGIC - Optimal: 100-200 epochs
-# MAGIC 
-# MAGIC **6. Bayesian Optimization Benefits:**
-# MAGIC - Efficient exploration of search space
-# MAGIC - Focuses on promising regions
-# MAGIC - Reduces total number of trials needed
-# MAGIC 
-# MAGIC The hyperparameter tuning process helps find the optimal configuration for your specific dataset and hardware setup! 
+print("=" * 60) 

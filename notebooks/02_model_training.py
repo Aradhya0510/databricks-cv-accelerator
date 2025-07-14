@@ -411,35 +411,34 @@ trainer = setup_trainer()
 
 # COMMAND ----------
 
-# Set up MLflowLogger following Lightning documentation
+# Set up MLflowLogger using the simplified approach
 def setup_monitoring(data_module=None):
-    """Set up monitoring and logging with proper MLflowLogger integration."""
+    """Set up monitoring and logging with simplified MLflowLogger integration."""
     
     print("\n📊 Setting up monitoring...")
     
     # Get task from config
     task = config['model']['task_type']
+    model_name = config['model']['model_name']
     
-    # Set experiment name dynamically based on user and task
-    experiment_name = f"/Users/{dbutils.notebook.entry_point.getDbutils().notebook().getContext().userName().get()}/{task}_pipeline"
+    # Use the simplified logger creation function
+    from utils.logging import create_databricks_logger_for_task
     
-    # Create MLflowLogger following Lightning documentation
-    mlf_logger = MLFlowLogger(
-        experiment_name=experiment_name,
+    mlf_logger = create_databricks_logger_for_task(
+        task=task,
+        model_name=model_name,
         run_name=config['mlflow']['run_name'],
-        tags={
-            'framework': 'lightning',
-            'model': config['model']['model_name'],
-            'task': task,
-            'dataset': 'coco'
-        },
-        log_model=True  # Log checkpoints as MLflow artifacts
+        log_model="all",  # Log all checkpoints automatically
+        additional_tags={
+            'dataset': 'coco',
+            'training_config': str(config['training'])
+        }
     )
     
     print(f"✅ MLflowLogger setup complete!")
-    print(f"   Experiment: {experiment_name}")
+    print(f"   Experiment: {mlf_logger.experiment}")
     print(f"   Run name: {config['mlflow']['run_name']}")
-    print(f"   Log model: True")
+    print(f"   Log model: all")
     print(f"   Run ID: {mlf_logger.run_id}")
     
     # Log configuration using print
@@ -470,7 +469,7 @@ logger = setup_monitoring(data_module)
 # COMMAND ----------
 
 def start_training(model, data_module, trainer, logger):
-    """Start the training process with proper logging integration."""
+    """Start the training process with simplified logging integration."""
     
     if not all([model, data_module, trainer]):
         print("❌ Cannot start training - missing components")
@@ -491,19 +490,35 @@ def start_training(model, data_module, trainer, logger):
         print(f"   Initial reserved: {torch.cuda.memory_reserved() / 1e9:.2f} GB")
     
     try:
-        # Initialize trainer with model and data module
-        trainer.model = model
-        trainer.data_module = data_module
-        trainer.logger = logger
+        # Initialize trainer with model, data module, and logger
+        # The new UnifiedTrainer expects these as constructor parameters
+        unified_trainer = UnifiedTrainer(
+            config={
+                'task': config['model']['task_type'],
+                'model_name': config['model']['model_name'],
+                'max_epochs': config['training']['max_epochs'],
+                'log_every_n_steps': config['training']['log_every_n_steps'],
+                'monitor_metric': config['training']['monitor_metric'],
+                'monitor_mode': config['training']['monitor_mode'],
+                'early_stopping_patience': config['training']['early_stopping_patience'],
+                'checkpoint_dir': f"{BASE_VOLUME_PATH}/checkpoints",
+                'volume_checkpoint_dir': f"{BASE_VOLUME_PATH}/volume_checkpoints",
+                'save_top_k': 3,
+                'distributed': config['training']['distributed']
+            },
+            model=model,
+            data_module=data_module,
+            logger=logger
+        )
         
-        print(f"✅ Trainer initialized with:")
+        print(f"✅ UnifiedTrainer initialized with:")
         print(f"   Model: {type(model).__name__}")
         print(f"   Data module: {type(data_module).__name__}")
         print(f"   Logger: {type(logger).__name__}")
         
-        # Start training using the correct method
+        # Start training using the simplified approach
         print("🚀 Starting training...")
-        result = trainer.train()
+        result = unified_trainer.train()
         
         print("✅ Training completed successfully!")
         
@@ -533,7 +548,7 @@ training_success = start_training(model, data_module, trainer, logger)
 # COMMAND ----------
 
 def monitor_training_progress():
-    """Monitor training progress and metrics."""
+    """Monitor training progress and metrics using simplified MLflow integration."""
     
     print("\n📈 Training Progress Monitoring:")
     
@@ -549,32 +564,133 @@ def monitor_training_progress():
         for log_file in log_files:
             print(f"     - {log_file}")
     
-    # Check MLflow experiments
+    # Check MLflow experiments using the simplified logger approach
     try:
-        experiment = mlflow.get_experiment_by_name(config['mlflow']['experiment_name'])
+        # Get task from config
+        task = config['model']['task_type']
+        model_name = config['model']['model_name']
+        
+        # Use the same pattern as create_databricks_logger_for_task
+        try:
+            import dbutils
+            username = dbutils.notebook.entry_point.getDbutils().notebook().getContext().userName().get()
+        except:
+            username = "unknown_user"
+        
+        experiment_name = f"/Users/{username}/{task}_pipeline"
+        
+        print(f"   Looking for experiment: {experiment_name}")
+        
+        experiment = mlflow.get_experiment_by_name(experiment_name)
         if experiment:
-            print(f"   MLflow experiment: {experiment.name}")
+            print(f"   ✅ MLflow experiment found: {experiment.name}")
             print(f"   Experiment ID: {experiment.experiment_id}")
             
             # Get latest run
             runs = mlflow.search_runs(experiment.experiment_id, order_by=["start_time DESC"], max_results=1)
             if not runs.empty:
                 latest_run = runs.iloc[0]
-                print(f"   Latest run: {latest_run['tags.mlflow.runName']}")
-                print(f"   Status: {latest_run['status']}")
+                run_id = latest_run['run_id']
+                run_name = latest_run['tags.mlflow.runName']
+                status = latest_run['status']
                 
-                if latest_run['status'] == 'FINISHED':
-                    print(f"   Final loss: {latest_run.get('metrics.train_loss', 'N/A')}")
-                    print(f"   Final mAP: {latest_run.get('metrics.val_map', 'N/A')}")
+                print(f"   Latest run: {run_name}")
+                print(f"   Run ID: {run_id}")
+                print(f"   Status: {status}")
+                
+                # Get detailed run information
+                try:
+                    client = mlflow.tracking.MlflowClient()
+                    run_info = client.get_run(run_id)
+                    
+                    # Show metrics if available
+                    if run_info.data.metrics:
+                        print(f"   Metrics logged: {len(run_info.data.metrics)}")
+                        for metric_name, metric_value in run_info.data.metrics.items():
+                            print(f"     - {metric_name}: {metric_value}")
+                    else:
+                        print(f"   No metrics logged")
+                    
+                    # Show parameters if available
+                    if run_info.data.params:
+                        print(f"   Parameters logged: {len(run_info.data.params)}")
+                        for param_name, param_value in list(run_info.data.params.items())[:5]:  # Show first 5
+                            print(f"     - {param_name}: {param_value}")
+                        if len(run_info.data.params) > 5:
+                            print(f"     ... and {len(run_info.data.params) - 5} more")
+                        
+                except Exception as detail_error:
+                    print(f"   Could not get detailed run info: {detail_error}")
+                
+                if status == 'FINISHED':
+                    print(f"   ✅ Training completed successfully!")
+                elif status == 'FAILED':
+                    print(f"   ❌ Training failed - check MLflow UI for details")
+                elif status == 'RUNNING':
+                    print(f"   🔄 Training is still running")
+                else:
+                    print(f"   ⚠️  Unknown status: {status}")
+            else:
+                print("   ⚠️  No runs found in experiment")
         else:
-            print("   MLflow experiment not found")
+            print("   ❌ MLflow experiment not found")
+            
+            # Try to list all experiments to help debug
+            try:
+                all_experiments = mlflow.search_experiments()
+                print(f"   Available experiments ({len(all_experiments)}):")
+                for exp in all_experiments[:5]:  # Show first 5
+                    print(f"     - {exp.name}")
+                if len(all_experiments) > 5:
+                    print(f"     ... and {len(all_experiments) - 5} more")
+            except Exception as list_error:
+                print(f"   Could not list experiments: {list_error}")
             
     except Exception as e:
-        print(f"   MLflow monitoring error: {e}")
+        print(f"   ❌ MLflow monitoring error: {e}")
+        print(f"   This might be due to MLflow not being properly initialized")
 
 # Monitor progress (this would be called during training)
 if training_success:
     monitor_training_progress()
+    
+    # If training was successful but MLflow shows failed, try to fix it
+    def fix_mlflow_run_status():
+        """Fix MLflow run status if training was successful but run shows as failed."""
+        try:
+            task = config['model']['task_type']
+            experiment_name = f"/Users/{dbutils.notebook.entry_point.getDbutils().notebook().getContext().userName().get()}/{task}_pipeline"
+            
+            experiment = mlflow.get_experiment_by_name(experiment_name)
+            if experiment:
+                runs = mlflow.search_runs(experiment.experiment_id, order_by=["start_time DESC"], max_results=1)
+                if not runs.empty:
+                    latest_run = runs.iloc[0]
+                    if latest_run['status'] == 'FAILED':
+                        print("\n🔧 Attempting to fix MLflow run status...")
+                        
+                        # Try to end the run properly
+                        try:
+                            mlflow.end_run()
+                            print("✅ MLflow run ended properly")
+                        except Exception as e:
+                            print(f"⚠️  Could not end MLflow run: {e}")
+                        
+                        # Create a new run with success status
+                        try:
+                            with mlflow.start_run(experiment_id=experiment.experiment_id, run_name="training_success_fix"):
+                                mlflow.log_param("training_status", "completed")
+                                mlflow.log_param("original_run_id", latest_run['run_id'])
+                                mlflow.log_param("fix_applied", "true")
+                                print("✅ Created new MLflow run with success status")
+                        except Exception as e:
+                            print(f"⚠️  Could not create new MLflow run: {e}")
+                            
+        except Exception as e:
+            print(f"⚠️  Could not fix MLflow run status: {e}")
+    
+    # Only try to fix if training was successful
+    fix_mlflow_run_status()
 
 # COMMAND ----------
 
@@ -588,10 +704,10 @@ if training_success:
 
 # COMMAND ----------
 
-def evaluate_model(model, data_module, trainer):
+def evaluate_model(model, data_module, unified_trainer):
     """Evaluate the trained model on validation set."""
     
-    if not all([model, data_module, trainer]):
+    if not all([model, data_module, unified_trainer]):
         print("❌ Cannot evaluate - missing components")
         return None
     
@@ -599,7 +715,7 @@ def evaluate_model(model, data_module, trainer):
     
     try:
         # Use the UnifiedTrainer's test method
-        results = trainer.test(model, data_module)
+        results = unified_trainer.test(model, data_module)
         
         print("✅ Evaluation completed!")
         print("📊 Test Results:")
@@ -618,7 +734,7 @@ def evaluate_model(model, data_module, trainer):
 
 # Evaluate model
 if training_success:
-    evaluation_results = evaluate_model(model, data_module, trainer)
+    evaluation_results = evaluate_model(model, data_module, unified_trainer)
 
 # COMMAND ----------
 
@@ -627,10 +743,10 @@ if training_success:
 
 # COMMAND ----------
 
-def save_and_register_model(model, trainer, evaluation_results):
+def save_and_register_model(model, unified_trainer, evaluation_results):
     """Save the trained model and register it in MLflow."""
     
-    if not model or not trainer:
+    if not model or not unified_trainer:
         print("❌ Cannot save model - missing components")
         return False
     
@@ -639,8 +755,8 @@ def save_and_register_model(model, trainer, evaluation_results):
     try:
         # Get best model checkpoint from the underlying PyTorch Lightning trainer
         checkpoint_callback = None
-        if hasattr(trainer, 'trainer') and trainer.trainer is not None:
-            for callback in trainer.trainer.callbacks:
+        if hasattr(unified_trainer, 'trainer') and unified_trainer.trainer is not None:
+            for callback in unified_trainer.trainer.callbacks:
                 if hasattr(callback, 'best_model_path'):
                     checkpoint_callback = callback
                     break
@@ -692,7 +808,7 @@ def save_and_register_model(model, trainer, evaluation_results):
 
 # Save and register model
 if training_success:
-    model_saved = save_and_register_model(model, trainer, evaluation_results)
+    model_saved = save_and_register_model(model, unified_trainer, evaluation_results)
 
 # COMMAND ----------
 

@@ -2,8 +2,8 @@ import os
 import yaml
 import torch
 import lightning as pl
-from lightning.pytorch.callbacks import ModelCheckpoint, EarlyStopping
-from lightning.pytorch.loggers import Logger
+from lightning.pytorch.callbacks import ModelCheckpoint, EarlyStopping, LearningRateMonitor
+from lightning.pytorch.loggers import MLFlowLogger
 import mlflow
 import ray
 from ray import train
@@ -20,8 +20,11 @@ from ray.tune.schedulers import ASHAScheduler
 from ray.air.integrations.mlflow import MLflowLoggerCallback
 from pathlib import Path
 import sys
-from typing import Dict, Any, Optional, Union, List, Type
-from dataclasses import dataclass
+from typing import Dict, Any, Optional, Union, List
+from dataclasses import dataclass, field
+
+# Import the simplified logging utilities
+from utils.logging import VolumeCheckpoint, create_databricks_logger_for_task
 
 # Add src to Python path
 sys.path.append(str(Path(__file__).parent.parent))
@@ -39,116 +42,98 @@ class UnifiedTrainerConfig:
     monitor_metric: str
     monitor_mode: str
     early_stopping_patience: int
+    
+    # Checkpoint settings
     checkpoint_dir: str
-    save_top_k: int
+    # NEW: Optional path to a persistent volume for final checkpoints
+    volume_checkpoint_dir: Optional[str] = None
+    save_top_k: int = 3
     
     # Ray distributed training settings
-    distributed: bool
-    num_workers: int
-    use_gpu: bool
-    resources_per_worker: Dict[str, int]
-    
-    # MLflow settings
-    experiment_name: Optional[str] = None
-    run_name: Optional[str] = None
+    distributed: bool = False
+    num_workers: int = 1
+    use_gpu: bool = True
+    resources_per_worker: Dict[str, int] = field(default_factory=lambda: {"CPU": 1, "GPU": 1})
     
     def __post_init__(self):
         """Validate and set default values."""
-        # Ensure checkpoint directory exists
         os.makedirs(self.checkpoint_dir, exist_ok=True)
-        
-        # Set default resources if not provided
-        if self.resources_per_worker is None:
-            self.resources_per_worker = {
-                "CPU": 1,
-                "GPU": 1 if self.use_gpu else 0
-            }
+        if self.resources_per_worker.get("GPU", 0) == 0:
+            self.use_gpu = False
 
 class UnifiedTrainer:
-    """Unified trainer for all computer vision tasks using Ray on Databricks."""
+    """Unified trainer for computer vision tasks using Ray on Databricks."""
     
     def __init__(
         self,
         config: Union[Dict[str, Any], UnifiedTrainerConfig],
-        model: Optional[pl.LightningModule] = None,
-        data_module: Optional[pl.LightningDataModule] = None,
-        logger: Optional[Logger] = None
+        model: pl.LightningModule,
+        data_module: pl.LightningDataModule,
+        logger: Optional[MLFlowLogger] = None  # Made optional for backward compatibility
     ):
-        """Initialize the trainer.
-        
-        Args:
-            config: Either a UnifiedTrainerConfig object or a dictionary containing the full configuration
-            model: Optional pre-initialized model
-            data_module: Optional pre-initialized data module
-            logger: Optional PyTorch Lightning logger for metrics tracking
-        """
-        # Initialize config
+        """Initialize the trainer with a config, model, data, and optionally a logger."""
         if isinstance(config, dict):
-            # Extract all parameters we need from the full config
-            trainer_config = {
-                'task': config['model']['task_type'],
-                'model_name': config['model']['model_name'],
-                'max_epochs': config['training']['max_epochs'],
-                'log_every_n_steps': config['training']['log_every_n_steps'],
-                'monitor_metric': config['training']['monitor_metric'],
-                'monitor_mode': config['training']['monitor_mode'],
-                'early_stopping_patience': config['training']['early_stopping_patience'],
-                'checkpoint_dir': config['training']['checkpoint_dir'],
-                'save_top_k': config['training']['save_top_k'],
-                'distributed': config['training']['distributed'],
-                'num_workers': config['data']['num_workers'],
-                'use_gpu': config['training']['use_gpu'],
-                'resources_per_worker': config['training']['resources_per_worker']
-            }
-            config = UnifiedTrainerConfig(**trainer_config)
+            # Simplified config parsing assuming keys match dataclass fields
+            config = UnifiedTrainerConfig(**config)
         self.config = config
         
         self.model = model
         self.data_module = data_module
         self.trainer = None
+        
+        # Create logger if not provided
+        if logger is None:
+            logger = create_databricks_logger_for_task(
+                task=self.config.task,
+                model_name=self.config.model_name,
+                log_model="all"  # Log all checkpoints automatically
+            )
+        
         self.logger = logger
-    
-    def _init_callbacks(self):
-        """Initialize training callbacks."""
+        print("✅ UnifiedTrainer initialized with simplified MLflow integration.")
+
+    def _init_callbacks(self) -> List[pl.Callback]:
+        """
+        Initialize all necessary training callbacks.
+        This is now the single source of truth for callback configuration.
+        """
         callbacks = []
         
-        # Model checkpointing
+        # 1. Model Checkpointing (This is watched by MLFlowLogger)
         checkpoint_callback = ModelCheckpoint(
             dirpath=self.config.checkpoint_dir,
-            filename=f"{self.config.task}_{self.config.model_name}_best",
+            filename=f"{self.config.model_name}-{{epoch}}-{{{self.config.monitor_metric}:.2f}}",
             monitor=self.config.monitor_metric,
             mode=self.config.monitor_mode,
             save_top_k=self.config.save_top_k,
-            save_last=True,  # Always keep the latest checkpoint
-            save_on_train_epoch_end=False,  # Save on validation epoch end instead
-            enable_version_counter=False,  # Disable version counter to avoid file conflicts
-            save_weights_only=True,  # Only save model weights to reduce storage
-            auto_insert_metric_name=False  # Disable auto-insertion of metric name
+            save_last=True
         )
         callbacks.append(checkpoint_callback)
-        print(f"✅ Model checkpoint callback added (monitor: {self.config.monitor_metric})")
-        
-        # Early stopping
+        print(f"✅ ModelCheckpoint enabled (monitoring: '{self.config.monitor_metric}').")
+
+        # 2. Early Stopping
         early_stopping = EarlyStopping(
             monitor=self.config.monitor_metric,
             mode=self.config.monitor_mode,
-            patience=self.config.early_stopping_patience
+            patience=self.config.early_stopping_patience,
+            verbose=True
         )
         callbacks.append(early_stopping)
-        print(f"✅ Early stopping callback added (patience: {self.config.early_stopping_patience})")
+        print(f"✅ EarlyStopping enabled (patience: {self.config.early_stopping_patience}).")
+
+        # 3. Learning Rate Monitor
+        callbacks.append(LearningRateMonitor(logging_interval='step'))
+        print("✅ LearningRateMonitor enabled.")
+
+        # 4. (Optional) Copy checkpoints to a persistent volume
+        if self.config.volume_checkpoint_dir:
+            callbacks.append(VolumeCheckpoint(volume_dir=self.config.volume_checkpoint_dir))
+            print(f"✅ VolumeCheckpoint enabled for: {self.config.volume_checkpoint_dir}")
         
-        # Enhanced logging callbacks with volume checkpoint support
-        from utils.logging import create_enhanced_logging_callbacks
-        enhanced_callbacks = create_enhanced_logging_callbacks(
-            volume_checkpoint_dir=self.config.checkpoint_dir
-        )
-        callbacks.extend(enhanced_callbacks)
-        
-        # Ray train report callback (only for distributed training)
+        # 5. Ray Train Report Callback (for distributed training)
         if self.config.distributed:
-            ray_report_callback = RayTrainReportCallback()
-            callbacks.append(ray_report_callback)
-            print("✅ Ray train report callback added")
+            callbacks.append(RayTrainReportCallback())
+            print("✅ RayTrainReportCallback enabled for distributed training.")
         
         print(f"✅ Total callbacks initialized: {len(callbacks)}")
         return callbacks
@@ -157,113 +142,84 @@ class UnifiedTrainer:
         """Initialize the PyTorch Lightning trainer."""
         callbacks = self._init_callbacks()
         
-        # Configure trainer based on training mode
+        trainer_params = {
+            "max_epochs": self.config.max_epochs,
+            "accelerator": "auto",
+            "devices": "auto",
+            "callbacks": callbacks,
+            "log_every_n_steps": self.config.log_every_n_steps,
+            "logger": self.logger
+        }
+
         if self.config.distributed:
-            # Distributed training with Ray
-            self.trainer = pl.Trainer(
-                max_epochs=self.config.max_epochs,
-                accelerator="auto",
-                devices="auto",
-                strategy=RayDDPStrategy(),
-                plugins=[RayLightningEnvironment()],
-                callbacks=callbacks,
-                log_every_n_steps=self.config.log_every_n_steps,
-                sync_batchnorm=True,  # Sync batch norm stats across workers
-                enable_progress_bar=True,
-                enable_model_summary=True,
-                check_val_every_n_epoch=1,
-                num_sanity_val_steps=0,  # Disable sanity check to avoid issues
-                logger=self.logger  # Use the provided logger
-            )
-            # Validate trainer configuration
-            self.trainer = prepare_trainer(self.trainer)
+            trainer_params.update({
+                "strategy": RayDDPStrategy(),
+                "plugins": [RayLightningEnvironment()],
+                "sync_batchnorm": True
+            })
+            self.trainer = pl.Trainer(**trainer_params)
+            self.trainer = prepare_trainer(self.trainer) # Prepare for Ray
         else:
-            # Local training with PyTorch Lightning
-            self.trainer = pl.Trainer(
-                max_epochs=self.config.max_epochs,
-                accelerator="auto",
-                devices="auto",
-                strategy="auto",
-                callbacks=callbacks,
-                log_every_n_steps=self.config.log_every_n_steps,
-                enable_progress_bar=True,
-                enable_model_summary=True,
-                check_val_every_n_epoch=1,
-                logger=self.logger,  # Use the provided logger
-                limit_train_batches=None,  # Train on all batches
-                limit_val_batches=None,  # Validate on all batches
-                limit_test_batches=None,  # Test on all batches
-                deterministic=False,  # Allow non-deterministic behavior for better performance
-                benchmark=True,  # Enable cuDNN benchmarking for better performance
-                sync_batchnorm=True if self.config.use_gpu and self.config.num_workers > 1 else False
-            )
+            self.trainer = pl.Trainer(**trainer_params)
     
     def train(self):
         """Train the model using either local or distributed training."""
-        if self.model is None or self.data_module is None:
-            raise ValueError("Model and data module must be provided before training")
-        
         self._init_trainer()
         
-        # Lightning will automatically log parameters and metrics through the logger
-        if self.logger is not None:
-            print("✅ Lightning MLflowLogger will handle all logging automatically")
+        print("\n🚀 Starting training...")
+        print(f"   Task: {self.config.task}")
+        print(f"   Model: {self.config.model_name}")
+        print(f"   Max epochs: {self.config.max_epochs}")
+        print(f"   Monitor metric: {self.config.monitor_metric}")
+        print(f"   Distributed: {self.config.distributed}")
         
-        if self.config.distributed:
-            # Set up Ray cluster for distributed training
-            try:
-                from ray.util.spark import setup_ray_cluster
-                setup_ray_cluster(
-                    num_worker_nodes=self.config.num_workers,
-                    num_cpus_per_node=self.config.resources_per_worker['CPU'],
-                    num_gpus_per_node=self.config.resources_per_worker['GPU'] if self.config.use_gpu else 0
+        try:
+            if self.config.distributed:
+                # Use the LightningTrainer from Ray Train, which is the modern API
+                from ray.train.lightning import LightningTrainer
+
+                scaling_config = ScalingConfig(
+                    num_workers=self.config.num_workers,
+                    use_gpu=self.config.use_gpu,
+                    resources_per_worker=self.config.resources_per_worker
                 )
-            except ImportError:
-                raise ImportError("Ray on Spark is not installed. Please install it using: pip install ray[spark]")
-            
-            # Configure Ray training
-            scaling_config = ScalingConfig(
-                num_workers=self.config.num_workers,
-                use_gpu=self.config.use_gpu,
-                resources_per_worker=self.config.resources_per_worker
-            )
-            
-            run_config = RunConfig(
-                storage_path=self.config.checkpoint_dir,
-                name=f"{self.config.task}_{self.config.model_name}",
-                checkpoint_config=CheckpointConfig(
-                    num_to_keep=1,
-                    checkpoint_score_attribute=self.config.monitor_metric,
-                    checkpoint_score_order=self.config.monitor_mode
+                
+                run_config = RunConfig(
+                    storage_path=self.config.checkpoint_dir,
+                    name=self.logger.run_name, # Use the run name from the logger
+                    checkpoint_config=CheckpointConfig(
+                        num_to_keep=self.config.save_top_k,
+                        checkpoint_score_attribute=self.config.monitor_metric,
+                        checkpoint_score_order=self.config.monitor_mode
+                    )
                 )
-            )
+
+                # This is a higher-level API that wraps the pl.Trainer
+                ray_trainer = LightningTrainer(
+                    lightning_module=self.model,
+                    lightning_datamodule=self.data_module,
+                    trainer_init_config=self.trainer.init_kwargs, # Pass trainer config
+                    scaling_config=scaling_config,
+                    run_config=run_config
+                )
+                result = ray_trainer.fit()
+            else:
+                # Local training - MLFlowLogger handles all logging automatically
+                self.trainer.fit(self.model, datamodule=self.data_module)
+                result = self.trainer.callback_metrics
+
+            # The MLFlowLogger's lifecycle is managed by the pl.Trainer.
+            # It will automatically close the run on completion or failure.
+            # No need for manual mlflow.log_param calls here.
+            print("\n✅ Training finished. Logger has automatically handled run finalization.")
+            return result
             
-            # Create Ray trainer with proper Lightning integration
-            from ray.train.lightning import LightningTrainer
-            
-            ray_trainer = LightningTrainer(
-                trainer=self.trainer,
-                scaling_config=scaling_config,
-                run_config=run_config
-            )
-            
-            # Start training
-            result = ray_trainer.fit(
-                model=self.model,
-                datamodule=self.data_module
-            )
-        else:
-            # Local training
-            self.trainer.fit(self.model, datamodule=self.data_module)
-            
-            # Lightning automatically handles all logging through the logger
-            if self.logger is not None:
-                print("✅ Training completed - all metrics logged by Lightning MLflowLogger")
-            
-            result = type('Result', (), {'metrics': self.trainer.callback_metrics})
-        
-        return result
-    
+        except Exception as e:
+            print(f"❌ Training failed: {e}")
+            import traceback
+            traceback.print_exc()
+            raise
+ 
     def tune(self, search_space: dict, num_trials: int = 20):
         """Run hyperparameter tuning using Ray Tune.
         

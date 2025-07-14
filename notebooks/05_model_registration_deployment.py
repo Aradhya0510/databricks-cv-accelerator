@@ -1,8 +1,6 @@
 # Databricks notebook source
-# COMMAND ----------
-
 # MAGIC %md
-# MAGIC # Model Registration and Deployment
+# MAGIC # 05. Model Registration and Deployment
 # MAGIC 
 # MAGIC This notebook demonstrates the complete model lifecycle management process:
 # MAGIC 1. **Model Registration**: Register trained DETR model in Unity Catalog
@@ -42,18 +40,15 @@
 # %pip install -r "../requirements.txt"
 # dbutils.library.restartPython()
 
-# (Databricks only) Run setup and previous notebooks if running interactively
-# %run ./00_setup_and_config
-# %run ./01_data_preparation
-# %run ./02_model_training
-# %run ./04_model_evaluation
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC ## 1. Import Dependencies and Load Configuration
 
 # COMMAND ----------
 
-# DBTITLE 1,Import Dependencies
 import sys
 import os
-from pathlib import Path
 import yaml
 import torch
 import mlflow
@@ -65,40 +60,60 @@ import requests
 from typing import Dict, List, Tuple, Any, Optional
 import time
 from datetime import datetime
+from pathlib import Path
 
-# Add the project root to Python path
-project_root = "/Volumes/<catalog>/<schema>/<volume>/<path>"
-sys.path.append(project_root)
+# Add the src directory to Python path
+sys.path.append('/Workspace/Repos/your-repo/Databricks_CV_ref/src')
 
-# Import project modules
-from src.utils.logging import create_databricks_logger
-from src.utils.coco_handler import COCOHandler
-from src.tasks.detection.model import DetectionModel
-from src.tasks.detection.data import DetectionDataModule
+from config import load_config, get_default_config
+from tasks.detection.model import DetectionModel
+from tasks.detection.data import DetectionDataModule
+from utils.logging import create_databricks_logger
+from utils.coco_handler import COCOHandler
 
-# COMMAND ----------
+# Load configuration from previous notebooks
+CATALOG = "your_catalog"
+SCHEMA = "your_schema"  
+VOLUME = "your_volume"
+PROJECT_PATH = "cv_detr_training"
 
-# DBTITLE 1,Initialize Configuration and Logging
+BASE_VOLUME_PATH = f"/Volumes/{CATALOG}/{SCHEMA}/{VOLUME}/{PROJECT_PATH}"
+CONFIG_PATH = f"{BASE_VOLUME_PATH}/configs/detection_detr_config.yaml"
+
+# Set up volume directories
+DEPLOYMENT_RESULTS_DIR = f"{BASE_VOLUME_PATH}/deployment_results"
+DEPLOYMENT_LOGS_DIR = f"{BASE_VOLUME_PATH}/logs"
+
+# Create directories
+os.makedirs(DEPLOYMENT_RESULTS_DIR, exist_ok=True)
+os.makedirs(DEPLOYMENT_LOGS_DIR, exist_ok=True)
+
+print(f"📁 Volume directories created:")
+print(f"   Deployment Results: {DEPLOYMENT_RESULTS_DIR}")
+print(f"   Deployment Logs: {DEPLOYMENT_LOGS_DIR}")
+
 # Load configuration
-try:
-    config = load_config("detection_detr")
-except NameError:
-    from src.config import load_config
-    config = load_config("detection_detr")
+if os.path.exists(CONFIG_PATH):
+    config = load_config(CONFIG_PATH)
+    # Update checkpoint directory to use volume path
+    config['training']['checkpoint_dir'] = f"{BASE_VOLUME_PATH}/checkpoints"
+    print(f"✅ Fixed config: updated checkpoint directory")
+else:
+    print("⚠️  Config file not found. Using default detection config.")
+    config = get_default_config("detection")
+    # Update checkpoint directory to use volume path
+    config['training']['checkpoint_dir'] = f"{BASE_VOLUME_PATH}/checkpoints"
+
+print("✅ Configuration loaded successfully!")
+print(f"📁 Checkpoint directory: {config['training']['checkpoint_dir']}")
 
 # Initialize logging
-volume_path = os.getenv("UNITY_CATALOG_VOLUME", project_root)
-log_dir = f"{volume_path}/logs"
-os.makedirs(log_dir, exist_ok=True)
-
 logger = create_databricks_logger(
     name="model_registration_deployment",
-    log_file=f"{log_dir}/registration_deployment.log"
+    log_file=f"{DEPLOYMENT_LOGS_DIR}/registration_deployment.log"
 )
 
 # Unity Catalog configuration
-CATALOG = os.getenv("CATALOG", "your_catalog")
-SCHEMA = os.getenv("SCHEMA", "your_schema")
 MODEL_NAME = config['model']['model_name']
 MODEL_VERSION = "1.0.0"
 
@@ -110,7 +125,7 @@ print(f"   Schema: {SCHEMA}")
 # COMMAND ----------
 
 # MAGIC %md
-# MAGIC ## 1. Model Preparation and Validation
+# MAGIC ## 2. Model Preparation and Validation
 
 # COMMAND ----------
 
@@ -125,7 +140,7 @@ def load_trained_model():
     print("📦 Loading trained model for registration...")
     
     # Find best checkpoint
-    checkpoint_dir = f"{volume_path}/checkpoints"
+    checkpoint_dir = f"{BASE_VOLUME_PATH}/checkpoints"
     if os.path.exists(checkpoint_dir):
         checkpoint_files = [f for f in os.listdir(checkpoint_dir) if f.endswith('.ckpt')]
         if checkpoint_files:
@@ -204,38 +219,46 @@ validation_results = validate_model_artifacts(model, config)
 # COMMAND ----------
 
 # MAGIC %md
-# MAGIC ## 2. Unity Catalog Model Registry Setup
+# MAGIC ## 3. Unity Catalog Model Registry Setup
 
 # COMMAND ----------
 
 # MAGIC %md
-# MAGIC ### Configure Unity Catalog Model Registry
+# MAGIC ### Setup Unity Catalog Model Registry
 
 # COMMAND ----------
 
 def setup_unity_catalog_model_registry():
-    """Setup Unity Catalog model registry configuration."""
+    """Set up Unity Catalog model registry for model registration."""
     
     print("🏗️  Setting up Unity Catalog model registry...")
     
-    # Configure MLflow to use Unity Catalog
-    mlflow.set_registry_uri("databricks-uc")
-    
-    # Set the catalog and schema
-    mlflow.set_experiment(f"/Shared/{CATALOG}/{SCHEMA}/experiments")
-    
-    # Create model registry path
-    model_registry_path = f"{CATALOG}.{SCHEMA}.{MODEL_NAME}"
-    
-    print(f"✅ Unity Catalog configured")
-    print(f"   Registry URI: databricks-uc")
-    print(f"   Model Path: {model_registry_path}")
-    print(f"   Catalog: {CATALOG}")
-    print(f"   Schema: {SCHEMA}")
-    
-    return model_registry_path
+    try:
+        # Set up Unity Catalog paths
+        model_registry_path = f"{CATALOG}.{SCHEMA}.{MODEL_NAME}"
+        
+        # Create model registry if it doesn't exist
+        try:
+            spark.sql(f"CREATE SCHEMA IF NOT EXISTS {CATALOG}.{SCHEMA}")
+            print(f"✅ Schema created/verified: {CATALOG}.{SCHEMA}")
+        except Exception as e:
+            print(f"⚠️  Schema creation failed: {e}")
+        
+        # Set up MLflow experiment for model registration
+        experiment_name = f"/Users/{dbutils.notebook.entry_point.getDbutils().notebook().getContext().userName().get()}/model_registry"
+        mlflow.set_experiment(experiment_name)
+        
+        print(f"✅ Unity Catalog model registry setup complete")
+        print(f"   Model registry path: {model_registry_path}")
+        print(f"   Experiment: {experiment_name}")
+        
+        return True
+        
+    except Exception as e:
+        print(f"❌ Unity Catalog setup failed: {e}")
+        return False
 
-model_registry_path = setup_unity_catalog_model_registry()
+registry_ready = setup_unity_catalog_model_registry()
 
 # COMMAND ----------
 
@@ -245,150 +268,161 @@ model_registry_path = setup_unity_catalog_model_registry()
 # COMMAND ----------
 
 def create_model_registry_entry():
-    """Create model registry entry in Unity Catalog."""
+    """Create a model registry entry in Unity Catalog."""
+    
+    if not registry_ready:
+        print("❌ Unity Catalog not ready")
+        return False
     
     print("📝 Creating model registry entry...")
     
     try:
-        # Create or get the model
-        client = mlflow.tracking.MlflowClient()
+        # Create model registry entry
+        model_registry_path = f"{CATALOG}.{SCHEMA}.{MODEL_NAME}"
         
-        # Check if model exists
+        # Set up MLflow model registry
+        mlflow.set_registry_uri("databricks-uc")
+        
+        # Create model if it doesn't exist
         try:
-            model_info = client.get_registered_model(model_registry_path)
-            print(f"✅ Model already exists: {model_info.name}")
-        except:
-            # Create new model
-            model_info = client.create_registered_model(
+            client = mlflow.tracking.MlflowClient()
+            client.create_registered_model(
                 name=model_registry_path,
-                description=f"DETR object detection model for COCO dataset",
-                tags={
-                    "framework": "pytorch",
-                    "model_type": "detection",
-                    "architecture": "detr",
-                    "dataset": "coco",
-                    "task": "object_detection"
-                }
+                description=f"DETR model for object detection - {MODEL_NAME}"
             )
-            print(f"✅ Created new model: {model_info.name}")
+            print(f"✅ Model registry entry created: {model_registry_path}")
+        except Exception as e:
+            print(f"⚠️  Model registry entry may already exist: {e}")
         
-        return model_info
+        return True
         
     except Exception as e:
-        print(f"❌ Failed to create model registry entry: {e}")
-        return None
+        print(f"❌ Model registry entry creation failed: {e}")
+        return False
 
-model_info = create_model_registry_entry()
-
-# COMMAND ----------
-
-# MAGIC %md
-# MAGIC ## 3. Model Registration with MLflow
+registry_entry_created = create_model_registry_entry()
 
 # COMMAND ----------
 
 # MAGIC %md
-# MAGIC ### Prepare Model for MLflow Logging
+# MAGIC ## 4. Model Registration
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC ### Prepare Model for MLflow Registration
 
 # COMMAND ----------
 
 def prepare_model_for_mlflow(model, config, checkpoint_path):
-    """Prepare model for MLflow logging with proper metadata."""
+    """Prepare the model for MLflow registration."""
     
-    print("📦 Preparing model for MLflow logging...")
+    if not model:
+        print("❌ No model available for registration")
+        return None, None, None
     
-    # Create model signature
-    from mlflow.models.signature import infer_signature
+    print("📦 Preparing model for MLflow registration...")
     
-    # Create sample input for signature inference
-    sample_input = torch.randn(1, 3, 800, 800)
-    with torch.no_grad():
-        sample_output = model(sample_input)
-    
-    # Create input example
-    input_example = {
-        "image": sample_input.numpy().tolist(),
-        "image_shape": [1, 3, 800, 800]
-    }
-    
-    # Infer signature
-    signature = infer_signature(
-        inputs=sample_input.numpy(),
-        outputs=sample_output if isinstance(sample_output, torch.Tensor) else sample_output.logits
-    )
-    
-    # Prepare model metadata
-    model_metadata = {
-        "model_name": MODEL_NAME,
-        "model_version": MODEL_VERSION,
-        "framework": "pytorch",
-        "architecture": "detr",
-        "dataset": "coco",
-        "task": "object_detection",
-        "checkpoint_path": checkpoint_path,
-        "training_config": config,
-        "model_parameters": sum(p.numel() for p in model.parameters()),
-        "registration_date": datetime.now().isoformat()
-    }
-    
-    print("✅ Model prepared for MLflow logging")
-    print(f"   Signature: {signature}")
-    print(f"   Parameters: {model_metadata['model_parameters']:,}")
-    
-    return signature, input_example, model_metadata
+    try:
+        # Create model signature
+        from mlflow.models.signature import ModelSignature
+        from mlflow.types.schema import Schema, TensorSpec
+        
+        # Define input schema (image tensor)
+        input_schema = Schema([
+            TensorSpec(np.dtype(np.float32), (-1, 3, 800, 800), name="image")
+        ])
+        
+        # Define output schema (predictions)
+        output_schema = Schema([
+            TensorSpec(np.dtype(np.float32), (-1, -1, 4), name="boxes"),
+            TensorSpec(np.dtype(np.float32), (-1, -1), name="scores"),
+            TensorSpec(np.dtype(np.int64), (-1, -1), name="labels")
+        ])
+        
+        signature = ModelSignature(inputs=input_schema, outputs=output_schema)
+        
+        # Create input example
+        input_example = {
+            "image": torch.randn(1, 3, 800, 800).numpy()
+        }
+        
+        # Create model metadata
+        model_metadata = {
+            "model_name": MODEL_NAME,
+            "model_version": MODEL_VERSION,
+            "framework": "pytorch",
+            "task": "object_detection",
+            "architecture": "DETR",
+            "backbone": "resnet50",
+            "num_classes": config['model']['num_classes'],
+            "image_size": config['data'].get('image_size', 800),
+            "confidence_threshold": config['model'].get('confidence_threshold', 0.7),
+            "training_config": config,
+            "checkpoint_path": checkpoint_path,
+            "registration_date": datetime.now().isoformat()
+        }
+        
+        print("✅ Model preparation completed")
+        print(f"   Signature: {signature}")
+        print(f"   Input example shape: {input_example['image'].shape}")
+        print(f"   Metadata keys: {list(model_metadata.keys())}")
+        
+        return signature, input_example, model_metadata
+        
+    except Exception as e:
+        print(f"❌ Model preparation failed: {e}")
+        return None, None, None
 
 signature, input_example, model_metadata = prepare_model_for_mlflow(model, config, checkpoint_path)
 
 # COMMAND ----------
 
 # MAGIC %md
-# MAGIC ### Log Model to MLflow Registry
+# MAGIC ### Log Model to Registry
 
 # COMMAND ----------
 
 def log_model_to_registry(model, signature, input_example, model_metadata):
-    """Log model to MLflow registry with proper metadata."""
+    """Log the model to Unity Catalog model registry."""
     
-    print("📤 Logging model to MLflow registry...")
+    if not all([model, signature, input_example, model_metadata]):
+        print("❌ Missing required components for model registration")
+        return None
+    
+    print("📤 Logging model to Unity Catalog registry...")
     
     try:
-        with mlflow.start_run():
-            # Log model with metadata
-            mlflow.pytorch.log_model(
+        # Set up MLflow experiment
+        experiment_name = f"/Users/{dbutils.notebook.entry_point.getDbutils().notebook().getContext().userName().get()}/model_registry"
+        mlflow.set_experiment(experiment_name)
+        
+        # Log model to MLflow
+        with mlflow.start_run(run_name=f"model_registration_{MODEL_NAME}"):
+            # Log model
+            model_uri = mlflow.pytorch.log_model(
                 pytorch_model=model,
                 artifact_path="model",
                 signature=signature,
                 input_example=input_example,
-                registered_model_name=model_registry_path,
-                pip_requirements=[
-                    "torch>=1.9.0",
-                    "torchvision>=0.10.0",
-                    "transformers>=4.20.0",
-                    "pillow>=8.0.0",
-                    "numpy>=1.21.0",
-                    "opencv-python>=4.5.0"
-                ],
-                extra_pip_requirements=[
-                    "mlflow>=2.0.0",
-                    "databricks-sdk>=0.12.0"
-                ]
+                registered_model_name=f"{CATALOG}.{SCHEMA}.{MODEL_NAME}"
             )
             
-            # Log additional metadata
-            mlflow.log_dict(model_metadata, "model_metadata.json")
-            mlflow.log_dict(config, "training_config.json")
+            # Log metadata
+            mlflow.log_params(model_metadata)
             
-            # Log model metrics from evaluation
-            if 'evaluation_results' in globals():
-                mlflow.log_metrics(evaluation_results)
+            # Log model artifacts
+            mlflow.log_artifact(checkpoint_path, "checkpoint")
             
-            print("✅ Model logged successfully to MLflow registry")
+            print(f"✅ Model logged successfully")
+            print(f"   Model URI: {model_uri}")
+            print(f"   Registered model: {CATALOG}.{SCHEMA}.{MODEL_NAME}")
+            
+            return model_uri
             
     except Exception as e:
-        print(f"❌ Failed to log model: {e}")
+        print(f"❌ Model logging failed: {e}")
         return None
-    
-    return mlflow.get_artifact_uri("model")
 
 model_uri = log_model_to_registry(model, signature, input_example, model_metadata)
 
@@ -400,12 +434,16 @@ model_uri = log_model_to_registry(model, signature, input_example, model_metadat
 # COMMAND ----------
 
 def validate_logged_model(model_uri):
-    """Validate the logged model using MLflow validation."""
+    """Validate the logged model in the registry."""
+    
+    if not model_uri:
+        print("❌ No model URI available for validation")
+        return False
     
     print("🔍 Validating logged model...")
     
     try:
-        # Load and test the logged model
+        # Load model from registry
         loaded_model = mlflow.pytorch.load_model(model_uri)
         
         # Test inference
@@ -414,8 +452,16 @@ def validate_logged_model(model_uri):
             test_output = loaded_model(test_input)
         
         print("✅ Model validation successful")
-        print(f"   Model URI: {model_uri}")
+        print(f"   Model loaded from: {model_uri}")
+        print(f"   Input shape: {test_input.shape}")
         print(f"   Output type: {type(test_output)}")
+        
+        # Check model metadata
+        client = mlflow.tracking.MlflowClient()
+        model_info = client.get_registered_model(f"{CATALOG}.{SCHEMA}.{MODEL_NAME}")
+        
+        print(f"   Model name: {model_info.name}")
+        print(f"   Latest version: {model_info.latest_versions}")
         
         return True
         
@@ -423,12 +469,12 @@ def validate_logged_model(model_uri):
         print(f"❌ Model validation failed: {e}")
         return False
 
-model_valid = validate_logged_model(model_uri)
+model_validated = validate_logged_model(model_uri)
 
 # COMMAND ----------
 
 # MAGIC %md
-# MAGIC ## 4. Model Serving Deployment
+# MAGIC ## 5. Model Serving Setup
 
 # COMMAND ----------
 
@@ -440,6 +486,10 @@ model_valid = validate_logged_model(model_uri)
 def create_model_serving_endpoint():
     """Create a model serving endpoint for the registered model."""
     
+    if not model_uri:
+        print("❌ No model URI available for serving")
+        return None
+    
     print("🚀 Creating model serving endpoint...")
     
     try:
@@ -449,37 +499,37 @@ def create_model_serving_endpoint():
         # Initialize workspace client
         client = WorkspaceClient()
         
-        # Endpoint configuration
-        endpoint_name = f"{MODEL_NAME}-endpoint"
+        # Define endpoint configuration
+        endpoint_name = f"detr-{MODEL_NAME.replace('/', '-')}"
         
-        # Model serving configuration
-        served_model = ServedModelInput(
-            model_name=model_registry_path,
-            model_version="1",
-            workload_size="Small",
-            scale_to_zero_enabled=True
-        )
-        
-        # Endpoint configuration
+        # Create endpoint configuration
         endpoint_config = EndpointCoreConfigInput(
             name=endpoint_name,
-            served_models=[served_model]
+            served_models=[
+                ServedModelInput(
+                    model_name=f"{CATALOG}.{SCHEMA}.{MODEL_NAME}",
+                    model_version="1",
+                    workload_size="Small",
+                    scale_to_zero_enabled=True
+                )
+            ]
         )
         
         # Create endpoint
         endpoint = client.serving_endpoints.create(endpoint_config)
         
-        print(f"✅ Endpoint created successfully")
+        print(f"✅ Model serving endpoint created")
         print(f"   Endpoint name: {endpoint_name}")
         print(f"   Endpoint ID: {endpoint.id}")
+        print(f"   Model: {CATALOG}.{SCHEMA}.{MODEL_NAME}")
         
-        return endpoint
+        return endpoint_name
         
     except Exception as e:
-        print(f"❌ Failed to create endpoint: {e}")
+        print(f"❌ Endpoint creation failed: {e}")
         return None
 
-endpoint = create_model_serving_endpoint()
+endpoint_name = create_model_serving_endpoint()
 
 # COMMAND ----------
 
@@ -491,45 +541,49 @@ endpoint = create_model_serving_endpoint()
 def wait_for_endpoint_ready(endpoint_name, timeout_minutes=15):
     """Wait for the endpoint to be ready for serving."""
     
+    if not endpoint_name:
+        print("❌ No endpoint name provided")
+        return False
+    
     print(f"⏳ Waiting for endpoint '{endpoint_name}' to be ready...")
     
     try:
         from databricks.sdk import WorkspaceClient
-        client = WorkspaceClient()
         
+        client = WorkspaceClient()
         start_time = time.time()
         timeout_seconds = timeout_minutes * 60
         
         while time.time() - start_time < timeout_seconds:
-            # Get endpoint status
-            endpoint = client.serving_endpoints.get(endpoint_name)
-            
-            if endpoint.state.ready == "READY":
-                print(f"✅ Endpoint '{endpoint_name}' is ready!")
-                print(f"   State: {endpoint.state.ready}")
-                print(f"   URL: {endpoint.state.config.inference_endpoint}")
-                return endpoint
-            elif endpoint.state.ready == "FAILED":
-                print(f"❌ Endpoint '{endpoint_name}' failed to deploy")
-                return None
-            else:
-                print(f"⏳ Endpoint state: {endpoint.state.ready}")
-                time.sleep(30)  # Wait 30 seconds before checking again
+            try:
+                endpoint = client.serving_endpoints.get(endpoint_name)
+                
+                if endpoint.state.ready:
+                    print(f"✅ Endpoint '{endpoint_name}' is ready!")
+                    print(f"   State: {endpoint.state}")
+                    print(f"   URL: {endpoint.state.config.inference_url}")
+                    return True
+                else:
+                    print(f"   Current state: {endpoint.state}")
+                    time.sleep(30)  # Wait 30 seconds before checking again
+                    
+            except Exception as e:
+                print(f"   Checking endpoint status: {e}")
+                time.sleep(30)
         
-        print(f"⏰ Timeout waiting for endpoint to be ready")
-        return None
+        print(f"❌ Endpoint '{endpoint_name}' did not become ready within {timeout_minutes} minutes")
+        return False
         
     except Exception as e:
-        print(f"❌ Error checking endpoint status: {e}")
-        return None
+        print(f"❌ Error waiting for endpoint: {e}")
+        return False
 
-if endpoint:
-    ready_endpoint = wait_for_endpoint_ready(endpoint.name)
+endpoint_ready = wait_for_endpoint_ready(endpoint_name)
 
 # COMMAND ----------
 
 # MAGIC %md
-# MAGIC ## 5. Endpoint Testing and Validation
+# MAGIC ## 6. Endpoint Testing
 
 # COMMAND ----------
 
@@ -541,45 +595,41 @@ if endpoint:
 def test_endpoint_with_sample_data(endpoint_name):
     """Test the deployed endpoint with sample data."""
     
-    print(f"🧪 Testing endpoint '{endpoint_name}' with sample data...")
+    if not endpoint_name or not endpoint_ready:
+        print("❌ Endpoint not ready for testing")
+        return None
+    
+    print("🧪 Testing endpoint with sample data...")
     
     try:
         from databricks.sdk import WorkspaceClient
+        
         client = WorkspaceClient()
-        
-        # Get endpoint details
         endpoint = client.serving_endpoints.get(endpoint_name)
-        inference_url = endpoint.state.config.inference_endpoint
         
-        # Prepare sample image
-        sample_image = np.random.randint(0, 255, (800, 800, 3), dtype=np.uint8)
-        sample_image_pil = Image.fromarray(sample_image)
+        # Get endpoint URL
+        endpoint_url = endpoint.state.config.inference_url
         
-        # Convert to base64 for API call
-        import base64
-        import io
-        buffer = io.BytesIO()
-        sample_image_pil.save(buffer, format='PNG')
-        image_base64 = base64.b64encode(buffer.getvalue()).decode()
+        # Create sample data
+        sample_image = torch.randn(1, 3, 800, 800).numpy()
         
         # Prepare request payload
         payload = {
             "dataframe_records": [
                 {
-                    "image": image_base64,
-                    "image_shape": [800, 800, 3]
+                    "image": sample_image.tolist()
                 }
             ]
         }
         
-        # Make API call
+        # Make prediction request
         headers = {
-            "Authorization": f"Bearer {client.config.token}",
+            "Authorization": f"Bearer {dbutils.notebook.entry_point.getDbutils().notebook().getContext().apiToken().get()}",
             "Content-Type": "application/json"
         }
         
         response = requests.post(
-            f"{inference_url}/invocations",
+            f"{endpoint_url}/invocations",
             json=payload,
             headers=headers
         )
@@ -589,123 +639,137 @@ def test_endpoint_with_sample_data(endpoint_name):
             print("✅ Endpoint test successful")
             print(f"   Response status: {response.status_code}")
             print(f"   Response keys: {list(result.keys())}")
-            return True
+            
+            # Analyze predictions
+            if 'predictions' in result:
+                predictions = result['predictions']
+                print(f"   Number of predictions: {len(predictions)}")
+                
+                if len(predictions) > 0:
+                    first_pred = predictions[0]
+                    print(f"   Prediction keys: {list(first_pred.keys())}")
+                    
+                    if 'boxes' in first_pred:
+                        num_boxes = len(first_pred['boxes'])
+                        print(f"   Number of detected objects: {num_boxes}")
+            
+            return result
         else:
             print(f"❌ Endpoint test failed")
             print(f"   Status code: {response.status_code}")
             print(f"   Response: {response.text}")
-            return False
+            return None
             
     except Exception as e:
-        print(f"❌ Error testing endpoint: {e}")
-        return False
+        print(f"❌ Endpoint testing failed: {e}")
+        return None
 
-if ready_endpoint:
-    endpoint_test_success = test_endpoint_with_sample_data(ready_endpoint.name)
+test_results = test_endpoint_with_sample_data(endpoint_name)
 
 # COMMAND ----------
 
 # MAGIC %md
-# MAGIC ### Performance Testing
+# MAGIC ### Performance Test Endpoint
 
 # COMMAND ----------
 
 def performance_test_endpoint(endpoint_name, num_requests=10):
-    """Test endpoint performance with multiple requests."""
+    """Perform performance testing on the endpoint."""
     
-    print(f"⚡ Performance testing endpoint '{endpoint_name}'...")
+    if not endpoint_name or not endpoint_ready:
+        print("❌ Endpoint not ready for performance testing")
+        return None
+    
+    print(f"⚡ Performance testing endpoint with {num_requests} requests...")
     
     try:
         from databricks.sdk import WorkspaceClient
+        
         client = WorkspaceClient()
-        
-        # Get endpoint details
         endpoint = client.serving_endpoints.get(endpoint_name)
-        inference_url = endpoint.state.config.inference_endpoint
+        endpoint_url = endpoint.state.config.inference_url
         
-        # Prepare sample image
-        sample_image = np.random.randint(0, 255, (800, 800, 3), dtype=np.uint8)
-        sample_image_pil = Image.fromarray(sample_image)
-        
-        # Convert to base64
-        import base64
-        import io
-        buffer = io.BytesIO()
-        sample_image_pil.save(buffer, format='PNG')
-        image_base64 = base64.b64encode(buffer.getvalue()).decode()
-        
-        # Prepare request payload
+        # Create sample data
+        sample_image = torch.randn(1, 3, 800, 800).numpy()
         payload = {
             "dataframe_records": [
                 {
-                    "image": image_base64,
-                    "image_shape": [800, 800, 3]
+                    "image": sample_image.tolist()
                 }
             ]
         }
         
         headers = {
-            "Authorization": f"Bearer {client.config.token}",
+            "Authorization": f"Bearer {dbutils.notebook.entry_point.getDbutils().notebook().getContext().apiToken().get()}",
             "Content-Type": "application/json"
         }
         
         # Performance test
         response_times = []
-        successful_requests = 0
+        success_count = 0
         
         for i in range(num_requests):
             start_time = time.time()
             
-            response = requests.post(
-                f"{inference_url}/invocations",
-                json=payload,
-                headers=headers
-            )
-            
-            end_time = time.time()
-            response_time = end_time - start_time
-            response_times.append(response_time)
-            
-            if response.status_code == 200:
-                successful_requests += 1
-            
-            # Small delay between requests
-            time.sleep(0.1)
+            try:
+                response = requests.post(
+                    f"{endpoint_url}/invocations",
+                    json=payload,
+                    headers=headers,
+                    timeout=30
+                )
+                
+                end_time = time.time()
+                response_time = end_time - start_time
+                response_times.append(response_time)
+                
+                if response.status_code == 200:
+                    success_count += 1
+                    print(f"   Request {i+1}: {response_time:.3f}s ✅")
+                else:
+                    print(f"   Request {i+1}: {response_time:.3f}s ❌ ({response.status_code})")
+                    
+            except Exception as e:
+                end_time = time.time()
+                response_time = end_time - start_time
+                response_times.append(response_time)
+                print(f"   Request {i+1}: {response_time:.3f}s ❌ ({str(e)})")
         
         # Calculate statistics
         avg_response_time = np.mean(response_times)
-        min_response_time = np.min(response_times)
-        max_response_time = np.max(response_times)
-        success_rate = successful_requests / num_requests * 100
+        std_response_time = np.std(response_times)
+        success_rate = success_count / num_requests * 100
+        throughput = 1.0 / avg_response_time if avg_response_time > 0 else 0
         
-        print("📊 Performance Test Results:")
+        print(f"\n📊 Performance Test Results:")
         print(f"   Total requests: {num_requests}")
-        print(f"   Successful requests: {successful_requests}")
+        print(f"   Successful requests: {success_count}")
         print(f"   Success rate: {success_rate:.1f}%")
-        print(f"   Average response time: {avg_response_time:.3f}s")
-        print(f"   Min response time: {min_response_time:.3f}s")
-        print(f"   Max response time: {max_response_time:.3f}s")
+        print(f"   Average response time: {avg_response_time:.3f} ± {std_response_time:.3f}s")
+        print(f"   Throughput: {throughput:.2f} requests/second")
         
-        return {
+        performance_results = {
             'total_requests': num_requests,
-            'successful_requests': successful_requests,
+            'successful_requests': success_count,
             'success_rate': success_rate,
             'avg_response_time': avg_response_time,
-            'min_response_time': min_response_time,
-            'max_response_time': max_response_time
+            'std_response_time': std_response_time,
+            'throughput': throughput,
+            'response_times': response_times
         }
         
+        return performance_results
+        
     except Exception as e:
-        print(f"❌ Error during performance test: {e}")
+        print(f"❌ Performance testing failed: {e}")
         return None
 
-if ready_endpoint:
-    performance_results = performance_test_endpoint(ready_endpoint.name)
+performance_results = performance_test_endpoint(endpoint_name)
 
 # COMMAND ----------
 
 # MAGIC %md
-# MAGIC ## 6. Model Promotion and Lifecycle Management
+# MAGIC ## 7. Model Promotion
 
 # COMMAND ----------
 
@@ -715,33 +779,36 @@ if ready_endpoint:
 # COMMAND ----------
 
 def promote_model_to_production():
-    """Promote the model to production in Unity Catalog."""
+    """Promote the model to production stage."""
+    
+    if not model_uri:
+        print("❌ No model URI available for promotion")
+        return False
     
     print("🚀 Promoting model to production...")
     
     try:
-        from databricks.sdk import WorkspaceClient
-        client = WorkspaceClient()
+        client = mlflow.tracking.MlflowClient()
         
-        # Promote model version to production
-        client.model_registry.transition_model_version_stage(
-            name=model_registry_path,
+        # Transition model to production
+        client.transition_model_version_stage(
+            name=f"{CATALOG}.{SCHEMA}.{MODEL_NAME}",
             version="1",
             stage="Production"
         )
         
-        print("✅ Model promoted to production successfully")
-        print(f"   Model: {model_registry_path}")
+        print(f"✅ Model promoted to production")
+        print(f"   Model: {CATALOG}.{SCHEMA}.{MODEL_NAME}")
         print(f"   Version: 1")
         print(f"   Stage: Production")
         
         return True
         
     except Exception as e:
-        print(f"❌ Failed to promote model: {e}")
+        print(f"❌ Model promotion failed: {e}")
         return False
 
-promotion_success = promote_model_to_production()
+model_promoted = promote_model_to_production()
 
 # COMMAND ----------
 
@@ -751,13 +818,16 @@ promotion_success = promote_model_to_production()
 # COMMAND ----------
 
 def set_model_aliases():
-    """Set model aliases for easy reference."""
+    """Set model aliases for easy access."""
+    
+    if not model_uri:
+        print("❌ No model URI available for aliases")
+        return False
     
     print("🏷️  Setting model aliases...")
     
     try:
-        from databricks.sdk import WorkspaceClient
-        client = WorkspaceClient()
+        client = mlflow.tracking.MlflowClient()
         
         # Set aliases
         aliases = {
@@ -767,21 +837,21 @@ def set_model_aliases():
         }
         
         for alias, version in aliases.items():
-            client.model_registry.set_model_version_tag(
-                name=model_registry_path,
-                version=version,
-                key=alias,
-                value="true"
-            )
+            try:
+                client.set_registered_model_alias(
+                    name=f"{CATALOG}.{SCHEMA}.{MODEL_NAME}",
+                    alias=alias,
+                    version=version
+                )
+                print(f"   ✅ Alias '{alias}' -> version '{version}'")
+            except Exception as e:
+                print(f"   ⚠️  Failed to set alias '{alias}': {e}")
         
-        print("✅ Model aliases set successfully")
-        for alias in aliases.keys():
-            print(f"   {alias}: version {aliases[alias]}")
-        
+        print(f"✅ Model aliases set successfully")
         return True
         
     except Exception as e:
-        print(f"❌ Failed to set model aliases: {e}")
+        print(f"❌ Setting model aliases failed: {e}")
         return False
 
 aliases_set = set_model_aliases()
@@ -789,95 +859,80 @@ aliases_set = set_model_aliases()
 # COMMAND ----------
 
 # MAGIC %md
-# MAGIC ## 7. Save Deployment Information
+# MAGIC ## 8. Save Deployment Summary
 
 # COMMAND ----------
 
 # MAGIC %md
-# MAGIC ### Export Deployment Summary
+# MAGIC ### Save Deployment Summary
 
 # COMMAND ----------
 
 def save_deployment_summary():
-    """Save comprehensive deployment summary."""
+    """Save a comprehensive deployment summary."""
     
     print("💾 Saving deployment summary...")
     
-    # Create deployment directory
-    deployment_dir = f"{volume_path}/deployment"
-    os.makedirs(deployment_dir, exist_ok=True)
-    
-    # Prepare deployment summary
+    # Create deployment summary
     deployment_summary = {
         'model_info': {
             'name': MODEL_NAME,
             'version': MODEL_VERSION,
-            'registry_path': model_registry_path,
+            'uri': model_uri,
+            'checkpoint_path': checkpoint_path
+        },
+        'registry_info': {
             'catalog': CATALOG,
-            'schema': SCHEMA
+            'schema': SCHEMA,
+            'registered_model': f"{CATALOG}.{SCHEMA}.{MODEL_NAME}",
+            'model_validated': model_validated
         },
-        'endpoint_info': {
-            'name': f"{MODEL_NAME}-endpoint" if endpoint else None,
-            'id': endpoint.id if endpoint else None,
-            'url': ready_endpoint.state.config.inference_endpoint if ready_endpoint else None
+        'serving_info': {
+            'endpoint_name': endpoint_name,
+            'endpoint_ready': endpoint_ready,
+            'endpoint_url': f"https://<workspace-url>/serving-endpoints/{endpoint_name}/invocations" if endpoint_name else None
         },
-        'validation_results': validation_results,
-        'performance_results': performance_results if 'performance_results' in locals() else None,
+        'test_results': {
+            'test_successful': test_results is not None,
+            'performance_results': performance_results
+        },
+        'promotion_info': {
+            'model_promoted': model_promoted,
+            'aliases_set': aliases_set
+        },
         'deployment_date': datetime.now().isoformat(),
-        'model_uri': model_uri,
-        'checkpoint_path': checkpoint_path
+        'config': config
     }
     
-    # Save as YAML
-    deployment_path = f"{deployment_dir}/deployment_summary.yaml"
-    with open(deployment_path, 'w') as f:
-        yaml.dump(deployment_summary, f)
+    # Save summary
+    summary_path = f"{DEPLOYMENT_RESULTS_DIR}/deployment_summary.json"
+    with open(summary_path, 'w') as f:
+        json.dump(deployment_summary, f, indent=2)
     
-    print(f"✅ Deployment summary saved to: {deployment_path}")
+    print(f"✅ Deployment summary saved to: {summary_path}")
     
-    # Create deployment report
-    report_path = f"{deployment_dir}/deployment_report.txt"
-    with open(report_path, 'w') as f:
-        f.write("DETR Model Deployment Report\n")
-        f.write("=" * 50 + "\n\n")
-        
-        f.write(f"Model Information:\n")
-        f.write(f"  Name: {MODEL_NAME}\n")
-        f.write(f"  Version: {MODEL_VERSION}\n")
-        f.write(f"  Registry Path: {model_registry_path}\n")
-        f.write(f"  Catalog: {CATALOG}\n")
-        f.write(f"  Schema: {SCHEMA}\n\n")
-        
-        if ready_endpoint:
-            f.write(f"Endpoint Information:\n")
-            f.write(f"  Name: {ready_endpoint.name}\n")
-            f.write(f"  ID: {ready_endpoint.id}\n")
-            f.write(f"  URL: {ready_endpoint.state.config.inference_endpoint}\n\n")
-        
-        if 'performance_results' in locals() and performance_results:
-            f.write(f"Performance Results:\n")
-            f.write(f"  Success Rate: {performance_results['success_rate']:.1f}%\n")
-            f.write(f"  Avg Response Time: {performance_results['avg_response_time']:.3f}s\n")
-            f.write(f"  Min Response Time: {performance_results['min_response_time']:.3f}s\n")
-            f.write(f"  Max Response Time: {performance_results['max_response_time']:.3f}s\n\n")
-        
-        f.write(f"Deployment Date: {datetime.now()}\n")
-        f.write(f"Model URI: {model_uri}\n")
-        f.write(f"Checkpoint Path: {checkpoint_path}\n")
+    # Save detailed results
+    detailed_results = {
+        'validation_results': validation_results,
+        'test_results': test_results,
+        'performance_results': performance_results,
+        'model_metadata': model_metadata if 'model_metadata' in locals() else None
+    }
     
-    print(f"✅ Deployment report saved to: {report_path}")
+    detailed_path = f"{DEPLOYMENT_RESULTS_DIR}/detailed_results.json"
+    with open(detailed_path, 'w') as f:
+        json.dump(detailed_results, f, indent=2)
     
-    return deployment_dir
+    print(f"✅ Detailed results saved to: {detailed_path}")
+    
+    return True
 
-deployment_dir = save_deployment_summary()
+deployment_summary_saved = save_deployment_summary()
 
 # COMMAND ----------
 
 # MAGIC %md
-# MAGIC ## 8. Summary and Next Steps
-
-# MAGIC %md
-# MAGIC ### Deployment Summary
+# MAGIC ## 9. Summary and Next Steps
 
 # COMMAND ----------
 
@@ -888,80 +943,30 @@ print("=" * 60)
 print(f"✅ Model Registration:")
 print(f"   Model: {MODEL_NAME}")
 print(f"   Version: {MODEL_VERSION}")
-print(f"   Registry Path: {model_registry_path}")
-print(f"   Unity Catalog: {CATALOG}.{SCHEMA}")
+print(f"   Registry: {CATALOG}.{SCHEMA}.{MODEL_NAME}")
+print(f"   Model validated: {'✅' if model_validated else '❌'}")
 
-if ready_endpoint:
+if endpoint_name:
     print(f"\n🚀 Model Serving:")
-    print(f"   Endpoint Name: {ready_endpoint.name}")
-    print(f"   Endpoint ID: {ready_endpoint.id}")
-    print(f"   Inference URL: {ready_endpoint.state.config.inference_endpoint}")
-    print(f"   Status: {ready_endpoint.state.ready}")
+    print(f"   Endpoint: {endpoint_name}")
+    print(f"   Status: {'✅ Ready' if endpoint_ready else '❌ Not ready'}")
+    print(f"   Test successful: {'✅' if test_results else '❌'}")
 
-if 'performance_results' in locals() and performance_results:
+if performance_results:
     print(f"\n⚡ Performance:")
-    print(f"   Success Rate: {performance_results['success_rate']:.1f}%")
-    print(f"   Avg Response Time: {performance_results['avg_response_time']:.3f}s")
-    print(f"   Throughput: {1/performance_results['avg_response_time']:.1f} requests/second")
+    print(f"   Success rate: {performance_results.get('success_rate', 0):.1f}%")
+    print(f"   Avg response time: {performance_results.get('avg_response_time', 0):.3f}s")
+    print(f"   Throughput: {performance_results.get('throughput', 0):.2f} req/s")
 
-print(f"\n📁 Deployment Files:")
-print(f"   Summary: {deployment_dir}/deployment_summary.yaml")
-print(f"   Report: {deployment_dir}/deployment_report.txt")
+print(f"\n📁 Results saved to:")
+print(f"   Deployment results: {DEPLOYMENT_RESULTS_DIR}")
+print(f"   Summary: {DEPLOYMENT_RESULTS_DIR}/deployment_summary.json")
+print(f"   Detailed results: {DEPLOYMENT_RESULTS_DIR}/detailed_results.json")
 
-print(f"\n🎯 Next Steps:")
+print(f"\n🎯 Next steps:")
 print(f"   1. Monitor endpoint performance and health")
-print(f"   2. Set up model monitoring and drift detection")
-print(f"   3. Configure alerts for endpoint issues")
-print(f"   4. Plan model updates and retraining")
+print(f"   2. Set up model monitoring and alerting")
+print(f"   3. Implement A/B testing if needed")
+print(f"   4. Plan model updates and versioning strategy")
 
-print("=" * 60)
-
-# COMMAND ----------
-
-# MAGIC %md
-# MAGIC ### Understanding Model Deployment
-
-# MAGIC 
-# MAGIC ### Key Deployment Concepts:
-# MAGIC 
-# MAGIC **1. Unity Catalog Model Registry:**
-# MAGIC - Centralized model governance and versioning
-# MAGIC - Model lineage tracking and metadata management
-# MAGIC - Environment promotion (Development → Staging → Production)
-# MAGIC - Access control and security policies
-# MAGIC 
-# MAGIC **2. Model Serving Endpoints:**
-# MAGIC - Production-grade REST API endpoints
-# MAGIC - Automatic scaling based on traffic
-# MAGIC - GPU support for compute-intensive models
-# MAGIC - Built-in monitoring and logging
-# MAGIC 
-# MAGIC **3. Model Validation:**
-# MAGIC - Pre-deployment testing and validation
-# MAGIC - Dependency verification and compatibility checks
-# MAGIC - Performance benchmarking and load testing
-# MAGIC - Security and compliance validation
-# MAGIC 
-# MAGIC **4. Model Lifecycle Management:**
-# MAGIC - Version control and model tracking
-# MAGIC - Environment promotion workflows
-# MAGIC - Model retirement and cleanup
-# MAGIC - Rollback capabilities for failed deployments
-# MAGIC 
-# MAGIC **5. Best Practices:**
-# MAGIC - Always validate models before deployment
-# MAGIC - Use proper model signatures and input examples
-# MAGIC - Monitor endpoint performance and health
-# MAGIC - Implement proper error handling and logging
-# MAGIC - Plan for model updates and retraining
-# MAGIC 
-# MAGIC **6. Deployment Checklist:**
-# MAGIC - ✅ Model validation and testing
-# MAGIC - ✅ Unity Catalog registration
-# MAGIC - ✅ Model serving endpoint creation
-# MAGIC - ✅ Endpoint testing and validation
-# MAGIC - ✅ Performance benchmarking
-# MAGIC - ✅ Model promotion to production
-# MAGIC - ✅ Monitoring and alerting setup
-# MAGIC 
-# MAGIC The model is now successfully deployed and ready for production use! 
+print("=" * 60) 

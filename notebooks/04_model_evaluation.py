@@ -1,8 +1,6 @@
 # Databricks notebook source
-# COMMAND ----------
-
 # MAGIC %md
-# MAGIC # Model Evaluation and Analysis
+# MAGIC # 04. Model Evaluation and Analysis
 # MAGIC 
 # MAGIC This notebook demonstrates comprehensive evaluation of the trained DETR model:
 # MAGIC 1. Load the trained model and checkpoint
@@ -11,6 +9,34 @@
 # MAGIC 4. Visualize predictions and analyze errors
 # MAGIC 5. Measure inference speed and performance
 # MAGIC 6. Generate evaluation reports and recommendations
+# MAGIC 
+# MAGIC ## Overview
+# MAGIC 
+# MAGIC **Model Evaluation Process:**
+# MAGIC 1. **Model Loading**: Load trained model from checkpoint or MLflow
+# MAGIC 2. **Data Preparation**: Set up test dataset with proper preprocessing
+# MAGIC 3. **Evaluation Metrics**: Calculate comprehensive detection metrics
+# MAGIC 4. **Visualization**: Generate prediction visualizations
+# MAGIC 5. **Performance Analysis**: Measure speed and resource usage
+# MAGIC 6. **Error Analysis**: Identify and analyze failure cases
+# MAGIC 
+# MAGIC ### Key Evaluation Metrics:
+# MAGIC - **mAP (mean Average Precision)**: Primary detection metric
+# MAGIC - **Precision/Recall**: Per-class performance analysis
+# MAGIC - **F1 Score**: Balanced precision-recall metric
+# MAGIC - **Inference Speed**: FPS and latency measurements
+# MAGIC - **Memory Usage**: GPU/CPU resource consumption
+# MAGIC 
+# MAGIC ## What This Notebook Does
+# MAGIC 
+# MAGIC 1. **Model Loading**: Load best checkpoint or MLflow model
+# MAGIC 2. **Test Evaluation**: Run comprehensive evaluation on test set
+# MAGIC 3. **Metric Analysis**: Calculate and analyze all detection metrics
+# MAGIC 4. **Visualization**: Create prediction visualizations
+# MAGIC 5. **Performance Testing**: Measure inference speed and efficiency
+# MAGIC 6. **Report Generation**: Create detailed evaluation report
+# MAGIC 
+# MAGIC ---
 
 # COMMAND ----------
 
@@ -18,17 +44,15 @@
 # %pip install -r "../requirements.txt"
 # dbutils.library.restartPython()
 
-# (Databricks only) Run setup and previous notebooks if running interactively
-# %run ./00_setup_and_config
-# %run ./01_data_preparation
-# %run ./02_model_training
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC ## 1. Import Dependencies and Load Configuration
 
 # COMMAND ----------
 
-# DBTITLE 1,Import Dependencies
 import sys
 import os
-from pathlib import Path
 import yaml
 import torch
 import mlflow
@@ -40,43 +64,66 @@ import matplotlib.patches as patches
 from typing import Dict, List, Tuple, Any
 import time
 from collections import defaultdict
+from pathlib import Path
+import json
 
-# Add the project root to Python path
-project_root = "/Volumes/<catalog>/<schema>/<volume>/<path>"
-sys.path.append(project_root)
+# Add the src directory to Python path
+sys.path.append('/Workspace/Repos/your-repo/Databricks_CV_ref/src')
 
-# Import project modules
-from src.utils.logging import create_databricks_logger
-from src.utils.coco_handler import COCOHandler
-from src.tasks.detection.model import DetectionModel
-from src.tasks.detection.data import DetectionDataModule
-from src.tasks.detection.evaluate import DetectionEvaluator
-from src.tasks.detection.adapters import get_input_adapter
+from config import load_config, get_default_config
+from tasks.detection.model import DetectionModel
+from tasks.detection.data import DetectionDataModule
+from tasks.detection.evaluate import DetectionEvaluator
+from tasks.detection.adapters import get_input_adapter
+from utils.logging import create_databricks_logger
+from utils.coco_handler import COCOHandler
 
-# COMMAND ----------
+# Load configuration from previous notebooks
+CATALOG = "your_catalog"
+SCHEMA = "your_schema"  
+VOLUME = "your_volume"
+PROJECT_PATH = "cv_detr_training"
 
-# DBTITLE 1,Initialize Logging and Configuration
-volume_path = os.getenv("UNITY_CATALOG_VOLUME", project_root)
-log_dir = f"{volume_path}/logs"
-os.makedirs(log_dir, exist_ok=True)
+BASE_VOLUME_PATH = f"/Volumes/{CATALOG}/{SCHEMA}/{VOLUME}/{PROJECT_PATH}"
+CONFIG_PATH = f"{BASE_VOLUME_PATH}/configs/detection_detr_config.yaml"
 
-logger = create_databricks_logger(
-    name="model_evaluation",
-    log_file=f"{log_dir}/evaluation.log"
-)
+# Set up volume directories
+EVALUATION_RESULTS_DIR = f"{BASE_VOLUME_PATH}/evaluation_results"
+EVALUATION_LOGS_DIR = f"{BASE_VOLUME_PATH}/logs"
+
+# Create directories
+os.makedirs(EVALUATION_RESULTS_DIR, exist_ok=True)
+os.makedirs(EVALUATION_LOGS_DIR, exist_ok=True)
+
+print(f"📁 Volume directories created:")
+print(f"   Evaluation Results: {EVALUATION_RESULTS_DIR}")
+print(f"   Evaluation Logs: {EVALUATION_LOGS_DIR}")
 
 # Load configuration
-try:
-    config = load_config("detection_detr")
-except NameError:
-    # Fallback if load_config is not available
-    from src.config import load_config
-    config = load_config("detection_detr")
+if os.path.exists(CONFIG_PATH):
+    config = load_config(CONFIG_PATH)
+    # Update checkpoint directory to use volume path
+    config['training']['checkpoint_dir'] = f"{BASE_VOLUME_PATH}/checkpoints"
+    print(f"✅ Fixed config: updated checkpoint directory")
+else:
+    print("⚠️  Config file not found. Using default detection config.")
+    config = get_default_config("detection")
+    # Update checkpoint directory to use volume path
+    config['training']['checkpoint_dir'] = f"{BASE_VOLUME_PATH}/checkpoints"
+
+print("✅ Configuration loaded successfully!")
+print(f"📁 Checkpoint directory: {config['training']['checkpoint_dir']}")
+
+# Initialize logging
+logger = create_databricks_logger(
+    name="model_evaluation",
+    log_file=f"{EVALUATION_LOGS_DIR}/evaluation.log"
+)
 
 # COMMAND ----------
 
 # MAGIC %md
-# MAGIC ## 1. Find and Load Best Checkpoint
+# MAGIC ## 2. Find and Load Best Checkpoint
 
 # COMMAND ----------
 
@@ -101,8 +148,7 @@ def find_best_checkpoint():
         print(f"⚠️  No production model found: {e}")
     
     # Check for local checkpoints
-    base_volume_path = os.getenv("BASE_VOLUME_PATH", "/Volumes/<catalog>/<schema>/<volume>/cv_detr_training")
-    checkpoint_dir = f"{base_volume_path}/checkpoints"
+    checkpoint_dir = f"{BASE_VOLUME_PATH}/checkpoints"
     if os.path.exists(checkpoint_dir):
         checkpoint_files = [f for f in os.listdir(checkpoint_dir) if f.endswith('.ckpt')]
         
@@ -133,6 +179,10 @@ def load_model_and_data():
         return None, None
     
     print("📦 Loading model and data...")
+    
+    # Set device
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    print(f"   Using device: {device}")
     
     # Load model
     if checkpoint_type == "mlflow_production":
@@ -174,7 +224,9 @@ model, data_module = load_model_and_data()
 # COMMAND ----------
 
 # MAGIC %md
-# MAGIC ## 2. Model Evaluation
+# MAGIC ## 3. Model Evaluation
+
+# COMMAND ----------
 
 # MAGIC %md
 # MAGIC ### Run Comprehensive Evaluation
@@ -209,10 +261,10 @@ evaluation_results = evaluate_model(model, data_module)
 # COMMAND ----------
 
 def analyze_metrics(evaluation_results):
-    """Analyze and extract key metrics from evaluation results."""
+    """Analyze the evaluation metrics in detail."""
     
     if not evaluation_results:
-        print("❌ No evaluation results to analyze")
+        print("❌ No evaluation results available")
         return None
     
     print("📊 Analyzing evaluation metrics...")
@@ -222,24 +274,35 @@ def analyze_metrics(evaluation_results):
         'mAP': evaluation_results.get('mAP', 0.0),
         'mAP_50': evaluation_results.get('mAP_50', 0.0),
         'mAP_75': evaluation_results.get('mAP_75', 0.0),
-        'Precision': evaluation_results.get('Precision', 0.0),
-        'Recall': evaluation_results.get('Recall', 0.0),
-        'F1-Score': evaluation_results.get('F1-Score', 0.0)
+        'precision': evaluation_results.get('precision', 0.0),
+        'recall': evaluation_results.get('recall', 0.0),
+        'f1_score': evaluation_results.get('f1_score', 0.0)
     }
     
-    print("📈 Key Metrics:")
-    for metric, value in metrics.items():
-        print(f"   {metric}: {value:.4f}")
+    print("🎯 Key Metrics:")
+    for metric_name, value in metrics.items():
+        print(f"   {metric_name}: {value:.4f}")
     
-    # Performance assessment
-    if metrics['mAP'] >= 0.4:
-        print("   🎉 Excellent performance!")
-    elif metrics['mAP'] >= 0.3:
-        print("   ✅ Good performance")
-    elif metrics['mAP'] >= 0.2:
-        print("   ⚠️  Moderate performance")
-    else:
-        print("   ❌ Poor performance - consider retraining")
+    # Analyze per-class performance if available
+    if 'per_class_metrics' in evaluation_results:
+        per_class = evaluation_results['per_class_metrics']
+        print(f"\n📈 Per-Class Performance (Top 10):")
+        
+        # Sort by mAP
+        sorted_classes = sorted(per_class.items(), key=lambda x: x[1].get('mAP', 0), reverse=True)
+        
+        for i, (class_name, class_metrics) in enumerate(sorted_classes[:10]):
+            print(f"   {i+1:2d}. {class_name}: mAP={class_metrics.get('mAP', 0):.4f}, "
+                  f"precision={class_metrics.get('precision', 0):.4f}, "
+                  f"recall={class_metrics.get('recall', 0):.4f}")
+    
+    # Performance analysis
+    if 'inference_time' in evaluation_results:
+        inference_time = evaluation_results['inference_time']
+        fps = 1.0 / inference_time if inference_time > 0 else 0
+        print(f"\n⚡ Performance Analysis:")
+        print(f"   Inference time per image: {inference_time:.4f} seconds")
+        print(f"   FPS: {fps:.2f}")
     
     return metrics
 
@@ -248,74 +311,81 @@ metrics = analyze_metrics(evaluation_results)
 # COMMAND ----------
 
 # MAGIC %md
-# MAGIC ## 3. Visualization and Analysis
+# MAGIC ## 4. Visualization and Analysis
+
+# COMMAND ----------
 
 # MAGIC %md
-# MAGIC ### Visualize Model Predictions
+# MAGIC ### Visualize Predictions
 
 # COMMAND ----------
 
 def visualize_predictions(model, data_module, num_samples=6):
-    """Visualize model predictions on test samples."""
+    """Visualize model predictions on sample images."""
     
     if not model or not data_module:
         print("❌ Model or data not available")
         return
     
-    print(f"🎨 Visualizing {num_samples} predictions...")
+    print("🎨 Creating prediction visualizations...")
     
-    # Get test samples
+    # Get sample data
     test_loader = data_module.test_dataloader()
-    samples = []
+    sample_batch = next(iter(test_loader))
     
-    for batch in test_loader:
-        if len(samples) >= num_samples:
-            break
-        samples.extend(batch)
+    # Move to device
+    device = next(model.parameters()).device
+    images = sample_batch['image'].to(device)
+    targets = sample_batch['target']
+    
+    # Run inference
+    model.eval()
+    with torch.no_grad():
+        predictions = model(images)
     
     # Create visualization
-    fig, axes = plt.subplots(2, 3, figsize=(15, 10))
-    axes = axes.flatten()
+    fig, axes = plt.subplots(2, 3, figsize=(18, 12))
+    fig.suptitle('DETR Model Predictions on Test Images', fontsize=16)
     
-    for i, sample in enumerate(samples[:num_samples]):
-        if i >= len(axes):
-            break
+    for i in range(min(num_samples, len(images))):
+        row = i // 3
+        col = i % 3
+        ax = axes[row, col]
+        
+        # Get image and predictions
+        image = images[i].cpu().permute(1, 2, 0).numpy()
+        image = (image - image.min()) / (image.max() - image.min())  # Normalize to [0,1]
+        
+        # Display image
+        ax.imshow(image)
+        ax.set_title(f'Sample {i+1}')
+        ax.axis('off')
+        
+        # Add predictions if available
+        if hasattr(predictions, 'pred_boxes') and len(predictions.pred_boxes[i]) > 0:
+            boxes = predictions.pred_boxes[i].cpu().numpy()
+            scores = predictions.scores[i].cpu().numpy()
+            labels = predictions.pred_classes[i].cpu().numpy()
             
-        # Get prediction
-        with torch.no_grad():
-            prediction = model(sample['image'].unsqueeze(0).to(device))
-        
-        # Visualize
-        image = sample['image'].permute(1, 2, 0).cpu().numpy()
-        image = (image - image.min()) / (image.max() - image.min())
-        
-        axes[i].imshow(image)
-        
-        # Draw predictions
-        if 'boxes' in prediction:
-            boxes = prediction['boxes'][0].cpu().numpy()
-            scores = prediction['scores'][0].cpu().numpy()
-            labels = prediction['labels'][0].cpu().numpy()
-            
+            # Draw bounding boxes
             for box, score, label in zip(boxes, scores, labels):
                 if score > 0.5:  # Confidence threshold
                     x1, y1, x2, y2 = box
                     rect = patches.Rectangle((x1, y1), x2-x1, y2-y1, 
-                                          linewidth=2, edgecolor='red', facecolor='none')
-                    axes[i].add_patch(rect)
-                    axes[i].text(x1, y1, f'{label}: {score:.2f}', 
-                               color='red', fontsize=8)
-        
-        axes[i].set_title(f'Sample {i+1}')
-        axes[i].axis('off')
+                                           linewidth=2, edgecolor='red', facecolor='none')
+                    ax.add_patch(rect)
+                    ax.text(x1, y1-5, f'{score:.2f}', color='red', fontsize=8)
     
     plt.tight_layout()
-    plt.show()
     
-    print("✅ Predictions visualized")
+    # Save the plot
+    plot_path = f"{EVALUATION_RESULTS_DIR}/predictions_visualization.png"
+    plt.savefig(plot_path, dpi=300, bbox_inches='tight')
+    print(f"✅ Visualization saved to: {plot_path}")
+    
+    plt.show()
 
-if model and data_module:
-    visualize_predictions(model, data_module)
+visualize_predictions(model, data_module)
 
 # COMMAND ----------
 
@@ -333,48 +403,53 @@ def analyze_per_class_performance(model, data_module):
     
     print("📊 Analyzing per-class performance...")
     
-    # Initialize evaluator for per-class analysis
+    # Initialize evaluator
     evaluator = DetectionEvaluator(config)
     
-    # Run per-class evaluation
-    class_metrics = evaluator.evaluate_per_class(model, data_module.test_dataloader())
+    # Get per-class metrics
+    per_class_metrics = evaluator.evaluate_per_class(model, data_module.test_dataloader())
     
-    # Analyze results
-    class_performance = {}
-    for class_id, metrics in class_metrics.items():
-        class_name = config['data']['classes'][class_id] if class_id < len(config['data']['classes']) else f"Class_{class_id}"
-        class_performance[class_name] = {
+    if not per_class_metrics:
+        print("❌ No per-class metrics available")
+        return None
+    
+    # Create performance summary
+    performance_summary = []
+    for class_name, metrics in per_class_metrics.items():
+        performance_summary.append({
+            'class': class_name,
             'mAP': metrics.get('mAP', 0.0),
-            'Precision': metrics.get('Precision', 0.0),
-            'Recall': metrics.get('Recall', 0.0),
-            'F1-Score': metrics.get('F1-Score', 0.0)
-        }
+            'precision': metrics.get('precision', 0.0),
+            'recall': metrics.get('recall', 0.0),
+            'f1_score': metrics.get('f1_score', 0.0)
+        })
     
     # Sort by mAP
-    class_performance = dict(sorted(class_performance.items(), 
-                                  key=lambda x: x[1]['mAP'], reverse=True))
+    performance_summary.sort(key=lambda x: x['mAP'], reverse=True)
     
-    print("📈 Per-Class Performance (Top 10):")
-    for i, (class_name, metrics) in enumerate(list(class_performance.items())[:10]):
-        print(f"   {i+1:2d}. {class_name:20s} - mAP: {metrics['mAP']:.4f}")
+    print("🏆 Top 10 Performing Classes:")
+    for i, summary in enumerate(performance_summary[:10]):
+        print(f"   {i+1:2d}. {summary['class']}: mAP={summary['mAP']:.4f}, "
+              f"precision={summary['precision']:.4f}, recall={summary['recall']:.4f}")
     
-    return class_performance
+    print(f"\n❌ Bottom 10 Performing Classes:")
+    for i, summary in enumerate(performance_summary[-10:]):
+        print(f"   {len(performance_summary)-9+i:2d}. {summary['class']}: mAP={summary['mAP']:.4f}, "
+              f"precision={summary['precision']:.4f}, recall={summary['recall']:.4f}")
+    
+    return performance_summary
 
-if model and data_module:
-    class_performance = analyze_per_class_performance(model, data_module)
+class_performance = analyze_per_class_performance(model, data_module)
 
 # COMMAND ----------
 
 # MAGIC %md
 # MAGIC ### Analyze Model Errors
 
-# MAGIC %md
-# MAGIC ### Error Analysis
-
 # COMMAND ----------
 
 def analyze_model_errors(model, data_module):
-    """Analyze common model errors and failure cases."""
+    """Analyze common error patterns in model predictions."""
     
     if not model or not data_module:
         print("❌ Model or data not available")
@@ -382,62 +457,65 @@ def analyze_model_errors(model, data_module):
     
     print("🔍 Analyzing model errors...")
     
-    # Initialize error tracking
-    error_analysis = {
-        'false_positives': 0,
-        'false_negatives': 0,
-        'misclassifications': 0,
-        'localization_errors': 0,
-        'total_predictions': 0
-    }
+    # Initialize evaluator
+    evaluator = DetectionEvaluator(config)
     
-    # Run error analysis
-    test_loader = data_module.test_dataloader()
+    # Get error analysis
+    error_analysis = evaluator.analyze_errors(model, data_module.test_dataloader())
     
-    for batch in test_loader:
-        with torch.no_grad():
-            predictions = model(batch['image'].to(device))
-            targets = batch['target']
-        
-        # Analyze errors (simplified analysis)
-        for pred, target in zip(predictions, targets):
-            error_analysis['total_predictions'] += len(pred['boxes'])
-            
-            # This is a simplified error analysis
-            # In practice, you'd implement proper IoU-based analysis
-            if len(pred['boxes']) > len(target['boxes']):
-                error_analysis['false_positives'] += len(pred['boxes']) - len(target['boxes'])
-            elif len(pred['boxes']) < len(target['boxes']):
-                error_analysis['false_negatives'] += len(target['boxes']) - len(pred['boxes'])
+    if not error_analysis:
+        print("❌ No error analysis available")
+        return None
     
-    print("📊 Error Analysis:")
-    total_errors = sum([error_analysis[k] for k in ['false_positives', 'false_negatives', 'misclassifications', 'localization_errors']])
+    print("📊 Error Analysis Summary:")
     
-    for error_type, count in error_analysis.items():
-        if error_type != 'total_predictions':
-            percentage = (count / total_errors * 100) if total_errors > 0 else 0
-            print(f"   {error_type.replace('_', ' ').title()}: {count} ({percentage:.1f}%)")
+    # False positive analysis
+    if 'false_positives' in error_analysis:
+        fp_analysis = error_analysis['false_positives']
+        print(f"   False Positives:")
+        print(f"     Total: {fp_analysis.get('total', 0)}")
+        print(f"     Average confidence: {fp_analysis.get('avg_confidence', 0):.4f}")
+        print(f"     Most common classes: {fp_analysis.get('top_classes', [])}")
+    
+    # False negative analysis
+    if 'false_negatives' in error_analysis:
+        fn_analysis = error_analysis['false_negatives']
+        print(f"   False Negatives:")
+        print(f"     Total: {fn_analysis.get('total', 0)}")
+        print(f"     Most common classes: {fn_analysis.get('top_classes', [])}")
+    
+    # Localization errors
+    if 'localization_errors' in error_analysis:
+        loc_errors = error_analysis['localization_errors']
+        print(f"   Localization Errors:")
+        print(f"     Average IoU: {loc_errors.get('avg_iou', 0):.4f}")
+        print(f"     Poor localization rate: {loc_errors.get('poor_localization_rate', 0):.4f}")
+    
+    # Size-based errors
+    if 'size_errors' in error_analysis:
+        size_errors = error_analysis['size_errors']
+        print(f"   Size-based Errors:")
+        print(f"     Small object errors: {size_errors.get('small_object_errors', 0)}")
+        print(f"     Large object errors: {size_errors.get('large_object_errors', 0)}")
     
     return error_analysis
 
-if model and data_module:
-    error_analysis = analyze_model_errors(model, data_module)
+error_analysis = analyze_model_errors(model, data_module)
 
 # COMMAND ----------
 
 # MAGIC %md
-# MAGIC ## 4. Performance Analysis
+# MAGIC ## 5. Performance Testing
+
+# COMMAND ----------
 
 # MAGIC %md
-# MAGIC ### Measure Inference Speed
-
-# MAGIC %md
-# MAGIC ### Speed Analysis
+# MAGIC ### Analyze Inference Speed
 
 # COMMAND ----------
 
 def analyze_inference_speed(model, data_module):
-    """Measure and analyze model inference speed."""
+    """Measure and analyze inference speed and performance."""
     
     if not model or not data_module:
         print("❌ Model or data not available")
@@ -445,138 +523,134 @@ def analyze_inference_speed(model, data_module):
     
     print("⚡ Analyzing inference speed...")
     
+    # Get device
+    device = next(model.parameters()).device
+    print(f"   Device: {device}")
+    
     # Warm up
-    dummy_input = torch.randn(1, 3, 800, 800).to(device)
+    print("   Warming up model...")
+    model.eval()
     with torch.no_grad():
+        dummy_input = torch.randn(1, 3, 800, 800).to(device)
         for _ in range(10):
             _ = model(dummy_input)
     
-    # Measure speed
+    # Measure inference time
+    print("   Measuring inference time...")
+    num_samples = 100
+    inference_times = []
+    
     test_loader = data_module.test_dataloader()
-    times = []
-    batch_sizes = []
+    sample_batch = next(iter(test_loader))
+    images = sample_batch['image'].to(device)
     
     with torch.no_grad():
-        for batch in test_loader:
+        for i in range(num_samples):
             start_time = time.time()
-            _ = model(batch['image'].to(device))
+            _ = model(images)
+            torch.cuda.synchronize() if torch.cuda.is_available() else None
             end_time = time.time()
-            
-            times.append(end_time - start_time)
-            batch_sizes.append(batch['image'].size(0))
+            inference_times.append(end_time - start_time)
     
-    # Calculate metrics
-    avg_time = np.mean(times)
-    avg_batch_size = np.mean(batch_sizes)
-    fps = avg_batch_size / avg_time
+    # Calculate statistics
+    avg_time = np.mean(inference_times)
+    std_time = np.std(inference_times)
+    fps = 1.0 / avg_time
+    throughput = fps * images.shape[0]  # Images per second
     
-    print("⚡ Speed Analysis:")
-    print(f"   Average batch time: {avg_time:.3f}s")
-    print(f"   Average batch size: {avg_batch_size:.1f}")
-    print(f"   FPS: {fps:.1f}")
-    print(f"   Per-image time: {avg_time/avg_batch_size*1000:.1f}ms")
+    print(f"✅ Speed Analysis:")
+    print(f"   Average inference time: {avg_time:.4f} ± {std_time:.4f} seconds")
+    print(f"   FPS: {fps:.2f}")
+    print(f"   Throughput: {throughput:.2f} images/second")
     
-    # Performance assessment
-    if fps >= 30:
-        print("   🎉 Real-time performance achieved!")
-    elif fps >= 10:
-        print("   ✅ Good performance for batch processing")
-    else:
-        print("   ⚠️  Slow inference speed")
+    # Memory usage
+    if torch.cuda.is_available():
+        gpu_memory = torch.cuda.memory_allocated() / 1024**3  # GB
+        gpu_memory_reserved = torch.cuda.memory_reserved() / 1024**3  # GB
+        print(f"   GPU Memory - Allocated: {gpu_memory:.2f} GB")
+        print(f"   GPU Memory - Reserved: {gpu_memory_reserved:.2f} GB")
     
-    return {
-        'avg_time': avg_time,
-        'avg_batch_size': avg_batch_size,
+    speed_analysis = {
+        'avg_inference_time': avg_time,
+        'std_inference_time': std_time,
         'fps': fps,
-        'per_image_time': avg_time/avg_batch_size*1000
+        'throughput': throughput,
+        'gpu_memory_allocated': gpu_memory if torch.cuda.is_available() else 0,
+        'gpu_memory_reserved': gpu_memory_reserved if torch.cuda.is_available() else 0
     }
+    
+    return speed_analysis
 
-if model and data_module:
-    speed_analysis = analyze_inference_speed(model, data_module)
+speed_analysis = analyze_inference_speed(model, data_module)
 
 # COMMAND ----------
 
 # MAGIC %md
-# MAGIC ## 5. Save Evaluation Results
+# MAGIC ## 6. Save Evaluation Results
+
+# COMMAND ----------
 
 # MAGIC %md
-# MAGIC ### Export Evaluation Results
+# MAGIC ### Save Evaluation Results
 
 # COMMAND ----------
 
 def save_evaluation_results(evaluation_results, metrics, class_performance, error_analysis, speed_analysis):
-    """Save comprehensive evaluation results."""
+    """Save all evaluation results to files."""
     
-    print("\n💾 Saving evaluation results...")
+    print("💾 Saving evaluation results...")
     
-    # Create results directory
-    results_dir = f"{BASE_VOLUME_PATH}/results/evaluation"
-    os.makedirs(results_dir, exist_ok=True)
-    
-    # Prepare results summary
-    results_summary = {
-        'model_info': {
-            'model_name': config['model']['model_name'],
-            'checkpoint_path': best_checkpoint,
-            'evaluation_date': pd.Timestamp.now().isoformat()
-        },
+    # Create results dictionary
+    results = {
+        'evaluation_results': evaluation_results,
         'metrics': metrics,
         'class_performance': class_performance,
         'error_analysis': error_analysis,
         'speed_analysis': speed_analysis,
-        'evaluation_results': evaluation_results
+        'evaluation_date': str(pd.Timestamp.now()),
+        'model_config': config['model'],
+        'data_config': config['data']
     }
     
-    # Save as YAML
-    import yaml
-    results_path = f"{results_dir}/evaluation_summary.yaml"
+    # Save detailed results
+    results_path = f"{EVALUATION_RESULTS_DIR}/evaluation_results.yaml"
     with open(results_path, 'w') as f:
-        yaml.dump(results_summary, f)
+        yaml.dump(results, f, default_flow_style=False)
     
-    print(f"✅ Evaluation results saved to: {results_path}")
+    print(f"✅ Detailed results saved to: {results_path}")
     
-    # Save detailed metrics as CSV
+    # Save metrics summary
+    if metrics:
+        summary_path = f"{EVALUATION_RESULTS_DIR}/metrics_summary.json"
+        with open(summary_path, 'w') as f:
+            json.dump(metrics, f, indent=2)
+        print(f"✅ Metrics summary saved to: {summary_path}")
+    
+    # Save class performance
     if class_performance:
-        class_df = pd.DataFrame.from_dict(class_performance, orient='index')
-        class_df.to_csv(f"{results_dir}/per_class_metrics.csv")
-        print(f"✅ Per-class metrics saved to: {results_dir}/per_class_metrics.csv")
+        class_perf_path = f"{EVALUATION_RESULTS_DIR}/class_performance.json"
+        with open(class_perf_path, 'w') as f:
+            json.dump(class_performance, f, indent=2)
+        print(f"✅ Class performance saved to: {class_perf_path}")
     
-    # Create evaluation report
-    report_path = f"{results_dir}/evaluation_report.txt"
-    with open(report_path, 'w') as f:
-        f.write("DETR Model Evaluation Report\n")
-        f.write("=" * 50 + "\n\n")
-        
-        f.write(f"Model: {config['model']['model_name']}\n")
-        f.write(f"Checkpoint: {best_checkpoint}\n")
-        f.write(f"Evaluation Date: {pd.Timestamp.now()}\n\n")
-        
-        f.write("Key Metrics:\n")
-        for metric, value in metrics.items():
-            f.write(f"  {metric}: {value:.4f}\n")
-        
-        f.write(f"\nInference Speed:\n")
-        f.write(f"  FPS: {speed_analysis['fps']:.1f}\n")
-        f.write(f"  Per-image time: {speed_analysis['per_image_time']:.1f}ms\n")
-        
-        f.write(f"\nError Analysis:\n")
-        for error_type, count in error_analysis.items():
-            f.write(f"  {error_type}: {count}\n")
+    # Save speed analysis
+    if speed_analysis:
+        speed_path = f"{EVALUATION_RESULTS_DIR}/speed_analysis.json"
+        with open(speed_path, 'w') as f:
+            json.dump(speed_analysis, f, indent=2)
+        print(f"✅ Speed analysis saved to: {speed_path}")
     
-    print(f"✅ Evaluation report saved to: {report_path}")
-    
-    return results_dir
+    return True
 
-if all([evaluation_results, metrics, class_performance, error_analysis, speed_analysis]):
-    results_dir = save_evaluation_results(evaluation_results, metrics, class_performance, error_analysis, speed_analysis)
+# Save results
+results_saved = save_evaluation_results(
+    evaluation_results, metrics, class_performance, error_analysis, speed_analysis
+)
 
 # COMMAND ----------
 
 # MAGIC %md
-# MAGIC ## 6. Summary and Recommendations
-
-# MAGIC %md
-# MAGIC ### Evaluation Summary
+# MAGIC ## 7. Summary and Recommendations
 
 # COMMAND ----------
 
@@ -584,89 +658,51 @@ print("=" * 60)
 print("MODEL EVALUATION SUMMARY")
 print("=" * 60)
 
-if evaluation_results and metrics:
+if metrics:
     print(f"✅ Model Performance:")
-    print(f"   mAP: {metrics['mAP']:.4f}")
-    print(f"   mAP@50: {metrics['mAP_50']:.4f}")
-    print(f"   mAP@75: {metrics['mAP_75']:.4f}")
-    print(f"   Precision: {metrics['Precision']:.4f}")
-    print(f"   Recall: {metrics['Recall']:.4f}")
-    print(f"   F1-Score: {metrics['F1-Score']:.4f}")
-    
-    print(f"\n⚡ Inference Performance:")
-    if speed_analysis:
-        print(f"   FPS: {speed_analysis['fps']:.1f}")
-        print(f"   Per-image time: {speed_analysis['per_image_time']:.1f}ms")
-    
-    print(f"\n🔍 Error Analysis:")
-    if error_analysis:
-        total_errors = sum(error_analysis.values())
-        for error_type, count in error_analysis.items():
-            percentage = (count / total_errors * 100) if total_errors > 0 else 0
-            print(f"   {error_type.replace('_', ' ').title()}: {percentage:.1f}%")
-    
-    print(f"\n📁 Results Location:")
-    print(f"   Results directory: {BASE_VOLUME_PATH}/results/evaluation/")
-    print(f"   Summary: evaluation_summary.yaml")
-    print(f"   Report: evaluation_report.txt")
-    print(f"   Per-class metrics: per_class_metrics.csv")
-    
-    print(f"\n🎯 Recommendations:")
-    if metrics['mAP'] < 0.4:
-        print("   ⚠️  Consider hyperparameter tuning or longer training")
-    if speed_analysis and speed_analysis['fps'] < 10:
-        print("   ⚠️  Consider model optimization for faster inference")
-    if error_analysis and error_analysis['false_positives'] > error_analysis['false_negatives']:
-        print("   ⚠️  Consider adjusting confidence threshold to reduce false positives")
-    
-    print("   ✅ Model evaluation completed successfully!")
+    print(f"   mAP: {metrics.get('mAP', 0):.4f}")
+    print(f"   mAP@50: {metrics.get('mAP_50', 0):.4f}")
+    print(f"   mAP@75: {metrics.get('mAP_75', 0):.4f}")
+    print(f"   Precision: {metrics.get('precision', 0):.4f}")
+    print(f"   Recall: {metrics.get('recall', 0):.4f}")
+    print(f"   F1 Score: {metrics.get('f1_score', 0):.4f}")
+
+if speed_analysis:
+    print(f"\n⚡ Performance Metrics:")
+    print(f"   FPS: {speed_analysis.get('fps', 0):.2f}")
+    print(f"   Throughput: {speed_analysis.get('throughput', 0):.2f} images/second")
+    print(f"   Avg inference time: {speed_analysis.get('avg_inference_time', 0):.4f} seconds")
+
+if class_performance:
+    print(f"\n📊 Class Performance:")
+    best_class = max(class_performance, key=lambda x: x['mAP'])
+    worst_class = min(class_performance, key=lambda x: x['mAP'])
+    print(f"   Best performing: {best_class['class']} (mAP: {best_class['mAP']:.4f})")
+    print(f"   Worst performing: {worst_class['class']} (mAP: {worst_class['mAP']:.4f})")
+
+print(f"\n📁 Results saved to:")
+print(f"   Evaluation results: {EVALUATION_RESULTS_DIR}")
+print(f"   Detailed results: {EVALUATION_RESULTS_DIR}/evaluation_results.yaml")
+print(f"   Metrics summary: {EVALUATION_RESULTS_DIR}/metrics_summary.json")
+
+print(f"\n🎯 Recommendations:")
+if metrics and metrics.get('mAP', 0) < 0.3:
+    print("   ⚠️  Model performance is low. Consider:")
+    print("      - Retraining with more epochs")
+    print("      - Hyperparameter tuning")
+    print("      - Data augmentation improvements")
+elif metrics and metrics.get('mAP', 0) < 0.5:
+    print("   📈 Model performance is moderate. Consider:")
+    print("      - Fine-tuning on specific classes")
+    print("      - Ensemble methods")
+    print("      - Advanced augmentation techniques")
 else:
-    print("❌ Evaluation failed or incomplete")
+    print("   ✅ Model performance is good!")
 
-print("=" * 60)
+if speed_analysis and speed_analysis.get('fps', 0) < 10:
+    print("   ⚡ Inference speed is slow. Consider:")
+    print("      - Model quantization")
+    print("      - TensorRT optimization")
+    print("      - Batch processing")
 
-# COMMAND ----------
-
-# MAGIC %md
-# MAGIC ### Understanding DETR Evaluation
-
-# MAGIC 
-# MAGIC ### Key Evaluation Concepts:
-# MAGIC 
-# MAGIC **1. mAP (mean Average Precision):**
-# MAGIC - Primary metric for object detection
-# MAGIC - Combines precision and recall across all classes
-# MAGIC - Higher values indicate better performance
-# MAGIC - DETR paper reports ~0.42 mAP on COCO
-# MAGIC 
-# MAGIC **2. Precision-Recall Trade-off:**
-# MAGIC - Precision: Accuracy of positive predictions
-# MAGIC - Recall: Ability to find all positive instances
-# MAGIC - DETR balances both through set prediction
-# MAGIC - No NMS needed, reducing false positives
-# MAGIC 
-# MAGIC **3. Per-Class Analysis:**
-# MAGIC - Different object classes have varying difficulty
-# MAGIC - Small objects (e.g., person) vs large objects (e.g., car)
-# MAGIC - Helps identify model weaknesses
-# MAGIC - Guides data augmentation strategies
-# MAGIC 
-# MAGIC **4. Error Analysis:**
-# MAGIC - False Positives: Model predicts object when none exists
-# MAGIC - False Negatives: Model misses existing objects
-# MAGIC - Misclassifications: Wrong class predictions
-# MAGIC - Localization errors: Wrong bounding box locations
-# MAGIC 
-# MAGIC **5. Inference Speed:**
-# MAGIC - Critical for real-time applications
-# MAGIC - DETR is slower than YOLO but more accurate
-# MAGIC - Transformer computation is the bottleneck
-# MAGIC - Batch processing improves efficiency
-# MAGIC 
-# MAGIC **6. Model Comparison:**
-# MAGIC - Compare with DETR paper results
-# MAGIC - Benchmark against other detection models
-# MAGIC - Consider speed-accuracy trade-offs
-# MAGIC - Evaluate on your specific use case
-# MAGIC 
-# MAGIC The evaluation provides comprehensive insights into model performance and guides future improvements! 
+print("=" * 60) 
