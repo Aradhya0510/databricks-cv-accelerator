@@ -106,22 +106,20 @@ else:
 print("✅ Configuration loaded successfully!")
 print(f"📁 Checkpoint directory: {config['training']['checkpoint_dir']}")
 
-# Validate required config fields
-required_fields = {
-    'model': ['model_name', 'task_type', 'num_classes'],
-    'training': ['max_epochs', 'learning_rate', 'monitor_metric'],
-    'data': ['batch_size', 'num_workers']
-}
+# Validate configuration for simplified MLflow integration
+from utils.config_validator import validate_config_for_simplified_mlflow, print_config_compatibility_report
 
-for section, fields in required_fields.items():
-    if section not in config:
-        print(f"❌ Missing config section: {section}")
-        continue
-    for field in fields:
-        if field not in config[section]:
-            print(f"❌ Missing config field: {section}.{field}")
-        else:
-            print(f"✅ {section}.{field}: {config[section][field]}")
+# Print compatibility report
+print_config_compatibility_report(config)
+
+# Validate and update config for simplified MLflow integration
+try:
+    validated_config = validate_config_for_simplified_mlflow(config)
+    print("✅ Configuration validated for simplified MLflow integration!")
+except Exception as e:
+    print(f"❌ Configuration validation failed: {e}")
+    print("Please check your configuration file and ensure all required fields are present.")
+    raise
 
 # COMMAND ----------
 

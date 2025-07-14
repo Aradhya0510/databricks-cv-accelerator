@@ -68,6 +68,7 @@ training:
   
   # Checkpointing
   checkpoint_dir: "/Volumes/<catalog>/<schema>/<volume>/<path>/checkpoints/detection"
+  volume_checkpoint_dir: "/Volumes/<catalog>/<schema>/<volume>/<path>/volume_checkpoints/detection"
   save_top_k: 3
   
   # Logging
@@ -76,19 +77,10 @@ training:
   # Distributed training
   distributed: false
   use_gpu: true
+  num_workers: 1
   resources_per_worker:
     CPU: 4
     GPU: 1
-
-# MLflow Configuration
-mlflow:
-  experiment_name: "detection_training"
-  run_name: "detr_resnet50"
-  log_model: true
-  tags:
-    framework: "lightning"
-    model: "detr"
-    dataset: "coco"
 
 # Output Configuration
 output:
