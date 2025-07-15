@@ -24,7 +24,7 @@ from typing import Dict, Any, Optional, Union, List
 from dataclasses import dataclass, field
 
 # Import the simplified logging utilities
-from utils.logging import VolumeCheckpoint, create_databricks_logger_for_task
+from utils.logging import VolumeCheckpoint, create_databricks_logger
 
 # Add src to Python path
 sys.path.append(str(Path(__file__).parent.parent))

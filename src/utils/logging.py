@@ -19,7 +19,7 @@ def create_databricks_logger(
     Creates and configures an MLFlowLogger for Databricks.
     
     The tracking URI is automatically detected by MLflow when running in a
-    Databricks notebook.
+    Databricks notebook. Let the MLFlowLogger handle experiment setup on its own.
     
     Args:
         experiment_name: The MLflow experiment name
@@ -27,9 +27,7 @@ def create_databricks_logger(
         log_model: "all" to log every checkpoint, True for only the best, False for none
         tags: Optional dictionary of tags for the run
     """
-    # On Databricks, this sets the experiment in the UI, which is a good practice.
-    mlflow.set_experiment(experiment_name)
-    
+    # Let MLFlowLogger handle experiment setup - no redundant mlflow.set_experiment() call
     logger = MLFlowLogger(
         experiment_name=experiment_name,
         run_name=run_name,
@@ -114,56 +112,3 @@ def get_training_callbacks(
     return callbacks
 
 
-# --- 4. Helper function for creating logger with common Databricks patterns ---
-def create_databricks_logger_for_task(
-    task: str,
-    model_name: str,
-    run_name: Optional[str] = None,
-    log_model: str = "all",
-    additional_tags: Optional[Dict[str, Any]] = None
-) -> MLFlowLogger:
-    """
-    Creates a Databricks logger with common patterns for computer vision tasks.
-    
-    Args:
-        task: The task type (e.g., 'detection', 'classification', 'segmentation')
-        model_name: The model name (e.g., 'detr-resnet50')
-        run_name: Optional custom run name
-        log_model: Model logging strategy
-        additional_tags: Additional tags to add
-    """
-    # Create experiment name using Databricks user pattern
-    try:
-        import dbutils
-        username = dbutils.notebook.entry_point.getDbutils().notebook().getContext().userName().get()
-    except:
-        username = "unknown_user"
-    
-    experiment_name = f"/Users/{username}/{task}_pipeline"
-    
-    # Create default tags
-    tags = {
-        'framework': 'lightning',
-        'model': model_name,
-        'task': task,
-        'dataset': 'coco',  # Default dataset
-        'architecture': 'modular_cv_framework'
-    }
-    
-    # Add additional tags if provided
-    if additional_tags:
-        tags.update(additional_tags)
-    
-    # Create run name if not provided
-    if not run_name:
-        # Generate a simple run name without starting a new run
-        import time
-        timestamp = int(time.time())
-        run_name = f"{model_name}-{task}-{timestamp}"
-    
-    return create_databricks_logger(
-        experiment_name=experiment_name,
-        run_name=run_name,
-        log_model=log_model,
-        tags=tags
-    )

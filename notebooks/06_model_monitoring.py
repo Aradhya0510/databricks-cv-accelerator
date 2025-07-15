@@ -128,37 +128,37 @@ def setup_model_monitoring():
     print("🔧 Setting up model monitoring...")
     
     try:
-        from databricks.sdk import WorkspaceClient
-        from databricks.sdk.service.serving import MonitoringConfig
-        
+from databricks.sdk import WorkspaceClient
+from databricks.sdk.service.serving import MonitoringConfig
+
         # Initialize workspace client
-        client = WorkspaceClient()
-        
+client = WorkspaceClient()
+
         # Configure monitoring
-        monitoring_config = MonitoringConfig(
-            enabled=True,
-            request_logging_enabled=True,
-            response_logging_enabled=True,
+monitoring_config = MonitoringConfig(
+    enabled=True,
+    request_logging_enabled=True,
+    response_logging_enabled=True,
             drift_threshold=0.1,  # 10% drift threshold
             performance_threshold=0.95,  # 95% performance threshold
             latency_threshold=1000  # 1 second latency threshold
-        )
-        
+)
+
         # Update endpoint with monitoring
-        try:
-            client.serving_endpoints.update_config(
-                name=ENDPOINT_NAME,
-                monitoring=monitoring_config
-            )
-            print(f"✅ Monitoring enabled for endpoint: {ENDPOINT_NAME}")
+try:
+    client.serving_endpoints.update_config(
+        name=ENDPOINT_NAME,
+        monitoring=monitoring_config
+    )
+    print(f"✅ Monitoring enabled for endpoint: {ENDPOINT_NAME}")
             print(f"   Drift threshold: {monitoring_config.drift_threshold}")
             print(f"   Performance threshold: {monitoring_config.performance_threshold}")
             print(f"   Latency threshold: {monitoring_config.latency_threshold}ms")
             
             return True
             
-        except Exception as e:
-            print(f"⚠️  Could not enable monitoring (may already be enabled): {e}")
+except Exception as e:
+    print(f"⚠️  Could not enable monitoring (may already be enabled): {e}")
             return False
             
     except Exception as e:
@@ -210,17 +210,17 @@ def log_prediction_events(num_events=100):
         }
         
         # Make prediction requests
-        headers = {
+headers = {
             "Authorization": f"Bearer {dbutils.notebook.entry_point.getDbutils().notebook().getContext().apiToken().get()}",
-            "Content-Type": "application/json"
-        }
-        
+    "Content-Type": "application/json"
+}
+
         successful_requests = 0
         for i in range(0, num_events, 10):  # Process in batches of 10
             batch_payload = {
                 "dataframe_records": payload["dataframe_records"][i:i+10]
-            }
-            
+}
+
             try:
                 response = requests.post(
                     f"{endpoint_url}/invocations",
@@ -229,10 +229,10 @@ def log_prediction_events(num_events=100):
                     timeout=30
                 )
                 
-                if response.status_code == 200:
+if response.status_code == 200:
                     successful_requests += len(batch_payload["dataframe_records"])
                     print(f"   Batch {i//10 + 1}: {len(batch_payload['dataframe_records'])} predictions logged ✅")
-                else:
+else:
                     print(f"   Batch {i//10 + 1}: Failed ❌ ({response.status_code})")
                     
             except Exception as e:
@@ -330,13 +330,13 @@ def analyze_endpoint_metrics():
         client = WorkspaceClient()
         
         # Get endpoint information
-        endpoint = client.serving_endpoints.get(ENDPOINT_NAME)
-        
+endpoint = client.serving_endpoints.get(ENDPOINT_NAME)
+
         print(f"✅ Endpoint Analysis:")
         print(f"   Endpoint: {endpoint.name}")
         print(f"   State: {endpoint.state.ready}")
         print(f"   Health: {getattr(endpoint.state, 'health', 'Unknown')}")
-        
+
         # Analyze served models
         if hasattr(endpoint.state, 'served_models'):
             for model in endpoint.state.served_models:
@@ -350,7 +350,7 @@ def analyze_endpoint_metrics():
             metrics = endpoint.state.monitoring_metrics
             for metric_name, metric_value in metrics.items():
                 print(f"   {metric_name}: {metric_value}")
-        else:
+else:
             print(f"\n⚠️  No monitoring metrics available yet")
             print(f"   This may take some time to populate after logging events")
         

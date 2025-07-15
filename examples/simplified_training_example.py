@@ -17,7 +17,7 @@ from pathlib import Path
 sys.path.append(str(Path(__file__).parent.parent / "src"))
 
 from training.trainer import UnifiedTrainer, UnifiedTrainerConfig
-from utils.logging import create_databricks_logger_for_task
+from utils.logging import create_databricks_logger
 from tasks.detection.model import DETRModel
 from tasks.detection.data import DETRDataModule
 
@@ -44,17 +44,38 @@ def main():
 
     # 2. ✨ Create the MLFlowLogger First ✨
     # This is the central piece for logging.
-    mlf_logger = create_databricks_logger_for_task(
-        task=trainer_config.task,
-        model_name=trainer_config.model_name,
-        run_name=f"{trainer_config.model_name}-run-{trainer_config.task}",
-        log_model="all"  # Automatically log all ModelCheckpoint artifacts
+    
+    # Create experiment name using Databricks user pattern
+    try:
+        import dbutils
+        username = dbutils.notebook.entry_point.getDbutils().notebook().getContext().userName().get()
+    except Exception:
+        username = "unknown_user"
+    
+    experiment_name = f"/Users/{username}/{trainer_config.task}_pipeline"
+    
+    # Create default tags
+    tags = {
+        'framework': 'lightning',
+        'model': trainer_config.model_name,
+        'task': trainer_config.task,
+        'dataset': 'coco',  # Default dataset
+        'architecture': 'modular_cv_framework'
+    }
+    
+    # Create run name
+    run_name = f"{trainer_config.model_name}-run-{trainer_config.task}"
+    
+    mlf_logger = create_databricks_logger(
+        experiment_name=experiment_name,
+        run_name=run_name,
+        log_model="all",  # Automatically log all ModelCheckpoint artifacts
+        tags=tags
     )
     
     print(f"✅ MLflowLogger created:")
-    print(f"   Experiment: {mlf_logger.experiment}")
-    print(f"   Run name: {mlf_logger.run_name}")
-    print(f"   Run ID: {mlf_logger.run_id}")
+    print(f"   Experiment: {experiment_name}")
+    print(f"   Run name: {run_name}")
     
     # 3. Initialize Model and Data
     # Remember to use self.save_hyperparameters() in your LightningModule

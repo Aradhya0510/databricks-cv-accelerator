@@ -85,7 +85,7 @@ def validate_config_for_simplified_mlflow(config: Dict[str, Any]) -> Dict[str, A
     # 4. Check for deprecated MLflow configuration
     if 'mlflow' in validated_config:
         print("⚠️  Found deprecated 'mlflow' section - this is no longer needed")
-        print("   The simplified approach uses create_databricks_logger_for_task()")
+        print("   The simplified approach uses create_databricks_logger() directly")
         print("   You can remove the mlflow section from your config")
         # Don't remove it automatically to avoid breaking existing code
     
@@ -146,7 +146,7 @@ def get_config_compatibility_report(config: Dict[str, Any]) -> Dict[str, Any]:
     # Check for deprecated MLflow configuration
     if 'mlflow' in config:
         report['warnings'].append("Deprecated 'mlflow' section found - no longer needed")
-        report['recommendations'].append("Remove the mlflow section and use create_databricks_logger_for_task()")
+        report['recommendations'].append("Remove the mlflow section and use create_databricks_logger() directly")
     
     # Check for missing volume checkpoint directory
     if 'training' in config and 'checkpoint_dir' in config['training']:
