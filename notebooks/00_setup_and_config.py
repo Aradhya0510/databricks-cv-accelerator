@@ -248,16 +248,27 @@ config = load_and_validate_config()
 
 # COMMAND ----------
 
+# Get task from config
+task = config['model']['task_type']
+model_name = config['model']['model_name']
+
+# Create experiment name using Databricks user pattern
+username = dbutils.notebook.entry_point.getDbutils().notebook().getContext().userName().get()    
+experiment_name = f"/Users/{username}/{task}_pipeline"
+
+# Create run name
+run_name = f"{model_name}-{task}-training"
+
 # Set up logging
 logger = create_databricks_logger(
-    experiment_name=config['mlflow']['experiment_name'],
-    run_name=config['mlflow']['run_name'],
+    experiment_name=experiment_name,
+    run_name=run_name,
     tags={"task": "detection", "model": config['model']['model_name']}
 )
 
 print("✅ Logging setup complete!")
-print(f"Experiment: {config['mlflow']['experiment_name']}")
-print(f"Run name: {config['mlflow']['run_name']}")
+print(f"Experiment: {experiment_name}")
+print(f"Run name: {run_name}")
 print(f"Training on {torch.cuda.device_count()} GPUs")
 
 # COMMAND ----------
@@ -343,8 +354,28 @@ def check_framework_compatibility():
         data_module.setup()
         print("✅ DetectionDataModule created successfully")
         
+        # Create trainer config for the simplified approach
+        trainer_config = {
+            'task': config['model']['task_type'],
+            'model_name': config['model']['model_name'],
+            'max_epochs': config['training']['max_epochs'],
+            'log_every_n_steps': config['training']['log_every_n_steps'],
+            'monitor_metric': config['training']['monitor_metric'],
+            'monitor_mode': config['training']['monitor_mode'],
+            'early_stopping_patience': config['training']['early_stopping_patience'],
+            'checkpoint_dir': f"{BASE_VOLUME_PATH}/checkpoints",
+            'volume_checkpoint_dir': f"{BASE_VOLUME_PATH}/volume_checkpoints",
+            'save_top_k': 3,
+            'distributed': config['training']['distributed']
+        }
+
         # Test trainer creation
-        trainer = UnifiedTrainer(config)
+        unified_trainer = UnifiedTrainer(
+            config=trainer_config,
+            model=model,
+            data_module=data_module,
+            logger=logger
+        )
         print("✅ UnifiedTrainer created successfully")
         
         return True

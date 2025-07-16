@@ -359,7 +359,7 @@ def prepare_model_for_mlflow(model, config, checkpoint_path):
             TensorSpec(np.dtype(np.float32), (-1, 3, 800, 800), name="image")
         ])
         
-        # Define output schema (predictions)
+        # Define output schema (predictions) - matches standalone wrapper output
         output_schema = Schema([
             TensorSpec(np.dtype(np.float32), (-1, -1, 4), name="boxes"),
             TensorSpec(np.dtype(np.float32), (-1, -1), name="scores"),
@@ -423,6 +423,10 @@ def log_model_to_registry(model, signature, input_example, model_metadata):
         experiment_name = f"/Users/{dbutils.notebook.entry_point.getDbutils().notebook().getContext().userName().get()}/model_registry"
         mlflow.set_experiment(experiment_name)
         
+        # Create standalone model wrapper to avoid import issues
+        print("🔧 Creating standalone model wrapper...")
+        standalone_model = create_standalone_model_wrapper(model, config)
+        
         # Create conda environment for serving (matching training environment)
         conda_env = {
             "name": "serving-env",
@@ -446,9 +450,9 @@ def log_model_to_registry(model, signature, input_example, model_metadata):
         
         # Log model to MLflow with custom conda environment
         with mlflow.start_run(run_name=f"model_registration_{UNITY_CATALOG_MODEL_NAME}"):
-            # Log model with custom conda environment
+            # Log standalone model with custom conda environment
             model_uri = mlflow.pytorch.log_model(
-                pytorch_model=model,
+                pytorch_model=standalone_model,
                 artifact_path="model",
                 signature=signature,
                 input_example=input_example,
@@ -467,6 +471,7 @@ def log_model_to_registry(model, signature, input_example, model_metadata):
             print(f"   Registered model: {CATALOG}.{SCHEMA}.{UNITY_CATALOG_MODEL_NAME}")
             print(f"   Original model name: {MODEL_NAME}")
             print(f"   Conda environment: {conda_env['name']}")
+            print(f"   Using standalone wrapper: ✅")
             
             return model_uri
             
@@ -521,6 +526,18 @@ def validate_logged_model(model_uri):
         print(f"   Input device: {test_input.device}")
         print(f"   Input shape: {test_input.shape}")
         print(f"   Output type: {type(test_output)}")
+        
+        # Check if output is a dictionary (standalone wrapper format)
+        if isinstance(test_output, dict):
+            print(f"   Output keys: {list(test_output.keys())}")
+            if 'boxes' in test_output:
+                print(f"   Boxes shape: {test_output['boxes'].shape}")
+            if 'scores' in test_output:
+                print(f"   Scores shape: {test_output['scores'].shape}")
+            if 'labels' in test_output:
+                print(f"   Labels shape: {test_output['labels'].shape}")
+        else:
+            print(f"   Output shape: {test_output.shape if hasattr(test_output, 'shape') else 'N/A'}")
         
         # Check model metadata
         client = mlflow.tracking.MlflowClient()
@@ -1111,3 +1128,89 @@ print(f"   3. Implement A/B testing if needed")
 print(f"   4. Plan model updates and versioning strategy")
 
 print("=" * 60) 
+
+def create_standalone_model_wrapper(model, config):
+    """Create a standalone model wrapper that doesn't depend on relative imports."""
+    
+    import torch
+    import torch.nn as nn
+    from transformers import AutoModelForObjectDetection, AutoConfig
+    
+    class StandaloneDetectionModel(nn.Module):
+        """Standalone detection model wrapper for serving."""
+        
+        def __init__(self, model, config):
+            super().__init__()
+            self.model = model
+            self.config = config
+            self.confidence_threshold = config.get('confidence_threshold', 0.5)
+            self.iou_threshold = config.get('iou_threshold', 0.5)
+            self.max_detections = config.get('max_detections', 100)
+            
+        def forward(self, image):
+            """
+            Forward pass for serving.
+            
+            Args:
+                image: Input image tensor of shape (batch_size, 3, height, width)
+            
+            Returns:
+                dict: Dictionary containing predictions
+                    - boxes: Bounding boxes (batch_size, num_detections, 4)
+                    - scores: Confidence scores (batch_size, num_detections)
+                    - labels: Class labels (batch_size, num_detections)
+            """
+            # Ensure model is in eval mode
+            self.model.eval()
+            
+            # Move input to same device as model
+            device = next(self.model.parameters()).device
+            image = image.to(device)
+            
+            # Forward pass
+            with torch.no_grad():
+                outputs = self.model(pixel_values=image)
+            
+            # Extract predictions
+            if hasattr(outputs, 'logits') and hasattr(outputs, 'pred_boxes'):
+                # DETR-style outputs
+                logits = outputs.logits
+                pred_boxes = outputs.pred_boxes
+                
+                # Convert logits to probabilities
+                probs = torch.softmax(logits, dim=-1)
+                scores, labels = torch.max(probs, dim=-1)
+                
+                # Apply confidence threshold
+                mask = scores > self.confidence_threshold
+                
+                # Filter predictions
+                filtered_boxes = pred_boxes[mask]
+                filtered_scores = scores[mask]
+                filtered_labels = labels[mask]
+                
+                # Limit number of detections
+                if len(filtered_boxes) > self.max_detections:
+                    # Keep top detections by score
+                    top_indices = torch.argsort(filtered_scores, descending=True)[:self.max_detections]
+                    filtered_boxes = filtered_boxes[top_indices]
+                    filtered_scores = filtered_scores[top_indices]
+                    filtered_labels = filtered_labels[top_indices]
+                
+                return {
+                    'boxes': filtered_boxes.unsqueeze(0),  # Add batch dimension
+                    'scores': filtered_scores.unsqueeze(0),
+                    'labels': filtered_labels.unsqueeze(0)
+                }
+            else:
+                # Fallback for other model types
+                return {
+                    'boxes': torch.zeros(1, 0, 4),
+                    'scores': torch.zeros(1, 0),
+                    'labels': torch.zeros(1, 0, dtype=torch.long)
+                }
+    
+    # Create the standalone wrapper
+    standalone_model = StandaloneDetectionModel(model, config)
+    
+    return standalone_model 
