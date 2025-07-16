@@ -432,12 +432,7 @@ def setup_monitoring(data_module=None):
     model_name = config['model']['model_name']
     
     # Create experiment name using Databricks user pattern
-    try:
-        import dbutils
-        username = dbutils.notebook.entry_point.getDbutils().notebook().getContext().userName().get()
-    except Exception:
-        username = "unknown_user"
-    
+    username = dbutils.notebook.entry_point.getDbutils().notebook().getContext().userName().get()    
     experiment_name = f"/Users/{username}/{task}_pipeline"
     
     # Create default tags
@@ -673,18 +668,39 @@ def save_and_register_model(model, unified_trainer, evaluation_results):
             
             print(f"✅ Model saved to: {model_dir}")
             
-            # Register in MLflow (use existing run if available)
+            # Register in MLflow - find the most recent run or create a new one
             try:
-                if mlflow.active_run() is not None:
-                    mlflow.log_artifact(model_dir, "model")
-                    if evaluation_results:
-                        mlflow.log_metrics(evaluation_results[0])
-                    print("✅ Model registered in MLflow")
+                # Try to find the most recent run from the same experiment
+                task = config['model']['task_type']
+                username = dbutils.notebook.entry_point.getDbutils().notebook().getContext().userName().get()
+                experiment_name = f"/Users/{username}/{task}_pipeline"
+                
+                experiment = mlflow.get_experiment_by_name(experiment_name)
+                if experiment:
+                    # Get the most recent run
+                    runs = mlflow.search_runs(experiment.experiment_id, order_by=["start_time DESC"], max_results=1)
+                    if not runs.empty:
+                        latest_run_id = runs.iloc[0]['run_id']
+                        
+                        # Log artifacts to the most recent run
+                        with mlflow.start_run(run_id=latest_run_id):
+                            mlflow.log_artifact(model_dir, "final_model")
+                            if evaluation_results:
+                                mlflow.log_metrics(evaluation_results[0])
+                            print("✅ Model registered in MLflow (added to existing run)")
+                    else:
+                        # Create a new run for model registration
+                        with mlflow.start_run(experiment_id=experiment.experiment_id, run_name="model_registration"):
+                            mlflow.log_artifact(model_dir, "final_model")
+                            if evaluation_results:
+                                mlflow.log_metrics(evaluation_results[0])
+                            print("✅ Model registered in MLflow (new run created)")
                 else:
-                    print("⚠️  No active MLflow run to register model")
+                    print("⚠️  Could not find MLflow experiment for model registration")
                     
             except Exception as e:
                 print(f"⚠️  MLflow registration failed: {e}")
+                print(f"   Model artifacts saved locally at: {model_dir}")
             
             return True
         else:

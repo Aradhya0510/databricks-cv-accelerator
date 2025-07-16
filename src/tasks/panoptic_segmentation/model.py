@@ -7,8 +7,7 @@ from torchmetrics.classification import Accuracy, F1Score, Precision, Recall, Di
 from torchmetrics.detection import MeanAveragePrecision
 from transformers import (
     AutoModelForUniversalSegmentation,
-    AutoConfig,
-    PreTrainedModel
+    AutoConfig
 )
 from .adapters import get_input_adapter, get_output_adapter
 
@@ -21,10 +20,17 @@ class PanopticSegmentationModelConfig:
     learning_rate: float = 1e-4
     weight_decay: float = 0.01
     scheduler: str = "cosine"
+    scheduler_params: Optional[Dict[str, Any]] = None
     epochs: int = 10
     class_names: Optional[List[str]] = None
     model_kwargs: Optional[Dict[str, Any]] = None
     image_size: int = 512
+    num_workers: int = 1  # Add num_workers parameter
+    
+    @property
+    def sync_dist_flag(self) -> bool:
+        """Return True if num_workers > 1 (distributed training), False otherwise."""
+        return self.num_workers > 1
 
 class PanopticSegmentationModel(pl.LightningModule):
     """Panoptic segmentation model that works with Hugging Face panoptic segmentation models."""
@@ -390,32 +396,63 @@ class PanopticSegmentationModel(pl.LightningModule):
         self.test_map.reset()
     
     def configure_optimizers(self):
-        """Configure optimizers and schedulers."""
-        optimizer = torch.optim.AdamW(
-            self.parameters(),
-            lr=self.config.learning_rate,
-            weight_decay=self.config.weight_decay
-        )
+        """Configure optimizers and learning rate schedulers."""
+        # Get optimizer parameters from config
+        optimizer_params = {
+            "lr": self.config.learning_rate,
+            "weight_decay": self.config.weight_decay
+        }
         
+        # Check if model has a backbone (common in vision models)
+        if hasattr(self.model, 'backbone'):
+            # Separate parameters for backbone and other parts
+            backbone_params = []
+            other_params = []
+            
+            for name, param in self.named_parameters():
+                if "backbone" in name:
+                    backbone_params.append(param)
+                else:
+                    other_params.append(param)
+            
+            # Create parameter groups with different learning rates
+            param_groups = [
+                {
+                    "params": backbone_params,
+                    "lr": self.config.learning_rate * 0.1,  # Lower learning rate for backbone
+                    "weight_decay": self.config.weight_decay
+                },
+                {
+                    "params": other_params,
+                    "lr": self.config.learning_rate,  # Higher learning rate for task-specific parts
+                    "weight_decay": self.config.weight_decay
+                }
+            ]
+            
+            # Create optimizer with parameter groups
+            optimizer = torch.optim.AdamW(param_groups)
+        else:
+            # If no backbone, use standard optimizer
+            optimizer = torch.optim.AdamW(self.parameters(), lr=self.config.learning_rate, weight_decay=self.config.weight_decay)
+        
+        # Configure scheduler
         if self.config.scheduler == "cosine":
             scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
                 optimizer,
-                T_max=self.config.epochs
+                T_max=self.config.epochs,
+                eta_min=1e-6
             )
-        else:
-            scheduler = torch.optim.lr_scheduler.StepLR(
-                optimizer,
-                step_size=30,
-                gamma=0.1
-            )
-        
-        return {
-            "optimizer": optimizer,
-            "lr_scheduler": {
-                "scheduler": scheduler,
-                "monitor": "val_loss"
+            return {
+                "optimizer": optimizer,
+                "lr_scheduler": {
+                    "scheduler": scheduler,
+                    "interval": "epoch",
+                    "frequency": 1
+                }
             }
-        }
+        else:
+            # Default to no scheduler
+            return {"optimizer": optimizer}
     
     @classmethod
     def from_pretrained(

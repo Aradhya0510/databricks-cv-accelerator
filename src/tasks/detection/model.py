@@ -483,7 +483,7 @@ class DetectionModel(pl.LightningModule):
         Args:
             checkpoint: Dictionary to save state to
         """
-        checkpoint["model_config"] = self.model_config.to_dict()
+        # Save class names and optimizer parameters
         checkpoint["class_names"] = self.config.class_names
         checkpoint["optimizer_params"] = {
             "learning_rate": self.config.learning_rate,
@@ -498,8 +498,6 @@ class DetectionModel(pl.LightningModule):
         Args:
             checkpoint: Dictionary to load state from
         """
-        if "model_config" in checkpoint:
-            self.model_config = AutoConfig.from_dict(checkpoint["model_config"])
         if "class_names" in checkpoint:
             self.config.class_names = checkpoint["class_names"]
         if "optimizer_params" in checkpoint:

@@ -107,15 +107,39 @@ else:
 print("✅ Configuration loaded successfully!")
 print(f"📁 Checkpoint directory: {config['training']['checkpoint_dir']}")
 
-# Initialize logging
-logger = create_databricks_logger(
-    name="model_registration_deployment",
-    log_file=f"{DEPLOYMENT_LOGS_DIR}/registration_deployment.log"
-)
-
 # Unity Catalog configuration
 MODEL_NAME = config['model']['model_name']
 MODEL_VERSION = "1.0.0"
+
+# Sanitize model name for Unity Catalog (no forward slashes, special chars)
+def sanitize_model_name(model_name: str) -> str:
+    """Sanitize model name for Unity Catalog compatibility."""
+    # Replace forward slashes and other invalid characters
+    sanitized = model_name.replace('/', '_').replace('-', '_').replace('.', '_')
+    # Remove any remaining special characters
+    sanitized = ''.join(c for c in sanitized if c.isalnum() or c == '_')
+    # Ensure it starts with a letter
+    if sanitized and not sanitized[0].isalpha():
+        sanitized = 'model_' + sanitized
+    return sanitized
+
+UNITY_CATALOG_MODEL_NAME = sanitize_model_name(MODEL_NAME)
+
+# Initialize logging for deployment tracking
+
+username = dbutils.notebook.entry_point.getDbutils().notebook().getContext().userName().get()
+
+deployment_logger = create_databricks_logger(
+    experiment_name=f"/Users/{username}/deployment_pipeline",
+    run_name="model_registration_deployment",
+    log_model=False,  # No model logging for deployment
+    tags={
+        'task': 'deployment',
+        'model': MODEL_NAME,
+        'catalog': CATALOG,
+        'schema': SCHEMA
+    }
+)
 
 print(f"✅ Configuration loaded")
 print(f"   Model: {MODEL_NAME}")
@@ -235,7 +259,7 @@ def setup_unity_catalog_model_registry():
     
     try:
         # Set up Unity Catalog paths
-        model_registry_path = f"{CATALOG}.{SCHEMA}.{MODEL_NAME}"
+        model_registry_path = f"{CATALOG}.{SCHEMA}.{UNITY_CATALOG_MODEL_NAME}"
         
         # Create model registry if it doesn't exist
         try:
@@ -277,8 +301,8 @@ def create_model_registry_entry():
     print("📝 Creating model registry entry...")
     
     try:
-        # Create model registry entry
-        model_registry_path = f"{CATALOG}.{SCHEMA}.{MODEL_NAME}"
+        # Create model registry entry with sanitized name
+        model_registry_path = f"{CATALOG}.{SCHEMA}.{UNITY_CATALOG_MODEL_NAME}"
         
         # Set up MLflow model registry
         mlflow.set_registry_uri("databricks-uc")
@@ -291,6 +315,8 @@ def create_model_registry_entry():
                 description=f"DETR model for object detection - {MODEL_NAME}"
             )
             print(f"✅ Model registry entry created: {model_registry_path}")
+            print(f"   Original model name: {MODEL_NAME}")
+            print(f"   Unity Catalog name: {UNITY_CATALOG_MODEL_NAME}")
         except Exception as e:
             print(f"⚠️  Model registry entry may already exist: {e}")
         
@@ -397,15 +423,37 @@ def log_model_to_registry(model, signature, input_example, model_metadata):
         experiment_name = f"/Users/{dbutils.notebook.entry_point.getDbutils().notebook().getContext().userName().get()}/model_registry"
         mlflow.set_experiment(experiment_name)
         
-        # Log model to MLflow
-        with mlflow.start_run(run_name=f"model_registration_{MODEL_NAME}"):
-            # Log model
+        # Create conda environment for serving (matching training environment)
+        conda_env = {
+            "name": "serving-env",
+            "channels": ["conda-forge"],
+            "dependencies": [
+                "python=3.12",
+                "pip",
+                {
+                    "pip": [
+                        "mlflow==2.21.3",
+                        "torch==2.6.0",
+                        "torchvision==0.21.0",
+                        "numpy==1.26.4",
+                        "pillow==10.2.0",
+                        "transformers==4.50.2",
+                        "accelerate==1.5.2"
+                    ]
+                }
+            ]
+        }
+        
+        # Log model to MLflow with custom conda environment
+        with mlflow.start_run(run_name=f"model_registration_{UNITY_CATALOG_MODEL_NAME}"):
+            # Log model with custom conda environment
             model_uri = mlflow.pytorch.log_model(
                 pytorch_model=model,
                 artifact_path="model",
                 signature=signature,
                 input_example=input_example,
-                registered_model_name=f"{CATALOG}.{SCHEMA}.{MODEL_NAME}"
+                conda_env=conda_env,
+                registered_model_name=f"{CATALOG}.{SCHEMA}.{UNITY_CATALOG_MODEL_NAME}"
             )
             
             # Log metadata
@@ -416,7 +464,9 @@ def log_model_to_registry(model, signature, input_example, model_metadata):
             
             print(f"✅ Model logged successfully")
             print(f"   Model URI: {model_uri}")
-            print(f"   Registered model: {CATALOG}.{SCHEMA}.{MODEL_NAME}")
+            print(f"   Registered model: {CATALOG}.{SCHEMA}.{UNITY_CATALOG_MODEL_NAME}")
+            print(f"   Original model name: {MODEL_NAME}")
+            print(f"   Conda environment: {conda_env['name']}")
             
             return model_uri
             
@@ -443,22 +493,38 @@ def validate_logged_model(model_uri):
     print("🔍 Validating logged model...")
     
     try:
-        # Load model from registry
-        loaded_model = mlflow.pytorch.load_model(model_uri)
+        # Check if model_uri is a string or ModelInfo object
+        if hasattr(model_uri, 'model_uri'):
+            # It's a ModelInfo object, get the actual URI
+            actual_uri = model_uri.model_uri
+        else:
+            # It's already a string URI
+            actual_uri = model_uri
         
-        # Test inference
+        print(f"   Using model URI: {actual_uri}")
+        
+        # Load model from registry
+        loaded_model = mlflow.pytorch.load_model(actual_uri)
+        
+        # Move model to CPU for validation (to avoid device mismatch)
+        loaded_model = loaded_model.cpu()
+        loaded_model.eval()
+        
+        # Test inference on CPU
         test_input = torch.randn(1, 3, 800, 800)
         with torch.no_grad():
             test_output = loaded_model(test_input)
         
         print("✅ Model validation successful")
-        print(f"   Model loaded from: {model_uri}")
+        print(f"   Model loaded from: {actual_uri}")
+        print(f"   Model device: {next(loaded_model.parameters()).device}")
+        print(f"   Input device: {test_input.device}")
         print(f"   Input shape: {test_input.shape}")
         print(f"   Output type: {type(test_output)}")
         
         # Check model metadata
         client = mlflow.tracking.MlflowClient()
-        model_info = client.get_registered_model(f"{CATALOG}.{SCHEMA}.{MODEL_NAME}")
+        model_info = client.get_registered_model(f"{CATALOG}.{SCHEMA}.{UNITY_CATALOG_MODEL_NAME}")
         
         print(f"   Model name: {model_info.name}")
         print(f"   Latest version: {model_info.latest_versions}")
@@ -467,6 +533,9 @@ def validate_logged_model(model_uri):
         
     except Exception as e:
         print(f"❌ Model validation failed: {e}")
+        print(f"   Model URI type: {type(model_uri)}")
+        if hasattr(model_uri, '__dict__'):
+            print(f"   Model URI attributes: {list(model_uri.__dict__.keys())}")
         return False
 
 model_validated = validate_logged_model(model_uri)
@@ -500,28 +569,82 @@ def create_model_serving_endpoint():
         client = WorkspaceClient()
         
         # Define endpoint configuration
-        endpoint_name = f"detr-{MODEL_NAME.replace('/', '-')}"
+        endpoint_name = f"detr-{UNITY_CATALOG_MODEL_NAME}"
         
-        # Create endpoint configuration
-        endpoint_config = EndpointCoreConfigInput(
-            name=endpoint_name,
-            served_models=[
-                ServedModelInput(
-                    model_name=f"{CATALOG}.{SCHEMA}.{MODEL_NAME}",
-                    model_version="1",
-                    workload_size="Small",
-                    scale_to_zero_enabled=True
-                )
-            ]
+        # Check if endpoint already exists
+        try:
+            existing_endpoint = client.serving_endpoints.get(endpoint_name)
+            print(f"⚠️  Endpoint '{endpoint_name}' already exists")
+            print(f"   Current state: {existing_endpoint.state}")
+            
+            # Ask user if they want to delete and recreate
+            print(f"   Deleting existing endpoint to recreate with new model...")
+            client.serving_endpoints.delete(endpoint_name)
+            
+            # Wait a bit for deletion to complete
+            import time
+            time.sleep(10)
+            
+        except Exception as e:
+            print(f"   Endpoint doesn't exist or can't be accessed: {e}")
+        
+        # Get the latest model version automatically
+        try:
+            mlflow_client = mlflow.tracking.MlflowClient()
+            model_info = mlflow_client.get_registered_model(f"{CATALOG}.{SCHEMA}.{UNITY_CATALOG_MODEL_NAME}")
+            
+            if model_info.latest_versions:
+                latest_version = max([v.version for v in model_info.latest_versions])
+                print(f"   Latest model version: {latest_version}")
+            else:
+                # If no versions found, try to get all versions
+                all_versions = mlflow_client.search_model_versions(f"name='{CATALOG}.{SCHEMA}.{UNITY_CATALOG_MODEL_NAME}'")
+                if all_versions:
+                    latest_version = max([v.version for v in all_versions])
+                    print(f"   Latest model version: {latest_version}")
+                else:
+                    print(f"   Warning: No model versions found, using version 1")
+                    latest_version = "1"
+        except Exception as e:
+            print(f"   Warning: Could not get latest version, using version 1: {e}")
+            latest_version = "1"
+        
+        # Try with minimal configuration first
+        from databricks.sdk.service.serving import ServedModelInput, EndpointCoreConfigInput, ServedModelInputWorkloadSize
+        
+        served_model = ServedModelInput(
+            model_name=f"{CATALOG}.{SCHEMA}.{UNITY_CATALOG_MODEL_NAME}",
+            model_version=str(latest_version),
+            workload_size=ServedModelInputWorkloadSize.SMALL,
+            scale_to_zero_enabled=True
         )
         
-        # Create endpoint
-        endpoint = client.serving_endpoints.create(endpoint_config)
+        endpoint_config = EndpointCoreConfigInput(
+            name=endpoint_name,
+            served_models=[served_model]
+        )
+        
+        print(f"   Endpoint config created:")
+        print(f"   Name: {endpoint_name}")
+        print(f"   Model: {CATALOG}.{SCHEMA}.{UNITY_CATALOG_MODEL_NAME}")
+        print(f"   Workload size: Small")
+        print(f"   Config type: {type(endpoint_config)}")
+        print(f"   Config: {endpoint_config}")
+        
+        # Create endpoint - pass both name and config as required by API
+        # Use WorkspaceClient for serving endpoints
+        workspace_client = WorkspaceClient()
+        endpoint = workspace_client.serving_endpoints.create(
+            name=endpoint_name,
+            config=endpoint_config
+        )
         
         print(f"✅ Model serving endpoint created")
         print(f"   Endpoint name: {endpoint_name}")
-        print(f"   Endpoint ID: {endpoint.id}")
-        print(f"   Model: {CATALOG}.{SCHEMA}.{MODEL_NAME}")
+        print(f"   Endpoint object: {endpoint}")
+        print(f"   Endpoint attributes: {dir(endpoint)}")
+        print(f"   Model: {CATALOG}.{SCHEMA}.{UNITY_CATALOG_MODEL_NAME}")
+        print(f"   Original model name: {MODEL_NAME}")
         
         return endpoint_name
         
@@ -558,13 +681,31 @@ def wait_for_endpoint_ready(endpoint_name, timeout_minutes=15):
             try:
                 endpoint = client.serving_endpoints.get(endpoint_name)
                 
-                if endpoint.state.ready:
+                # Check if endpoint is actually ready
+                if hasattr(endpoint.state, 'ready') and endpoint.state.ready.value == 'READY':
                     print(f"✅ Endpoint '{endpoint_name}' is ready!")
                     print(f"   State: {endpoint.state}")
-                    print(f"   URL: {endpoint.state.config.inference_url}")
+                    
+                    # Try to get the inference URL safely
+                    try:
+                        # Debug endpoint structure
+                        print(f"   Endpoint attributes: {dir(endpoint)}")
+                        print(f"   State attributes: {dir(endpoint.state)}")
+                        
+                        # Try different ways to get the URL
+                        if hasattr(endpoint.state, 'config') and hasattr(endpoint.state.config, 'inference_url'):
+                            print(f"   URL: {endpoint.state.config.inference_url}")
+                        elif hasattr(endpoint, 'config') and hasattr(endpoint.config, 'inference_url'):
+                            print(f"   URL: {endpoint.config.inference_url}")
+                        else:
+                            print(f"   URL: Not available yet")
+                    except Exception as e:
+                        print(f"   URL: Error getting URL - {e}")
+                    
                     return True
                 else:
                     print(f"   Current state: {endpoint.state}")
+                    print(f"   Ready status: {endpoint.state.ready if hasattr(endpoint.state, 'ready') else 'Unknown'}")
                     time.sleep(30)  # Wait 30 seconds before checking again
                     
             except Exception as e:

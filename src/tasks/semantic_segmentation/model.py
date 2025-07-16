@@ -6,8 +6,7 @@ import lightning as pl
 from torchmetrics.classification import Accuracy, F1Score, Precision, Recall, Dice, JaccardIndex
 from transformers import (
     AutoModelForSemanticSegmentation,
-    AutoConfig,
-    PreTrainedModel
+    AutoConfig
 )
 from .adapters import get_input_adapter, get_output_adapter
 
@@ -20,10 +19,17 @@ class SemanticSegmentationModelConfig:
     learning_rate: float = 1e-4
     weight_decay: float = 0.01
     scheduler: str = "cosine"
+    scheduler_params: Optional[Dict[str, Any]] = None
     epochs: int = 10
     class_names: Optional[List[str]] = None
     model_kwargs: Optional[Dict[str, Any]] = None
     image_size: int = 512
+    num_workers: int = 1  # Add num_workers parameter
+    
+    @property
+    def sync_dist_flag(self) -> bool:
+        """Return True if num_workers > 1 (distributed training), False otherwise."""
+        return self.num_workers > 1
 
 class SemanticSegmentationModel(pl.LightningModule):
     """Semantic segmentation model that works with Hugging Face semantic segmentation models."""
@@ -168,8 +174,14 @@ class SemanticSegmentationModel(pl.LightningModule):
             self.train_precision.update(pred_mask, target_mask)
             self.train_recall.update(pred_mask, target_mask)
         
-        # Log loss
-        self.log("train_loss", outputs["loss"], prog_bar=True)
+        # Log loss with sync_dist flag and batch_size
+        # Get batch size from input data safely
+        try:
+            batch_size = batch["pixel_values"].shape[0] if "pixel_values" in batch else None
+        except (KeyError, AttributeError, IndexError):
+            batch_size = None
+        
+        self.log("train_loss", outputs["loss"], prog_bar=True, sync_dist=self.config.sync_dist_flag, batch_size=batch_size)
         
         # Memory management: Clear intermediate tensors
         if hasattr(outputs, 'logits'):
@@ -210,8 +222,14 @@ class SemanticSegmentationModel(pl.LightningModule):
             self.val_precision.update(pred_mask, target_mask)
             self.val_recall.update(pred_mask, target_mask)
         
-        # Log loss
-        self.log("val_loss", outputs["loss"], prog_bar=True)
+        # Log loss with sync_dist flag and batch_size
+        # Get batch size from input data safely
+        try:
+            batch_size = batch["pixel_values"].shape[0] if "pixel_values" in batch else None
+        except (KeyError, AttributeError, IndexError):
+            batch_size = None
+        
+        self.log("val_loss", outputs["loss"], prog_bar=True, sync_dist=self.config.sync_dist_flag, batch_size=batch_size)
         
         # Memory management: Clear intermediate tensors
         if hasattr(outputs, 'logits'):
@@ -220,11 +238,11 @@ class SemanticSegmentationModel(pl.LightningModule):
     def on_validation_epoch_end(self) -> None:
         """Called at the end of validation epoch."""
         # Log metrics
-        self.log("val_dice", self.val_dice.compute(), prog_bar=True)
-        self.log("val_iou", self.val_iou.compute(), prog_bar=True)
-        self.log("val_accuracy", self.val_accuracy.compute(), prog_bar=True)
-        self.log("val_precision", self.val_precision.compute(), prog_bar=True)
-        self.log("val_recall", self.val_recall.compute(), prog_bar=True)
+        self.log("val_dice", self.val_dice.compute(), prog_bar=True, sync_dist=self.config.sync_dist_flag)
+        self.log("val_iou", self.val_iou.compute(), prog_bar=True, sync_dist=self.config.sync_dist_flag)
+        self.log("val_accuracy", self.val_accuracy.compute(), prog_bar=True, sync_dist=self.config.sync_dist_flag)
+        self.log("val_precision", self.val_precision.compute(), sync_dist=self.config.sync_dist_flag)
+        self.log("val_recall", self.val_recall.compute(), sync_dist=self.config.sync_dist_flag)
         
         # Reset metrics
         self.val_dice.reset()
@@ -260,8 +278,14 @@ class SemanticSegmentationModel(pl.LightningModule):
             self.test_precision.update(pred_mask, target_mask)
             self.test_recall.update(pred_mask, target_mask)
         
-        # Log loss
-        self.log("test_loss", outputs["loss"], prog_bar=True)
+        # Log loss with sync_dist flag and batch_size
+        # Get batch size from input data safely
+        try:
+            batch_size = batch["pixel_values"].shape[0] if "pixel_values" in batch else None
+        except (KeyError, AttributeError, IndexError):
+            batch_size = None
+        
+        self.log("test_loss", outputs["loss"], prog_bar=True, sync_dist=self.config.sync_dist_flag, batch_size=batch_size)
         
         # Memory management: Clear intermediate tensors
         if hasattr(outputs, 'logits'):
@@ -270,11 +294,11 @@ class SemanticSegmentationModel(pl.LightningModule):
     def on_test_epoch_end(self) -> None:
         """Called at the end of test epoch."""
         # Log metrics
-        self.log("test_dice", self.test_dice.compute(), prog_bar=True)
-        self.log("test_iou", self.test_iou.compute(), prog_bar=True)
-        self.log("test_accuracy", self.test_accuracy.compute(), prog_bar=True)
-        self.log("test_precision", self.test_precision.compute(), prog_bar=True)
-        self.log("test_recall", self.test_recall.compute(), prog_bar=True)
+        self.log("test_dice", self.test_dice.compute(), prog_bar=True, sync_dist=self.config.sync_dist_flag)
+        self.log("test_iou", self.test_iou.compute(), prog_bar=True, sync_dist=self.config.sync_dist_flag)
+        self.log("test_accuracy", self.test_accuracy.compute(), prog_bar=True, sync_dist=self.config.sync_dist_flag)
+        self.log("test_precision", self.test_precision.compute(), sync_dist=self.config.sync_dist_flag)
+        self.log("test_recall", self.test_recall.compute(), sync_dist=self.config.sync_dist_flag)
         
         # Reset metrics
         self.test_dice.reset()
@@ -284,32 +308,63 @@ class SemanticSegmentationModel(pl.LightningModule):
         self.test_recall.reset()
     
     def configure_optimizers(self):
-        """Configure optimizers and schedulers."""
-        optimizer = torch.optim.AdamW(
-            self.parameters(),
-            lr=self.config.learning_rate,
-            weight_decay=self.config.weight_decay
-        )
+        """Configure optimizers and learning rate schedulers."""
+        # Get optimizer parameters from config
+        optimizer_params = {
+            "lr": self.config.learning_rate,
+            "weight_decay": self.config.weight_decay
+        }
         
+        # Check if model has a backbone (common in vision models)
+        if hasattr(self.model, 'backbone'):
+            # Separate parameters for backbone and other parts
+            backbone_params = []
+            other_params = []
+            
+            for name, param in self.named_parameters():
+                if "backbone" in name:
+                    backbone_params.append(param)
+                else:
+                    other_params.append(param)
+            
+            # Create parameter groups with different learning rates
+            param_groups = [
+                {
+                    "params": backbone_params,
+                    "lr": self.config.learning_rate * 0.1,  # Lower learning rate for backbone
+                    "weight_decay": self.config.weight_decay
+                },
+                {
+                    "params": other_params,
+                    "lr": self.config.learning_rate,  # Higher learning rate for task-specific parts
+                    "weight_decay": self.config.weight_decay
+                }
+            ]
+            
+            # Create optimizer with parameter groups
+            optimizer = torch.optim.AdamW(param_groups)
+        else:
+            # If no backbone, use standard optimizer
+            optimizer = torch.optim.AdamW(self.parameters(), lr=self.config.learning_rate, weight_decay=self.config.weight_decay)
+        
+        # Configure scheduler
         if self.config.scheduler == "cosine":
             scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
                 optimizer,
-                T_max=self.config.epochs
+                T_max=self.config.epochs,
+                eta_min=1e-6
             )
-        else:
-            scheduler = torch.optim.lr_scheduler.StepLR(
-                optimizer,
-                step_size=30,
-                gamma=0.1
-            )
-        
-        return {
-            "optimizer": optimizer,
-            "lr_scheduler": {
-                "scheduler": scheduler,
-                "monitor": "val_loss"
+            return {
+                "optimizer": optimizer,
+                "lr_scheduler": {
+                    "scheduler": scheduler,
+                    "interval": "epoch",
+                    "frequency": 1
+                }
             }
-        }
+        else:
+            # Default to no scheduler
+            return {"optimizer": optimizer}
     
     @classmethod
     def from_pretrained(
@@ -351,24 +406,43 @@ class SemanticSegmentationModel(pl.LightningModule):
         self.model.eval()
     
     def on_save_checkpoint(self, checkpoint: Dict[str, Any]) -> None:
-        """Called when saving a checkpoint."""
-        # Add model configuration to checkpoint
-        checkpoint["model_config"] = self.config.__dict__
+        """Save additional state to checkpoint.
+        
+        Args:
+            checkpoint: Dictionary to save state to
+        """
+        # Save class names and optimizer parameters
+        checkpoint["class_names"] = self.config.class_names
+        checkpoint["optimizer_params"] = {
+            "learning_rate": self.config.learning_rate,
+            "weight_decay": self.config.weight_decay,
+            "scheduler": self.config.scheduler,
+            "scheduler_params": self.config.scheduler_params
+        }
     
     def on_load_checkpoint(self, checkpoint: Dict[str, Any]) -> None:
-        """Called when loading a checkpoint."""
-        # Load model configuration from checkpoint
-        if "model_config" in checkpoint:
-            self.config = SemanticSegmentationModelConfig(**checkpoint["model_config"])
+        """Load additional state from checkpoint.
+        
+        Args:
+            checkpoint: Dictionary to load state from
+        """
+        if "class_names" in checkpoint:
+            self.config.class_names = checkpoint["class_names"]
+        if "optimizer_params" in checkpoint:
+            params = checkpoint["optimizer_params"]
+            self.config.learning_rate = params["learning_rate"]
+            self.config.weight_decay = params["weight_decay"]
+            self.config.scheduler = params["scheduler"]
+            self.config.scheduler_params = params["scheduler_params"]
     
     def on_train_epoch_end(self) -> None:
         """Called at the end of training epoch."""
         # Log metrics
-        self.log("train_dice", self.train_dice.compute(), prog_bar=True)
-        self.log("train_iou", self.train_iou.compute(), prog_bar=True)
-        self.log("train_accuracy", self.train_accuracy.compute(), prog_bar=True)
-        self.log("train_precision", self.train_precision.compute(), prog_bar=True)
-        self.log("train_recall", self.train_recall.compute(), prog_bar=True)
+        self.log("train_dice", self.train_dice.compute(), prog_bar=True, sync_dist=self.config.sync_dist_flag)
+        self.log("train_iou", self.train_iou.compute(), prog_bar=True, sync_dist=self.config.sync_dist_flag)
+        self.log("train_accuracy", self.train_accuracy.compute(), prog_bar=True, sync_dist=self.config.sync_dist_flag)
+        self.log("train_precision", self.train_precision.compute(), sync_dist=self.config.sync_dist_flag)
+        self.log("train_recall", self.train_recall.compute(), sync_dist=self.config.sync_dist_flag)
         
         # Reset metrics
         self.train_dice.reset()

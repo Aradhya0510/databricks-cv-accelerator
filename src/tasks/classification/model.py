@@ -4,7 +4,7 @@ from dataclasses import dataclass
 import torch
 import lightning as pl
 from torchmetrics.classification import Accuracy, F1Score, Precision, Recall
-from transformers import AutoModelForImageClassification, AutoConfig, PreTrainedModel
+from transformers import AutoModelForImageClassification, AutoConfig
 from .adapters import get_input_adapter, get_output_adapter
 
 @dataclass
@@ -16,10 +16,17 @@ class ClassificationModelConfig:
     learning_rate: float = 1e-4
     weight_decay: float = 0.01
     scheduler: str = "cosine"
+    scheduler_params: Optional[Dict[str, Any]] = None
     epochs: int = 10
     class_names: Optional[List[str]] = None
     model_kwargs: Optional[Dict[str, Any]] = None
     image_size: int = 224
+    num_workers: int = 1  # Add num_workers parameter
+    
+    @property
+    def sync_dist_flag(self) -> bool:
+        """Return True if num_workers > 1 (distributed training), False otherwise."""
+        return self.num_workers > 1
 
 class ClassificationModel(pl.LightningModule):
     """Base classification model that can work with any Hugging Face image classification model."""
@@ -156,10 +163,16 @@ class ClassificationModel(pl.LightningModule):
             self.train_precision.update(pred["labels"], target["labels"])
             self.train_recall.update(pred["labels"], target["labels"])
         
-        # Log metrics
-        self.log("train_loss", outputs["loss"], on_step=True, on_epoch=True, prog_bar=True)
+        # Log metrics with sync_dist flag and batch_size
+        # Get batch size from input data safely
+        try:
+            batch_size = batch["pixel_values"].shape[0] if "pixel_values" in batch else None
+        except (KeyError, AttributeError, IndexError):
+            batch_size = None
+        
+        self.log("train_loss", outputs["loss"], on_step=True, on_epoch=True, prog_bar=True, sync_dist=self.config.sync_dist_flag, batch_size=batch_size)
         for k, v in outputs["loss_dict"].items():
-            self.log(f"train_{k}", v, on_step=True, on_epoch=True)
+            self.log(f"train_{k}", v, on_step=True, on_epoch=True, sync_dist=self.config.sync_dist_flag, batch_size=batch_size)
         
         # Memory management: Clear intermediate tensors
         if hasattr(outputs, 'logits'):
@@ -181,10 +194,10 @@ class ClassificationModel(pl.LightningModule):
     
     def on_train_epoch_end(self) -> None:
         """Calculate and log metrics at the end of training epoch."""
-        self.log("train_accuracy", self.train_accuracy.compute(), prog_bar=True)
-        self.log("train_f1", self.train_f1.compute())
-        self.log("train_precision", self.train_precision.compute())
-        self.log("train_recall", self.train_recall.compute())
+        self.log("train_accuracy", self.train_accuracy.compute(), prog_bar=True, sync_dist=self.config.sync_dist_flag)
+        self.log("train_f1", self.train_f1.compute(), sync_dist=self.config.sync_dist_flag)
+        self.log("train_precision", self.train_precision.compute(), sync_dist=self.config.sync_dist_flag)
+        self.log("train_recall", self.train_recall.compute(), sync_dist=self.config.sync_dist_flag)
         
         # Reset metrics
         self.train_accuracy.reset()
@@ -215,8 +228,14 @@ class ClassificationModel(pl.LightningModule):
             self.val_precision.update(pred["labels"], target["labels"])
             self.val_recall.update(pred["labels"], target["labels"])
         
-        # Log metrics
-        self.log("val_loss", outputs["loss"], on_step=True, on_epoch=True, prog_bar=True)
+        # Log metrics with sync_dist flag and batch_size
+        # Get batch size from input data safely
+        try:
+            batch_size = batch["pixel_values"].shape[0] if "pixel_values" in batch else None
+        except (KeyError, AttributeError, IndexError):
+            batch_size = None
+        
+        self.log("val_loss", outputs["loss"], on_step=True, on_epoch=True, prog_bar=True, sync_dist=self.config.sync_dist_flag, batch_size=batch_size)
         
         # Memory management: Clear intermediate tensors
         if hasattr(outputs, 'logits'):
@@ -224,10 +243,10 @@ class ClassificationModel(pl.LightningModule):
     
     def on_validation_epoch_end(self) -> None:
         """Calculate and log metrics at the end of validation epoch."""
-        self.log("val_accuracy", self.val_accuracy.compute(), prog_bar=True)
-        self.log("val_f1", self.val_f1.compute())
-        self.log("val_precision", self.val_precision.compute())
-        self.log("val_recall", self.val_recall.compute())
+        self.log("val_accuracy", self.val_accuracy.compute(), prog_bar=True, sync_dist=self.config.sync_dist_flag)
+        self.log("val_f1", self.val_f1.compute(), sync_dist=self.config.sync_dist_flag)
+        self.log("val_precision", self.val_precision.compute(), sync_dist=self.config.sync_dist_flag)
+        self.log("val_recall", self.val_recall.compute(), sync_dist=self.config.sync_dist_flag)
         
         # Reset metrics
         self.val_accuracy.reset()
@@ -258,8 +277,14 @@ class ClassificationModel(pl.LightningModule):
             self.test_precision.update(pred["labels"], target["labels"])
             self.test_recall.update(pred["labels"], target["labels"])
         
-        # Log metrics
-        self.log("test_loss", outputs["loss"], on_step=True, on_epoch=True, prog_bar=True)
+        # Log metrics with sync_dist flag and batch_size
+        # Get batch size from input data safely
+        try:
+            batch_size = batch["pixel_values"].shape[0] if "pixel_values" in batch else None
+        except (KeyError, AttributeError, IndexError):
+            batch_size = None
+        
+        self.log("test_loss", outputs["loss"], on_step=True, on_epoch=True, prog_bar=True, sync_dist=self.config.sync_dist_flag, batch_size=batch_size)
         
         # Memory management: Clear intermediate tensors
         if hasattr(outputs, 'logits'):
@@ -267,10 +292,10 @@ class ClassificationModel(pl.LightningModule):
     
     def on_test_epoch_end(self) -> None:
         """Calculate and log metrics at the end of test epoch."""
-        self.log("test_accuracy", self.test_accuracy.compute(), prog_bar=True)
-        self.log("test_f1", self.test_f1.compute())
-        self.log("test_precision", self.test_precision.compute())
-        self.log("test_recall", self.test_recall.compute())
+        self.log("test_accuracy", self.test_accuracy.compute(), prog_bar=True, sync_dist=self.config.sync_dist_flag)
+        self.log("test_f1", self.test_f1.compute(), sync_dist=self.config.sync_dist_flag)
+        self.log("test_precision", self.test_precision.compute(), sync_dist=self.config.sync_dist_flag)
+        self.log("test_recall", self.test_recall.compute(), sync_dist=self.config.sync_dist_flag)
         
         # Reset metrics
         self.test_accuracy.reset()
@@ -280,21 +305,62 @@ class ClassificationModel(pl.LightningModule):
     
     def configure_optimizers(self):
         """Configure optimizers and learning rate schedulers."""
-        optimizer = torch.optim.AdamW(
-            self.parameters(),
-            lr=self.config.learning_rate,
-            weight_decay=self.config.weight_decay
-        )
+        # Get optimizer parameters from config
+        optimizer_params = {
+            "lr": self.config.learning_rate,
+            "weight_decay": self.config.weight_decay
+        }
         
+        # Check if model has a backbone (common in vision models)
+        if hasattr(self.model, 'backbone'):
+            # Separate parameters for backbone and other parts
+            backbone_params = []
+            other_params = []
+            
+            for name, param in self.named_parameters():
+                if "backbone" in name:
+                    backbone_params.append(param)
+                else:
+                    other_params.append(param)
+            
+            # Create parameter groups with different learning rates
+            param_groups = [
+                {
+                    "params": backbone_params,
+                    "lr": self.config.learning_rate * 0.1,  # Lower learning rate for backbone
+                    "weight_decay": self.config.weight_decay
+                },
+                {
+                    "params": other_params,
+                    "lr": self.config.learning_rate,  # Higher learning rate for task-specific parts
+                    "weight_decay": self.config.weight_decay
+                }
+            ]
+            
+            # Create optimizer with parameter groups
+            optimizer = torch.optim.AdamW(param_groups)
+        else:
+            # If no backbone, use standard optimizer
+            optimizer = torch.optim.AdamW(self.parameters(), lr=self.config.learning_rate, weight_decay=self.config.weight_decay)
+        
+        # Configure scheduler
         if self.config.scheduler == "cosine":
             scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
                 optimizer,
                 T_max=self.config.epochs,
                 eta_min=1e-6
             )
-            return [optimizer], [scheduler]
-        
-        return optimizer
+            return {
+                "optimizer": optimizer,
+                "lr_scheduler": {
+                    "scheduler": scheduler,
+                    "interval": "epoch",
+                    "frequency": 1
+                }
+            }
+        else:
+            # Default to no scheduler
+            return {"optimizer": optimizer}
     
     @classmethod
     def from_pretrained(
@@ -347,8 +413,14 @@ class ClassificationModel(pl.LightningModule):
         Args:
             checkpoint: Dictionary to save state to
         """
-        checkpoint["model_config"] = self.config.__dict__
+        # Save class names and optimizer parameters
         checkpoint["class_names"] = self.config.class_names
+        checkpoint["optimizer_params"] = {
+            "learning_rate": self.config.learning_rate,
+            "weight_decay": self.config.weight_decay,
+            "scheduler": self.config.scheduler,
+            "scheduler_params": self.config.scheduler_params
+        }
     
     def on_load_checkpoint(self, checkpoint: Dict[str, Any]) -> None:
         """Load additional state from checkpoint.
@@ -356,7 +428,11 @@ class ClassificationModel(pl.LightningModule):
         Args:
             checkpoint: Dictionary to load state from
         """
-        if "model_config" in checkpoint:
-            self.config = ClassificationModelConfig(**checkpoint["model_config"])
         if "class_names" in checkpoint:
-            self.config.class_names = checkpoint["class_names"] 
+            self.config.class_names = checkpoint["class_names"]
+        if "optimizer_params" in checkpoint:
+            params = checkpoint["optimizer_params"]
+            self.config.learning_rate = params["learning_rate"]
+            self.config.weight_decay = params["weight_decay"]
+            self.config.scheduler = params["scheduler"]
+            self.config.scheduler_params = params["scheduler_params"] 
