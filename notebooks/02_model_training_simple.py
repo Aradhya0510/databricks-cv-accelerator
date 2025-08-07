@@ -88,7 +88,15 @@ print(f"✅ Model initialized: {config['model']['model_name']}")
 # Initialize data module
 print("📊 Setting up data module...")
 from tasks.detection.adapters import get_input_adapter
-adapter = get_input_adapter(config["model"]["model_name"], image_size=config["data"].get("image_size", [800,800])[0])
+
+# Fix image size handling - handle both list and scalar formats
+image_size = config["data"].get("image_size", 800)
+if isinstance(image_size, list):
+    image_size = image_size[0]  # Use first value if it's a list
+elif isinstance(image_size, dict):
+    image_size = image_size.get("height", 800)  # Use height if it's a dict
+
+adapter = get_input_adapter(config["model"]["model_name"], image_size=image_size)
 data_module = DetectionDataModule(config["data"])
 data_module.adapter = adapter
 data_module.setup('fit')
@@ -101,11 +109,28 @@ print(f"✅ Data module setup: {len(data_module.train_dataset)} train, {len(data
 
 # COMMAND ----------
 
-# Setup trainer
+# Setup trainer with proper constructor parameters
 print("🚀 Setting up trainer...")
-trainer = UnifiedTrainer(config)
-trainer.model = model
-trainer.data_module = data_module
+
+# Create trainer config with required fields
+trainer_config = {
+    'task': config['model']['task_type'],
+    'model_name': config['model']['model_name'],
+    'max_epochs': config['training']['max_epochs'],
+    'log_every_n_steps': config['training'].get('log_every_n_steps', 50),
+    'monitor_metric': config['training'].get('monitor_metric', 'val_loss'),
+    'monitor_mode': config['training'].get('monitor_mode', 'min'),
+    'early_stopping_patience': config['training'].get('early_stopping_patience', 10),
+    'checkpoint_dir': CHECKPOINT_DIR,
+    'save_top_k': 3,
+    'distributed': config['training'].get('distributed', False)
+}
+
+trainer = UnifiedTrainer(
+    config=trainer_config,
+    model=model,
+    data_module=data_module
+)
 print("✅ Trainer setup complete!")
 
 # COMMAND ----------
@@ -128,7 +153,8 @@ with mlflow.start_run():
         'max_epochs': config['training']['max_epochs'],
         'learning_rate': config['training']['learning_rate'],
         'batch_size': config['data']['batch_size'],
-        'num_workers': config['data']['num_workers']
+        'num_workers': config['data']['num_workers'],
+        'image_size': image_size
     })
     
     # Start training
@@ -154,6 +180,7 @@ print(f"✅ Classes: {config['model']['num_classes']}")
 print(f"✅ Epochs: {config['training']['max_epochs']}")
 print(f"✅ Learning Rate: {config['training']['learning_rate']}")
 print(f"✅ Batch Size: {config['data']['batch_size']}")
+print(f"✅ Image Size: {image_size}")
 print(f"✅ Training Success: {'Yes' if result else 'No'}")
 
 print(f"\n📁 Checkpoints: {CHECKPOINT_DIR}")

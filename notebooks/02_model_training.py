@@ -242,7 +242,15 @@ def setup_data_module():
     try:
         # Setup adapter first
         from tasks.detection.adapters import get_input_adapter
-        adapter = get_input_adapter(config["model"]["model_name"], image_size=config["data"].get("image_size", [800,800])[0])
+        
+        # Fix image size handling - handle both list and scalar formats
+        image_size = config["data"].get("image_size", 800)
+        if isinstance(image_size, list):
+            image_size = image_size[0]  # Use first value if it's a list
+        elif isinstance(image_size, dict):
+            image_size = image_size.get("height", 800)  # Use height if it's a dict
+        
+        adapter = get_input_adapter(config["model"]["model_name"], image_size=image_size)
         if adapter is None:
             print("❌ Failed to create adapter")
             return None
@@ -298,7 +306,15 @@ def test_data_loading_performance(data_module):
     
     # Setup adapter first
     from tasks.detection.adapters import get_input_adapter
-    adapter = get_input_adapter(config["model"]["model_name"], image_size=config["data"].get("image_size", [800,800])[0])
+    
+    # Fix image size handling - handle both list and scalar formats
+    image_size = config["data"].get("image_size", 800)
+    if isinstance(image_size, list):
+        image_size = image_size[0]  # Use first value if it's a list
+    elif isinstance(image_size, dict):
+        image_size = image_size.get("height", 800)  # Use height if it's a dict
+    
+    adapter = get_input_adapter(config["model"]["model_name"], image_size=image_size)
     if adapter is None:
         print("❌ Failed to create adapter")
         return False

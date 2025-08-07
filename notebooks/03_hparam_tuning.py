@@ -171,9 +171,8 @@ def define_search_space():
         # Weight decay
         "weight_decay": tune.loguniform(1e-5, 1e-3),
         
-        # Scheduler parameters
-        "scheduler_t_max": tune.choice([100, 200, 300]),
-        "scheduler_eta_min": tune.loguniform(1e-7, 1e-5),
+        # Scheduler type
+        "scheduler": tune.choice(["cosine", "step", "exponential"]),
         
         # Model architecture variations
         "backbone": tune.choice(["resnet50", "resnet101"]),
@@ -184,8 +183,8 @@ def define_search_space():
         # Data augmentation strength
         "augment_strength": tune.choice([0.1, 0.2, 0.3]),
         
-        # Dropout rate
-        "dropout": tune.uniform(0.1, 0.3),
+        # Number of workers
+        "num_workers": tune.choice([2, 4, 8]),
     }
     
     print("✅ Search space defined:")
@@ -219,12 +218,11 @@ def setup_search_algorithm():
                 "learning_rate": 1e-4,
                 "batch_size": 16,
                 "weight_decay": 1e-4,
-                "scheduler_t_max": 300,
-                "scheduler_eta_min": 1e-6,
+                "scheduler": "cosine",
                 "backbone": "resnet50",
                 "max_epochs": 100,
                 "augment_strength": 0.2,
-                "dropout": 0.1,
+                "num_workers": 4,
             }
         ]
     )
@@ -265,29 +263,24 @@ search_alg, scheduler = setup_search_algorithm()
 def train_trial(config_dict):
     """Training function for a single hyperparameter trial."""
     
-    print(f"🎯 Starting trial with config: {config_dict}")
-    
     try:
-        # Create a copy of base config and update with trial parameters
+        print(f"🚀 Starting trial with config: {config_dict}")
+        
+        # Create trial configuration
         trial_config = base_config.copy()
         
-        # Update training parameters
-        trial_config['training']['learning_rate'] = config_dict['learning_rate']
-        trial_config['training']['max_epochs'] = config_dict['max_epochs']
-        trial_config['training']['weight_decay'] = config_dict['weight_decay']
+        # Update model parameters
+        trial_config['model']['learning_rate'] = config_dict['learning_rate']
+        trial_config['model']['weight_decay'] = config_dict['weight_decay']
+        trial_config['model']['backbone'] = config_dict['backbone']
         
         # Update data parameters
         trial_config['data']['batch_size'] = config_dict['batch_size']
+        trial_config['data']['num_workers'] = config_dict['num_workers']
         
-        # Update model parameters
-        trial_config['model']['model_name'] = f"facebook/detr-{config_dict['backbone']}"
-        trial_config['model']['dropout'] = config_dict['dropout']
-        
-        # Update scheduler parameters
-        trial_config['training']['scheduler_params'] = {
-            'T_max': config_dict['scheduler_t_max'],
-            'eta_min': config_dict['scheduler_eta_min']
-        }
+        # Update training parameters
+        trial_config['training']['max_epochs'] = config_dict['max_epochs']
+        trial_config['training']['scheduler'] = config_dict['scheduler']
         
         # Update augmentation parameters
         trial_config['data']['augmentations']['strength'] = config_dict['augment_strength']
@@ -298,8 +291,26 @@ def train_trial(config_dict):
         # Create data module
         data_module = DetectionDataModule(trial_config['data'])
         
-        # Create trainer
-        trainer = UnifiedTrainer(trial_config)
+        # Create trainer config with proper structure
+        trainer_config = {
+            'task': trial_config['model']['task_type'],
+            'model_name': trial_config['model']['model_name'],
+            'max_epochs': trial_config['training']['max_epochs'],
+            'log_every_n_steps': trial_config['training'].get('log_every_n_steps', 50),
+            'monitor_metric': trial_config['training'].get('monitor_metric', 'val_loss'),
+            'monitor_mode': trial_config['training'].get('monitor_mode', 'min'),
+            'early_stopping_patience': trial_config['training'].get('early_stopping_patience', 10),
+            'checkpoint_dir': f"{BASE_VOLUME_PATH}/checkpoints/trial_{tune.get_trial_id()}",
+            'save_top_k': 1,  # Save only best checkpoint for trials
+            'distributed': False  # Disable distributed training for trials
+        }
+        
+        # Create trainer with proper constructor
+        trainer = UnifiedTrainer(
+            config=trainer_config,
+            model=model,
+            data_module=data_module
+        )
         
         # Train the model
         result = trainer.train()

@@ -72,6 +72,10 @@ class ClassificationDataset(Dataset):
         # Apply transforms
         if self.transform:
             image, target = self.transform(image, target)
+        else:
+            # Convert PIL image to tensor if no transform is provided
+            import torchvision.transforms.functional as F
+            image = F.to_tensor(image)
         
         return {
             "pixel_values": image,

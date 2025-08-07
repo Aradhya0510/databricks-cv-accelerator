@@ -172,26 +172,50 @@ def load_trained_model():
             best_checkpoint = os.path.join(checkpoint_dir, checkpoint_files[0])
             print(f"✅ Found checkpoint: {best_checkpoint}")
             
-            # Load model
-            # Prepare model config with num_workers from data config
-            model_config = config["model"].copy()
-            model_config["num_workers"] = config["data"]["num_workers"]
-            
-            model = DetectionModel.load_from_checkpoint(best_checkpoint, config=model_config)
-            model.eval()
-            
-            print(f"✅ Model loaded successfully")
-            print(f"   Parameters: {sum(p.numel() for p in model.parameters()):,}")
-            
-            return model, best_checkpoint
+            try:
+                # Load configuration
+                if os.path.exists(CONFIG_PATH):
+                    config = load_config(CONFIG_PATH)
+                else:
+                    config = get_default_config("detection")
+                
+                # Update paths
+                config['data']['train_data_path'] = f"{BASE_VOLUME_PATH}/data/train2017"
+                config['data']['train_annotation_file'] = f"{BASE_VOLUME_PATH}/data/instances_train2017.json"
+                config['data']['val_data_path'] = f"{BASE_VOLUME_PATH}/data/val2017"
+                config['data']['val_annotation_file'] = f"{BASE_VOLUME_PATH}/data/instances_val2017.json"
+                config['data']['test_data_path'] = f"{BASE_VOLUME_PATH}/data/test2017"
+                config['data']['test_annotation_file'] = f"{BASE_VOLUME_PATH}/data/instances_test2017.json"
+                
+                # Create model config
+                model_config = config["model"].copy()
+                model_config["num_workers"] = config["data"]["num_workers"]
+                
+                # Load model from checkpoint
+                model = DetectionModel.load_from_checkpoint(best_checkpoint, config=model_config)
+                model.eval()
+                
+                # Move to CPU for deployment (no GPU needed for inference)
+                model = model.cpu()
+                
+                print(f"✅ Model loaded successfully")
+                print(f"   Model: {config['model']['model_name']}")
+                print(f"   Parameters: {sum(p.numel() for p in model.parameters()):,}")
+                print(f"   Device: {next(model.parameters()).device}")
+                
+                return model, best_checkpoint, config
+                
+            except Exception as e:
+                print(f"❌ Error loading model: {e}")
+                return None, None, None
         else:
             print("❌ No checkpoint files found")
-            return None, None
+            return None, None, None
     else:
         print("❌ Checkpoint directory not found")
-        return None, None
+        return None, None, None
 
-model, checkpoint_path = load_trained_model()
+model, checkpoint_path, config = load_trained_model()
 
 # COMMAND ----------
 
@@ -401,6 +425,122 @@ def prepare_model_for_mlflow(model, config, checkpoint_path):
         return None, None, None
 
 signature, input_example, model_metadata = prepare_model_for_mlflow(model, config, checkpoint_path)
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC ### Create Standalone Model Wrapper
+
+# COMMAND ----------
+
+def create_standalone_model_wrapper(model, config):
+    """Create a standalone model wrapper that doesn't depend on relative imports."""
+    
+    import torch
+    import torch.nn as nn
+    from transformers import AutoModelForObjectDetection, AutoConfig
+    
+    class StandaloneDetectionModel(nn.Module):
+        """Standalone detection model wrapper for serving."""
+        
+        def __init__(self, model, config):
+            super().__init__()
+            self.model = model
+            self.config = config
+            self.confidence_threshold = config.get('confidence_threshold', 0.5)
+            self.iou_threshold = config.get('iou_threshold', 0.5)
+            self.max_detections = config.get('max_detections', 100)
+            
+        def forward(self, image):
+            """
+            Forward pass for serving.
+            
+            Args:
+                image: Input image tensor of shape (batch_size, 3, height, width)
+            
+            Returns:
+                dict: Dictionary containing predictions
+                    - boxes: Bounding boxes (batch_size, num_detections, 4)
+                    - scores: Confidence scores (batch_size, num_detections)
+                    - labels: Class labels (batch_size, num_detections)
+            """
+            # Ensure model is in eval mode
+            self.model.eval()
+            
+            # Move input to same device as model
+            device = next(self.model.parameters()).device
+            image = image.to(device)
+            
+            # Forward pass
+            with torch.no_grad():
+                outputs = self.model(pixel_values=image)
+            
+            # Extract predictions
+            if hasattr(outputs, 'logits') and hasattr(outputs, 'pred_boxes'):
+                # DETR-style outputs
+                logits = outputs.logits
+                pred_boxes = outputs.pred_boxes
+                
+                # Convert logits to probabilities
+                probs = torch.softmax(logits, dim=-1)
+                scores, labels = torch.max(probs, dim=-1)
+                
+                # Apply confidence threshold
+                mask = scores > self.confidence_threshold
+                
+                # Filter predictions
+                filtered_boxes = pred_boxes[mask]
+                filtered_scores = scores[mask]
+                filtered_labels = labels[mask]
+                
+                # Limit number of detections
+                if len(filtered_boxes) > self.max_detections:
+                    # Keep top detections by score
+                    top_indices = torch.argsort(filtered_scores, descending=True)[:self.max_detections]
+                    filtered_boxes = filtered_boxes[top_indices]
+                    filtered_scores = filtered_scores[top_indices]
+                    filtered_labels = filtered_labels[top_indices]
+                
+                return {
+                    'boxes': filtered_boxes.unsqueeze(0),  # Add batch dimension
+                    'scores': filtered_scores.unsqueeze(0),
+                    'labels': filtered_labels.unsqueeze(0)
+                }
+            else:
+                # Fallback for other model types
+                return {
+                    'boxes': torch.empty(1, 0, 4),
+                    'scores': torch.empty(1, 0),
+                    'labels': torch.empty(1, 0, dtype=torch.long)
+                }
+        
+        def predict(self, image):
+            """
+            Prediction method for MLflow serving.
+            
+            Args:
+                image: Input image tensor
+            
+            Returns:
+                dict: Predictions in MLflow-compatible format
+            """
+            predictions = self.forward(image)
+            
+            # Convert to MLflow-compatible format
+            return {
+                'predictions': {
+                    'boxes': predictions['boxes'].cpu().numpy().tolist(),
+                    'scores': predictions['scores'].cpu().numpy().tolist(),
+                    'labels': predictions['labels'].cpu().numpy().tolist()
+                }
+            }
+    
+    # Create and return the wrapper
+    wrapper = StandaloneDetectionModel(model, config)
+    print("✅ Standalone model wrapper created successfully")
+    
+    return wrapper 
+
 
 # COMMAND ----------
 
@@ -1129,88 +1269,3 @@ print(f"   4. Plan model updates and versioning strategy")
 
 print("=" * 60) 
 
-def create_standalone_model_wrapper(model, config):
-    """Create a standalone model wrapper that doesn't depend on relative imports."""
-    
-    import torch
-    import torch.nn as nn
-    from transformers import AutoModelForObjectDetection, AutoConfig
-    
-    class StandaloneDetectionModel(nn.Module):
-        """Standalone detection model wrapper for serving."""
-        
-        def __init__(self, model, config):
-            super().__init__()
-            self.model = model
-            self.config = config
-            self.confidence_threshold = config.get('confidence_threshold', 0.5)
-            self.iou_threshold = config.get('iou_threshold', 0.5)
-            self.max_detections = config.get('max_detections', 100)
-            
-        def forward(self, image):
-            """
-            Forward pass for serving.
-            
-            Args:
-                image: Input image tensor of shape (batch_size, 3, height, width)
-            
-            Returns:
-                dict: Dictionary containing predictions
-                    - boxes: Bounding boxes (batch_size, num_detections, 4)
-                    - scores: Confidence scores (batch_size, num_detections)
-                    - labels: Class labels (batch_size, num_detections)
-            """
-            # Ensure model is in eval mode
-            self.model.eval()
-            
-            # Move input to same device as model
-            device = next(self.model.parameters()).device
-            image = image.to(device)
-            
-            # Forward pass
-            with torch.no_grad():
-                outputs = self.model(pixel_values=image)
-            
-            # Extract predictions
-            if hasattr(outputs, 'logits') and hasattr(outputs, 'pred_boxes'):
-                # DETR-style outputs
-                logits = outputs.logits
-                pred_boxes = outputs.pred_boxes
-                
-                # Convert logits to probabilities
-                probs = torch.softmax(logits, dim=-1)
-                scores, labels = torch.max(probs, dim=-1)
-                
-                # Apply confidence threshold
-                mask = scores > self.confidence_threshold
-                
-                # Filter predictions
-                filtered_boxes = pred_boxes[mask]
-                filtered_scores = scores[mask]
-                filtered_labels = labels[mask]
-                
-                # Limit number of detections
-                if len(filtered_boxes) > self.max_detections:
-                    # Keep top detections by score
-                    top_indices = torch.argsort(filtered_scores, descending=True)[:self.max_detections]
-                    filtered_boxes = filtered_boxes[top_indices]
-                    filtered_scores = filtered_scores[top_indices]
-                    filtered_labels = filtered_labels[top_indices]
-                
-                return {
-                    'boxes': filtered_boxes.unsqueeze(0),  # Add batch dimension
-                    'scores': filtered_scores.unsqueeze(0),
-                    'labels': filtered_labels.unsqueeze(0)
-                }
-            else:
-                # Fallback for other model types
-                return {
-                    'boxes': torch.zeros(1, 0, 4),
-                    'scores': torch.zeros(1, 0),
-                    'labels': torch.zeros(1, 0, dtype=torch.long)
-                }
-    
-    # Create the standalone wrapper
-    standalone_model = StandaloneDetectionModel(model, config)
-    
-    return standalone_model 
