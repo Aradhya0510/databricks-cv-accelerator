@@ -1,18 +1,21 @@
 #!/usr/bin/env python3
 """
 Base test class for task module testing.
-Provides common utilities and patterns for testing all CV task modules.
+
+This module provides common utilities and patterns for testing all CV task modules
+with standardized fixtures and helper methods.
 """
 
-import unittest
-import torch
-import numpy as np
-from PIL import Image
-import tempfile
 import shutil
+import tempfile
+import unittest
 from pathlib import Path
-from unittest.mock import patch, MagicMock
-from typing import Dict, Any, List, Tuple
+from typing import Any, Dict, List, Tuple
+from unittest.mock import MagicMock, patch
+
+import numpy as np
+import torch
+from PIL import Image
 
 
 class BaseTaskTest(unittest.TestCase):
@@ -171,7 +174,7 @@ class BaseTaskTest(unittest.TestCase):
                 "val_data_path": self.temp_dir,
                 "test_data_path": None
             })
-        elif task_type in ["detection", "semantic_segmentation", "instance_segmentation", "panoptic_segmentation"]:
+        elif task_type in ["detection", "semantic_segmentation", "instance_segmentation", "universal_segmentation"]:
             base_config.update({
                 "train_data_path": self.temp_dir,
                 "train_annotation_file": f"{self.temp_dir}/annotations.json",

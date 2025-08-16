@@ -1,11 +1,22 @@
+"""
+Simplified logging utilities for the Databricks Computer Vision Pipeline.
+
+This module provides streamlined MLflow integration and checkpoint management
+for training computer vision models on Databricks.
+"""
+
 import os
 import shutil
-from typing import Optional, Dict, Any, Union, Literal
+from typing import Any, Dict, Literal, Optional, Union
 
 import mlflow
 import torch
 from lightning.pytorch import LightningModule, Trainer
-from lightning.pytorch.callbacks import Callback, ModelCheckpoint, LearningRateMonitor
+from lightning.pytorch.callbacks import (
+    Callback,
+    LearningRateMonitor,
+    ModelCheckpoint,
+)
 from lightning.pytorch.loggers import MLFlowLogger
 
 # --- 1. Simplified Logger Creation ---

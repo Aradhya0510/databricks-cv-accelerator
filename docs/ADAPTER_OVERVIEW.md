@@ -29,8 +29,6 @@ Adapters solve these differences by providing model-specific preprocessing while
 - Class label handling
 - Model-specific normalization
 
-**Detailed Documentation**: [Classification Adapters](CLASSIFICATION_ADAPTERS.md)
-
 **Supported Models**:
 - Vision Transformers (ViT, DeiT)
 - ConvNeXT models
@@ -45,8 +43,6 @@ Adapters solve these differences by providing model-specific preprocessing while
 - Bounding box coordinate transformations
 - COCO format compatibility
 
-**Detailed Documentation**: [Detection Adapters](DETECTION_ADAPTERS.md)
-
 **Supported Models**:
 - DETR (DEtection TRansformer)
 - YOLOS (You Only Look at One Sequence)
@@ -58,8 +54,6 @@ Adapters solve these differences by providing model-specific preprocessing while
 - Image preprocessing for segmentation tasks
 - Mask handling for pixel-level classification
 - Semantic mask format compatibility
-
-**Detailed Documentation**: [Semantic Segmentation Adapters](SEMANTIC_SEGMENTATION_ADAPTERS.md)
 
 **Supported Models**:
 - SegFormer models
@@ -73,8 +67,6 @@ Adapters solve these differences by providing model-specific preprocessing while
 - Instance mask handling
 - Query-based architecture support
 
-**Detailed Documentation**: [Instance Segmentation Adapters](INSTANCE_SEGMENTATION_ADAPTERS.md)
-
 **Supported Models**:
 - Mask2Former models
 
@@ -85,8 +77,6 @@ Adapters solve these differences by providing model-specific preprocessing while
 - Image preprocessing for panoptic segmentation
 - Unified "things" and "stuff" handling
 - Panoptic quality metric support
-
-**Detailed Documentation**: [Panoptic Segmentation Adapters](PANOPTIC_SEGMENTATION_ADAPTERS.md)
 
 **Supported Models**:
 - Mask2Former panoptic models
@@ -319,10 +309,4 @@ To contribute new adapters:
 
 The adapter system provides a flexible, maintainable, and extensible solution for handling diverse model architectures. By understanding how adapters work and following the established patterns, you can easily add support for new models and ensure optimal performance across different computer vision tasks.
 
-For detailed information about specific adapter types, refer to the individual documentation files:
-
-- [Classification Adapters](CLASSIFICATION_ADAPTERS.md)
-- [Detection Adapters](DETECTION_ADAPTERS.md)
-- [Semantic Segmentation Adapters](SEMANTIC_SEGMENTATION_ADAPTERS.md)
-- [Instance Segmentation Adapters](INSTANCE_SEGMENTATION_ADAPTERS.md)
-- [Panoptic Segmentation Adapters](PANOPTIC_SEGMENTATION_ADAPTERS.md) 
+For detailed information about specific adapter implementations, refer to the source code in `src/tasks/[task_type]/adapters.py` files. 

@@ -1,15 +1,22 @@
-import os
-import argparse
-from typing import List, Dict, Any
-import json
+"""
+Batch inference module for the Databricks Computer Vision Pipeline.
 
-import torch
+This module provides utilities for running batch inference on trained models
+using MLflow model artifacts.
+"""
+
+import argparse
+import json
+import os
+from typing import Any, Dict, List
+
+import albumentations as A
 import mlflow
 import mlflow.pytorch
-from PIL import Image
 import numpy as np
-import albumentations as A
+import torch
 from albumentations.pytorch import ToTensorV2
+from PIL import Image
 
 from src.utils.config import load_config
 

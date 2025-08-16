@@ -1,33 +1,47 @@
+"""
+Unified trainer for computer vision tasks using Ray or Databricks DDP.
+
+This module provides a unified training interface that supports both
+single-node distributed training (Databricks DDP) and multi-node
+distributed training (Ray) on Databricks.
+"""
+
 import os
-import yaml
-import torch
+import sys
+from dataclasses import dataclass, field
+from pathlib import Path
+from typing import Any, Dict, List, Optional, Union
+
 import lightning as pl
-from lightning.pytorch.callbacks import ModelCheckpoint, EarlyStopping, LearningRateMonitor
-from lightning.pytorch.loggers import MLFlowLogger
 import mlflow
 import ray
+import torch
+import yaml
+from lightning.pytorch.callbacks import (
+    EarlyStopping,
+    LearningRateMonitor,
+    ModelCheckpoint,
+)
+from lightning.pytorch.loggers import MLFlowLogger
 from ray import train
-from ray.train import ScalingConfig, RunConfig, CheckpointConfig
-from ray.train.torch import TorchTrainer
+from ray.air.integrations.mlflow import MLflowLoggerCallback
+from ray.train import CheckpointConfig, RunConfig, ScalingConfig
 from ray.train.lightning import (
     RayDDPStrategy,
     RayLightningEnvironment,
     RayTrainReportCallback,
-    prepare_trainer
+    prepare_trainer,
 )
+from ray.train.torch import TorchTrainer
 from ray.tune import TuneConfig
 from ray.tune.schedulers import ASHAScheduler
-from ray.air.integrations.mlflow import MLflowLoggerCallback
-from pathlib import Path
-import sys
-from typing import Dict, Any, Optional, Union, List
-from dataclasses import dataclass, field
 
-# Import the simplified logging utilities
-from utils.logging import VolumeCheckpoint, create_databricks_logger
-
-# Add src to Python path
+# Add src to Python path for imports
 sys.path.append(str(Path(__file__).parent.parent))
+
+# Import our custom modules
+from utils.logging import VolumeCheckpoint, create_databricks_logger
+from .databricks_ddp import DatabricksDDPStrategy
 
 @dataclass
 class UnifiedTrainerConfig:
@@ -45,35 +59,39 @@ class UnifiedTrainerConfig:
     
     # Checkpoint settings
     checkpoint_dir: str
-    # NEW: Optional path to a persistent volume for final checkpoints
     volume_checkpoint_dir: Optional[str] = None
     save_top_k: int = 3
     
-    # Ray distributed training settings
+    # Distributed training settings
     distributed: bool = False
+    use_ray: bool = False  # Whether to use Ray (multi-node) or Databricks DDP (single-node)
     num_workers: int = 1
     use_gpu: bool = True
     resources_per_worker: Dict[str, int] = field(default_factory=lambda: {"CPU": 1, "GPU": 1})
+    master_port: Optional[str] = None  # Optional master port for Databricks DDP
     
     def __post_init__(self):
         """Validate and set default values."""
         os.makedirs(self.checkpoint_dir, exist_ok=True)
         if self.resources_per_worker.get("GPU", 0) == 0:
             self.use_gpu = False
+        
+        # Validate distributed settings
+        if self.distributed and self.use_ray and not self.use_gpu:
+            raise ValueError("Ray distributed training requires GPU support")
 
 class UnifiedTrainer:
-    """Unified trainer for computer vision tasks using Ray on Databricks."""
+    """Unified trainer for computer vision tasks using Ray or Databricks DDP on Databricks."""
     
     def __init__(
         self,
         config: Union[Dict[str, Any], UnifiedTrainerConfig],
         model: pl.LightningModule,
         data_module: pl.LightningDataModule,
-        logger: Optional[MLFlowLogger] = None  # Made optional for backward compatibility
+        logger: Optional[MLFlowLogger] = None
     ):
         """Initialize the trainer with a config, model, data, and optionally a logger."""
         if isinstance(config, dict):
-            # Simplified config parsing assuming keys match dataclass fields
             config = UnifiedTrainerConfig(**config)
         self.config = config
         
@@ -81,25 +99,14 @@ class UnifiedTrainer:
         self.data_module = data_module
         self.trainer = None
         
-        # Create logger if not provided
-        if logger is None:
-            logger = create_databricks_logger_for_task(
-                task=self.config.task,
-                model_name=self.config.model_name,
-                log_model="all"  # Log all checkpoints automatically
-            )
-        
         self.logger = logger
         print("✅ UnifiedTrainer initialized with simplified MLflow integration.")
-
+    
     def _init_callbacks(self) -> List[pl.Callback]:
-        """
-        Initialize all necessary training callbacks.
-        This is now the single source of truth for callback configuration.
-        """
+        """Initialize all necessary training callbacks."""
         callbacks = []
         
-        # 1. Model Checkpointing (This is watched by MLFlowLogger)
+        # 1. Model Checkpointing
         checkpoint_callback = ModelCheckpoint(
             dirpath=self.config.checkpoint_dir,
             filename=f"{self.config.model_name}-{{epoch}}-{{{self.config.monitor_metric}:.2f}}",
@@ -130,10 +137,10 @@ class UnifiedTrainer:
             callbacks.append(VolumeCheckpoint(volume_dir=self.config.volume_checkpoint_dir))
             print(f"✅ VolumeCheckpoint enabled for: {self.config.volume_checkpoint_dir}")
         
-        # 5. Ray Train Report Callback (for distributed training)
-        if self.config.distributed:
+        # 5. Ray Train Report Callback (for distributed training with Ray)
+        if self.config.distributed and self.config.use_ray:
             callbacks.append(RayTrainReportCallback())
-            print("✅ RayTrainReportCallback enabled for distributed training.")
+            print("✅ RayTrainReportCallback enabled for Ray distributed training.")
         
         print(f"✅ Total callbacks initialized: {len(callbacks)}")
         return callbacks
@@ -144,7 +151,7 @@ class UnifiedTrainer:
         
         trainer_params = {
             "max_epochs": self.config.max_epochs,
-            "accelerator": "auto",
+            "accelerator": "gpu" if self.config.use_gpu else "cpu",
             "devices": "auto",
             "callbacks": callbacks,
             "log_every_n_steps": self.config.log_every_n_steps,
@@ -152,15 +159,28 @@ class UnifiedTrainer:
         }
 
         if self.config.distributed:
-            trainer_params.update({
-                "strategy": RayDDPStrategy(),
-                "plugins": [RayLightningEnvironment()],
-                "sync_batchnorm": True
-            })
-            self.trainer = pl.Trainer(**trainer_params)
-            self.trainer = prepare_trainer(self.trainer) # Prepare for Ray
+            if self.config.use_ray:
+                # Use Ray strategy for multi-node training
+                trainer_params.update({
+                    "strategy": RayDDPStrategy(),
+                    "plugins": [RayLightningEnvironment()],
+                    "sync_batchnorm": True
+                })
+                self.trainer = pl.Trainer(**trainer_params)
+                self.trainer = prepare_trainer(self.trainer)  # Prepare for Ray
+            else:
+                # Use Databricks strategy for single-node multi-GPU
+                trainer_params.update({
+                    "strategy": DatabricksDDPStrategy(
+                        master_port=self.config.master_port
+                    ),
+                    "sync_batchnorm": True
+                })
+                self.trainer = pl.Trainer(**trainer_params)
+                print("✅ Using Databricks DDP strategy for single-node multi-GPU training.")
         else:
             self.trainer = pl.Trainer(**trainer_params)
+            print("✅ Using single-device training strategy.")
     
     def train(self):
         """Train the model using either local or distributed training."""
@@ -172,10 +192,12 @@ class UnifiedTrainer:
         print(f"   Max epochs: {self.config.max_epochs}")
         print(f"   Monitor metric: {self.config.monitor_metric}")
         print(f"   Distributed: {self.config.distributed}")
+        if self.config.distributed:
+            print(f"   Strategy: {'Ray' if self.config.use_ray else 'Databricks DDP'}")
         
         try:
-            if self.config.distributed:
-                # Use the LightningTrainer from Ray Train, which is the modern API
+            if self.config.distributed and self.config.use_ray:
+                # Use the LightningTrainer from Ray Train for multi-node
                 from ray.train.lightning import LightningTrainer
 
                 scaling_config = ScalingConfig(
@@ -186,7 +208,7 @@ class UnifiedTrainer:
                 
                 run_config = RunConfig(
                     storage_path=self.config.checkpoint_dir,
-                    name=self.logger.run_name, # Use the run name from the logger
+                    name=self.logger.run_name,
                     checkpoint_config=CheckpointConfig(
                         num_to_keep=self.config.save_top_k,
                         checkpoint_score_attribute=self.config.monitor_metric,
@@ -194,23 +216,19 @@ class UnifiedTrainer:
                     )
                 )
 
-                # This is a higher-level API that wraps the pl.Trainer
                 ray_trainer = LightningTrainer(
                     lightning_module=self.model,
                     lightning_datamodule=self.data_module,
-                    trainer_init_config=self.trainer.init_kwargs, # Pass trainer config
+                    trainer_init_config=self.trainer.init_kwargs,
                     scaling_config=scaling_config,
                     run_config=run_config
                 )
                 result = ray_trainer.fit()
             else:
-                # Local training - MLFlowLogger handles all logging automatically
+                # Local or single-node multi-GPU training
                 self.trainer.fit(self.model, datamodule=self.data_module)
                 result = self.trainer.callback_metrics
 
-            # The MLFlowLogger's lifecycle is managed by the pl.Trainer.
-            # It will automatically close the run on completion or failure.
-            # No need for manual mlflow.log_param calls here.
             print("\n✅ Training finished. Logger has automatically handled run finalization.")
             return result
             
@@ -219,16 +237,11 @@ class UnifiedTrainer:
             import traceback
             traceback.print_exc()
             raise
- 
+    
     def tune(self, search_space: dict, num_trials: int = 20):
-        """Run hyperparameter tuning using Ray Tune.
-        
-        Args:
-            search_space: Dictionary defining the hyperparameter search space
-            num_trials: Number of trials to run
-        """
-        if not self.config.distributed:
-            raise ValueError("Hyperparameter tuning requires distributed training mode")
+        """Run hyperparameter tuning using Ray Tune."""
+        if not self.config.distributed or not self.config.use_ray:
+            raise ValueError("Hyperparameter tuning requires Ray distributed training mode")
         
         # Initialize Ray
         try:
@@ -301,15 +314,7 @@ class UnifiedTrainer:
         return best_trial.config
     
     def test(self, model=None, data_module=None):
-        """Test the model using the underlying PyTorch Lightning trainer.
-        
-        Args:
-            model: Optional model to test (uses self.model if not provided)
-            data_module: Optional data module to test with (uses self.data_module if not provided)
-            
-        Returns:
-            List of test results
-        """
+        """Test the model using the underlying PyTorch Lightning trainer."""
         if model is not None:
             self.model = model
         if data_module is not None:
@@ -330,4 +335,4 @@ class UnifiedTrainer:
         """Get training metrics from MLflow."""
         client = mlflow.tracking.MlflowClient()
         run = client.get_run(mlflow.active_run().info.run_id)
-        return run.data.metrics 
+        return run.data.metrics

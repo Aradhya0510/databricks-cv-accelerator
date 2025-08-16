@@ -10,16 +10,16 @@ import matplotlib.pyplot as plt
 from matplotlib.colors import ListedColormap
 import matplotlib.patches as patches
 
-from .model import PanopticSegmentationModel
+from .model import UniversalSegmentationModel
 
-class PanopticSegmentationInference:
+class UniversalSegmentationInference:
     def __init__(self, model_path: str, config_path: str):
         # Load configuration
         with open(config_path, 'r') as f:
             self.config = yaml.safe_load(f)
         
         # Load model
-        self.model = PanopticSegmentationModel.load_from_checkpoint(model_path, config=self.config)
+        self.model = UniversalSegmentationModel.load_from_checkpoint(model_path, config=self.config)
         self.model.eval()
         
         # Move model to GPU if available
@@ -318,7 +318,7 @@ def batch_inference(
 ):
     """Run batch inference on a directory of images."""
     # Initialize inference
-    inference = PanopticSegmentationInference(model_path, config_path)
+    inference = UniversalSegmentationInference(model_path, config_path)
     
     # Create output directory
     os.makedirs(output_dir, exist_ok=True)
@@ -362,7 +362,7 @@ if __name__ == '__main__':
         batch_inference(args.model, args.config, args.input, args.output, args.batch_size)
     else:
         # Single image inference
-        inference = PanopticSegmentationInference(args.model, args.config)
+        inference = UniversalSegmentationInference(args.model, args.config)
         
         # Load image
         image = cv2.imread(args.input)

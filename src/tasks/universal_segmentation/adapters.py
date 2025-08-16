@@ -110,7 +110,7 @@ class OutputAdapter(ABC):
         """
         pass
 
-class PanopticSegmentationOutputAdapter(OutputAdapter):
+class UniversalSegmentationOutputAdapter(OutputAdapter):
     """Adapter for panoptic segmentation model outputs."""
     
     def adapt_output(self, outputs: Dict[str, Any]) -> Dict[str, Any]:
@@ -249,10 +249,10 @@ def get_output_adapter(model_name: str) -> OutputAdapter:
     """
     # For panoptic segmentation, we use a single output adapter
     # since the output format is consistent across models
-    return PanopticSegmentationOutputAdapter()
+    return UniversalSegmentationOutputAdapter()
 
 # Keep the old function for backward compatibility
-def get_panoptic_adapter(model_name: str, image_size: int = 512) -> BaseAdapter:
+def get_universal_adapter(model_name: str, image_size: int = 512) -> BaseAdapter:
     """Get the appropriate adapter for a given model name.
     
     Args:

@@ -1,15 +1,19 @@
 #!/usr/bin/env python3
 """
 Validation script for standardized config files.
-Tests that all config files can be loaded and have the required structure.
+
+This script tests that all config files can be loaded and have the required
+structure for the Databricks Computer Vision Pipeline.
 """
 
 import os
-import yaml
 import sys
 from pathlib import Path
+from typing import Any, Dict, List
 
-def validate_config_structure(config: dict, config_path: str) -> bool:
+import yaml
+
+def validate_config_structure(config: Dict[str, Any], config_path: str) -> bool:
     """Validate that a config has the required structure."""
     required_sections = ['model', 'data', 'training', 'mlflow', 'output']
     
@@ -73,7 +77,7 @@ def validate_naming_convention(filename: str) -> bool:
     # Valid task names (including those with underscores)
     valid_tasks = [
         'detection', 'classification', 'semantic_segmentation', 
-        'instance_segmentation', 'panoptic_segmentation'
+        'instance_segmentation', 'universal_segmentation'
     ]
     
     # Check if the filename starts with any valid task

@@ -1,24 +1,35 @@
-# Core dependencies
-lightning==2.5.2
+# Development Environment Dependencies (Databricks ML Runtime)
+# Only includes packages NOT provided by DBR ML 16.4 LTS runtime
 
 # Training and optimization
 optuna>=3.2.0
 
-# Data handling
+# Data handling (not in runtime)
 pycocotools>=2.0.6
 
-# Testing
+# Testing (development only)
 pytest>=7.3.1
 pytest-cov>=4.1.0
 
-# Documentation
+# Documentation (development only)
 sphinx>=6.1.3
 sphinx-rtd-theme>=1.2.0
 
-# Computer Vision
+# Computer Vision (not in runtime)
 timm>=0.9.0
 albumentations==2.0.8
 opencv-python>=4.8.0
 
+# Environment management (development only)
+uv==0.2.0
+
 #Stabilize
 numpy==1.26.4
+
+# Note: The following are provided by DBR ML runtime and don't need to be installed:
+# - torch, torchvision, torchmetrics
+# - transformers, tokenizers
+# - lightning
+# - numpy, pandas, pillow, requests
+# - opencv-python
+# - pyyaml, tqdm

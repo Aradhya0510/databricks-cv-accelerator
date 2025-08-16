@@ -1,14 +1,26 @@
-from typing import Dict, Any, Optional, Union, List
-from dataclasses import dataclass
+"""
+Instance segmentation model implementation for the Databricks Computer Vision Pipeline.
 
-import torch
+This module provides a unified instance segmentation model that can work with any
+Hugging Face instance segmentation model through adapter patterns.
+"""
+
+from dataclasses import dataclass
+from typing import Any, Dict, List, Optional, Union
+
 import lightning as pl
-from torchmetrics.classification import Accuracy, F1Score, Precision, Recall, Dice, JaccardIndex
-from torchmetrics.detection import MeanAveragePrecision
-from transformers import (
-    AutoModelForInstanceSegmentation,
-    AutoConfig
+import torch
+from torchmetrics.classification import (
+    Accuracy,
+    Dice,
+    F1Score,
+    JaccardIndex,
+    Precision,
+    Recall,
 )
+from torchmetrics.detection import MeanAveragePrecision
+from transformers import AutoConfig, AutoModelForInstanceSegmentation
+
 from .adapters import get_input_adapter, get_output_adapter
 
 @dataclass

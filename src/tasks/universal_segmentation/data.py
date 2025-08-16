@@ -13,8 +13,8 @@ from transformers import AutoFeatureExtractor
 from .adapters import get_input_adapter
 
 @dataclass
-class PanopticSegmentationDataConfig:
-    """Configuration for panoptic segmentation data module."""
+class UniversalSegmentationDataConfig:
+    """Configuration for universal segmentation data module."""
     # Separate paths for train/val/test splits
     train_data_path: str
     train_annotation_file: str
@@ -36,7 +36,7 @@ class PanopticSegmentationDataConfig:
     model_name: Optional[str] = None
     augmentations: Optional[Dict[str, Any]] = None
 
-class COCOPanopticSegmentationDataset(torch.utils.data.Dataset):
+class COCOUniversalSegmentationDataset(torch.utils.data.Dataset):
     def __init__(
         self,
         root_dir: str,
@@ -49,10 +49,10 @@ class COCOPanopticSegmentationDataset(torch.utils.data.Dataset):
         self.ids = list(sorted(self.coco.imgs.keys()))
         
         # Load class names (combine thing and stuff classes)
-        self.class_names = self._load_panoptic_class_names()
+        self.class_names = self._load_universal_class_names()
         
-    def _load_panoptic_class_names(self) -> List[str]:
-        """Load panoptic class names (things + stuff)."""
+    def _load_universal_class_names(self) -> List[str]:
+        """Load universal class names (things + stuff)."""
         # COCO panoptic classes: 80 things + 53 stuff = 133 classes
         thing_classes = [
             'person', 'bicycle', 'car', 'motorcycle', 'airplane', 'bus', 'train', 'truck',
@@ -160,24 +160,24 @@ class COCOPanopticSegmentationDataset(torch.utils.data.Dataset):
             "labels": target
         }
 
-class PanopticSegmentationDataModule(pl.LightningDataModule):
-    def __init__(self, config: Union[Dict[str, Any], PanopticSegmentationDataConfig]):
+class UniversalSegmentationDataModule(pl.LightningDataModule):
+    def __init__(self, config: Union[Dict[str, Any], UniversalSegmentationDataConfig]):
         super().__init__()
         if isinstance(config, dict):
-            config = PanopticSegmentationDataConfig(**config)
+            config = UniversalSegmentationDataConfig(**config)
         self.config = config
         self.save_hyperparameters(config.__dict__)
         self.adapter = None  # Will be set after initialization
     
     def setup(self, stage: Optional[str] = None):
         if stage == 'fit' or stage is None:
-            self.train_dataset = COCOPanopticSegmentationDataset(
+            self.train_dataset = COCOUniversalSegmentationDataset(
                 root_dir=self.config.train_data_path,
                 annotation_file=self.config.train_annotation_file,
                 transform=None  # Transform will be set by the adapter
             )
             
-            self.val_dataset = COCOPanopticSegmentationDataset(
+            self.val_dataset = COCOUniversalSegmentationDataset(
                 root_dir=self.config.val_data_path,
                 annotation_file=self.config.val_annotation_file,
                 transform=None  # Transform will be set by the adapter
@@ -185,14 +185,14 @@ class PanopticSegmentationDataModule(pl.LightningDataModule):
         
         if stage == 'test':
             if self.config.test_data_path is not None and self.config.test_annotation_file is not None:
-                self.test_dataset = COCOPanopticSegmentationDataset(
+                self.test_dataset = COCOUniversalSegmentationDataset(
                     root_dir=self.config.test_data_path,
                     annotation_file=self.config.test_annotation_file,
                     transform=None  # Transform will be set by the adapter
                 )
             else:
                 # Use validation data for testing if test data not provided
-                self.test_dataset = COCOPanopticSegmentationDataset(
+                self.test_dataset = COCOUniversalSegmentationDataset(
                     root_dir=self.config.val_data_path,
                     annotation_file=self.config.val_annotation_file,
                     transform=None  # Transform will be set by the adapter
@@ -267,11 +267,11 @@ class PanopticSegmentationDataModule(pl.LightningDataModule):
         if hasattr(self, 'train_dataset'):
             return self.train_dataset.class_names
         else:
-            # Default COCO panoptic class names
-            return self._load_panoptic_class_names()
+            # Default COCO universal class names
+            return self._load_universal_class_names()
     
-    def _load_panoptic_class_names(self) -> List[str]:
-        """Load panoptic class names (things + stuff)."""
+    def _load_universal_class_names(self) -> List[str]:
+        """Load universal class names (things + stuff)."""
         # COCO panoptic classes: 80 things + 53 stuff = 133 classes
         thing_classes = [
             'person', 'bicycle', 'car', 'motorcycle', 'airplane', 'bus', 'train', 'truck',

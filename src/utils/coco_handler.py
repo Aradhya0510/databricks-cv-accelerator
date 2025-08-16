@@ -1,13 +1,17 @@
 """
 COCO Handler for managing COCO format data.
+
+This module provides utilities for handling COCO format annotations and
+converting between different bounding box formats.
 """
 
 import json
 from pathlib import Path
-from typing import Dict, List, Union, Optional
+from typing import Dict, List, Optional, Union
+
+import numpy as np
 import torch
 from PIL import Image
-import numpy as np
 
 class COCOHandler:
     """Handler for COCO format data."""

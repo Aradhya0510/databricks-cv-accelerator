@@ -18,7 +18,7 @@ from test_classification import TestClassificationTask
 from test_detection import TestDetectionTask
 from test_semantic_segmentation import TestSemanticSegmentationTask
 from test_instance_segmentation import TestInstanceSegmentationTask
-from test_panoptic_segmentation import TestPanopticSegmentationTask
+from test_universal_segmentation import TestUniversalSegmentationTask
 
 
 class TestAllTasks(BaseTaskTest):
@@ -43,7 +43,7 @@ class TestAllTasks(BaseTaskTest):
             "detection", 
             "semantic_segmentation",
             "instance_segmentation",
-            "panoptic_segmentation"
+            "universal_segmentation"
         ]
         
         for task in task_modules:
@@ -64,7 +64,7 @@ class TestAllTasks(BaseTaskTest):
             ("detection", "DetectionModelConfig"),
             ("semantic_segmentation", "SemanticSegmentationModelConfig"),
             ("instance_segmentation", "InstanceSegmentationModelConfig"),
-            ("panoptic_segmentation", "PanopticSegmentationModelConfig")
+            ("universal_segmentation", "UniversalSegmentationModelConfig")
         ]
         
         for task, config_class in configs:
@@ -85,7 +85,7 @@ class TestAllTasks(BaseTaskTest):
             ("detection", ["DETRInputAdapter", "YOLOSInputAdapter"]),
             ("semantic_segmentation", ["SegFormerInputAdapter"]),
             ("instance_segmentation", ["Mask2FormerInputAdapter"]),
-            ("panoptic_segmentation", ["Mask2FormerInputAdapter"])
+            ("universal_segmentation", ["Mask2FormerInputAdapter"])
         ]
         
         for task, expected_adapters in adapter_patterns:
@@ -107,7 +107,7 @@ class TestAllTasks(BaseTaskTest):
             "DetectionDataModule", 
             "SemanticSegmentationDataModule",
             "InstanceSegmentationDataModule",
-            "PanopticSegmentationDataModule"
+            "UniversalSegmentationDataModule"
         ]
         
         for data_module_name in data_modules:
@@ -115,7 +115,7 @@ class TestAllTasks(BaseTaskTest):
             try:
                 # Try to find the module
                 module_found = False
-                for task in ["classification", "detection", "semantic_segmentation", "instance_segmentation", "panoptic_segmentation"]:
+                for task in ["classification", "detection", "semantic_segmentation", "instance_segmentation", "universal_segmentation"]:
                     try:
                         module = __import__(f"tasks.{task}.data", fromlist=[data_module_name])
                         data_module_class = getattr(module, data_module_name, None)
@@ -145,7 +145,7 @@ class TestAllTasks(BaseTaskTest):
             "DetectionModel",
             "SemanticSegmentationModel", 
             "InstanceSegmentationModel",
-            "PanopticSegmentationModel"
+            "UniversalSegmentationModel"
         ]
         
         for model_name in model_classes:
@@ -153,7 +153,7 @@ class TestAllTasks(BaseTaskTest):
             try:
                 # Try to find the module
                 module_found = False
-                for task in ["classification", "detection", "semantic_segmentation", "instance_segmentation", "panoptic_segmentation"]:
+                for task in ["classification", "detection", "semantic_segmentation", "instance_segmentation", "universal_segmentation"]:
                     try:
                         module = __import__(f"tasks.{task}.model", fromlist=[model_name])
                         model_class = getattr(module, model_name, None)
@@ -183,7 +183,7 @@ class TestAllTasks(BaseTaskTest):
             "DetectionEvaluator",
             "SemanticSegmentationEvaluator",
             "InstanceSegmentationEvaluator", 
-            "PanopticSegmentationEvaluator"
+            "UniversalSegmentationEvaluator"
         ]
         
         for evaluator_name in evaluator_classes:
@@ -191,7 +191,7 @@ class TestAllTasks(BaseTaskTest):
             try:
                 # Try to find the module
                 module_found = False
-                for task in ["classification", "detection", "semantic_segmentation", "instance_segmentation", "panoptic_segmentation"]:
+                for task in ["classification", "detection", "semantic_segmentation", "instance_segmentation", "universal_segmentation"]:
                     try:
                         module = __import__(f"tasks.{task}.evaluate", fromlist=[evaluator_name])
                         evaluator_class = getattr(module, evaluator_name, None)
@@ -224,7 +224,7 @@ class TestAllTasks(BaseTaskTest):
             "detection",
             "semantic_segmentation", 
             "instance_segmentation",
-            "panoptic_segmentation"
+            "universal_segmentation"
         ]
         
         for task_type in task_types:
@@ -286,7 +286,7 @@ def run_all_tests():
         TestDetectionTask,
         TestSemanticSegmentationTask,
         TestInstanceSegmentationTask,
-        TestPanopticSegmentationTask,
+        TestUniversalSegmentationTask,
         TestAllTasks
     ]
     

@@ -13,16 +13,16 @@ from unittest.mock import patch, MagicMock
 sys.path.append(os.path.join(os.path.dirname(__file__), '..', 'src'))
 
 from test_base import BaseTaskTest
-from tasks.panoptic_segmentation.model import PanopticSegmentationModel, PanopticSegmentationModelConfig
-from tasks.panoptic_segmentation.data import PanopticSegmentationDataset, PanopticSegmentationDataModule, PanopticSegmentationDataConfig
-from tasks.panoptic_segmentation.adapters import (
+from tasks.universal_segmentation.model import UniversalSegmentationModel, UniversalSegmentationModelConfig
+from tasks.universal_segmentation.data import UniversalSegmentationDataset, UniversalSegmentationDataModule, UniversalSegmentationDataConfig
+from tasks.universal_segmentation.adapters import (
     Mask2FormerInputAdapter, Mask2FormerOutputAdapter,
     get_input_adapter, get_output_adapter
 )
-from tasks.panoptic_segmentation.evaluate import PanopticSegmentationEvaluator
+from tasks.universal_segmentation.evaluate import UniversalSegmentationEvaluator
 
 
-class TestPanopticSegmentationTask(BaseTaskTest):
+class TestUniversalSegmentationTask(BaseTaskTest):
     """Comprehensive tests for panoptic segmentation task module."""
     
     def setUp(self):
@@ -40,10 +40,10 @@ class TestPanopticSegmentationTask(BaseTaskTest):
         
         self.annotations_file = annotations_file
     
-    def test_panoptic_segmentation_model_config(self):
+    def test_universal_segmentation_model_config(self):
         """Test panoptic segmentation model config initialization and structure."""
-        config_dict = self.create_minimal_config("panoptic_segmentation")
-        config = PanopticSegmentationModelConfig(**config_dict)
+        config_dict = self.create_minimal_config("universal_segmentation")
+        config = UniversalSegmentationModelConfig(**config_dict)
         
         # Test config structure
         expected_fields = [
@@ -59,10 +59,10 @@ class TestPanopticSegmentationTask(BaseTaskTest):
         self.assertEqual(config.num_classes, self.num_classes)
         self.assertEqual(config.mask_threshold, 0.5)
     
-    def test_panoptic_segmentation_data_config(self):
+    def test_universal_segmentation_data_config(self):
         """Test panoptic segmentation data config initialization and structure."""
-        config_dict = self.create_minimal_config("panoptic_segmentation")
-        config = PanopticSegmentationDataConfig(**config_dict)
+        config_dict = self.create_minimal_config("universal_segmentation")
+        config = UniversalSegmentationDataConfig(**config_dict)
         
         # Test config structure
         expected_fields = [
@@ -75,11 +75,11 @@ class TestPanopticSegmentationTask(BaseTaskTest):
         self.assertEqual(config.batch_size, self.batch_size)
         self.assertEqual(config.image_size, self.image_size)
     
-    def test_panoptic_segmentation_model_initialization(self):
+    def test_universal_segmentation_model_initialization(self):
         """Test panoptic segmentation model initialization with mocked transformers."""
         with self.mock_transformers():
-            config_dict = self.create_minimal_config("panoptic_segmentation")
-            model = PanopticSegmentationModel(config_dict)
+            config_dict = self.create_minimal_config("universal_segmentation")
+            model = UniversalSegmentationModel(config_dict)
             
             # Test model interface
             self.assert_model_interface(model)
@@ -88,9 +88,9 @@ class TestPanopticSegmentationTask(BaseTaskTest):
             self.assertIsNotNone(model.model)
             self.assertIsNotNone(model.output_adapter)
     
-    def test_panoptic_segmentation_dataset_initialization(self):
+    def test_universal_segmentation_dataset_initialization(self):
         """Test panoptic segmentation dataset initialization."""
-        dataset = PanopticSegmentationDataset(
+        dataset = UniversalSegmentationDataset(
             data_path=self.dataset_path,
             annotation_file=self.annotations_file,
             transform=None
@@ -103,9 +103,9 @@ class TestPanopticSegmentationTask(BaseTaskTest):
         self.assertGreater(len(dataset), 0)
         self.assertIsNotNone(dataset.class_names)
     
-    def test_panoptic_segmentation_dataset_getitem(self):
+    def test_universal_segmentation_dataset_getitem(self):
         """Test panoptic segmentation dataset item retrieval."""
-        dataset = PanopticSegmentationDataset(
+        dataset = UniversalSegmentationDataset(
             data_path=self.dataset_path,
             annotation_file=self.annotations_file,
             transform=None
@@ -126,10 +126,10 @@ class TestPanopticSegmentationTask(BaseTaskTest):
             self.assertIn("image_id", labels)
             self.assertIn("panoptic_masks", labels)
     
-    def test_panoptic_segmentation_datamodule_initialization(self):
+    def test_universal_segmentation_datamodule_initialization(self):
         """Test panoptic segmentation datamodule initialization."""
-        config_dict = self.create_minimal_config("panoptic_segmentation")
-        datamodule = PanopticSegmentationDataModule(config_dict)
+        config_dict = self.create_minimal_config("universal_segmentation")
+        datamodule = UniversalSegmentationDataModule(config_dict)
         
         # Test datamodule interface
         self.assert_datamodule_interface(datamodule)
@@ -137,10 +137,10 @@ class TestPanopticSegmentationTask(BaseTaskTest):
         # Test datamodule attributes
         self.assertIsNotNone(datamodule.config)
     
-    def test_panoptic_segmentation_datamodule_setup(self):
+    def test_universal_segmentation_datamodule_setup(self):
         """Test panoptic segmentation datamodule setup."""
-        config_dict = self.create_minimal_config("panoptic_segmentation")
-        datamodule = PanopticSegmentationDataModule(config_dict)
+        config_dict = self.create_minimal_config("universal_segmentation")
+        datamodule = UniversalSegmentationDataModule(config_dict)
         
         # Setup datamodule
         datamodule.setup()
@@ -151,10 +151,10 @@ class TestPanopticSegmentationTask(BaseTaskTest):
         self.assertGreater(len(datamodule.train_dataset), 0)
         self.assertGreater(len(datamodule.val_dataset), 0)
     
-    def test_panoptic_segmentation_datamodule_dataloaders(self):
+    def test_universal_segmentation_datamodule_dataloaders(self):
         """Test panoptic segmentation datamodule dataloaders."""
-        config_dict = self.create_minimal_config("panoptic_segmentation")
-        datamodule = PanopticSegmentationDataModule(config_dict)
+        config_dict = self.create_minimal_config("universal_segmentation")
+        datamodule = UniversalSegmentationDataModule(config_dict)
         datamodule.setup()
         
         # Test dataloaders
@@ -228,7 +228,7 @@ class TestPanopticSegmentationTask(BaseTaskTest):
         stuff_set = set(stuff_classes)
         self.assertEqual(len(thing_set.intersection(stuff_set)), 0)
     
-    def test_panoptic_segmentation_evaluator_initialization(self):
+    def test_universal_segmentation_evaluator_initialization(self):
         """Test panoptic segmentation evaluator initialization."""
         # Create dummy model checkpoint and config
         checkpoint_path = os.path.join(self.temp_dir, "dummy_checkpoint.ckpt")
@@ -242,14 +242,14 @@ class TestPanopticSegmentationTask(BaseTaskTest):
         
         # Test evaluator initialization (should not fail even with dummy files)
         try:
-            evaluator = PanopticSegmentationEvaluator(checkpoint_path, config_path)
+            evaluator = UniversalSegmentationEvaluator(checkpoint_path, config_path)
             # If it doesn't fail, test basic interface
             self.assertIsNotNone(evaluator)
         except Exception:
             # Expected to fail with dummy files, but should not crash
             pass
     
-    def test_panoptic_segmentation_metrics_interface(self):
+    def test_universal_segmentation_metrics_interface(self):
         """Test panoptic segmentation metrics interface."""
         # Test that metrics can be imported and initialized
         try:

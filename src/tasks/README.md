@@ -16,10 +16,10 @@ This directory contains three separate segmentation modules for different types 
 - **Models**: Mask2Former, Mask R-CNN, etc.
 - **Output**: Multiple masks per image, one for each object instance
 
-### 3. Panoptic Segmentation (`panoptic_segmentation/`)
+### 3. Universal Segmentation (`universal_segmentation/`)
 - **Purpose**: Combines semantic and instance segmentation for complete scene understanding
 - **Use Case**: Complete scene parsing, autonomous driving, robotics
-- **Models**: Mask2Former, Panoptic FPN, etc.
+- **Models**: Mask2Former, Universal FPN, etc.
 - **Output**: Unified segmentation map with both "stuff" (background) and "things" (objects)
 
 ## Module Components
@@ -103,32 +103,32 @@ trainer = pl.Trainer(max_epochs=10)
 trainer.fit(model, data_module)
 ```
 
-### Panoptic Segmentation
+### Universal Segmentation
 
 ```python
-from src.tasks.panoptic_segmentation import (
-    PanopticSegmentationModel,
-    PanopticSegmentationDataModule,
-    PanopticSegmentationModelConfig,
-    PanopticSegmentationDataConfig
+from src.tasks.universal_segmentation import (
+    UniversalSegmentationModel,
+    UniversalSegmentationDataModule,
+    UniversalSegmentationModelConfig,
+    UniversalSegmentationDataConfig
 )
 
 # Configuration
-model_config = PanopticSegmentationModelConfig(
+model_config = UniversalSegmentationModelConfig(
     model_name="facebook/mask2former-swin-base-coco-panoptic",
-    num_classes=133,  # COCO panoptic classes
+    num_classes=133,  # COCO universal classes
     learning_rate=1e-4
 )
 
-data_config = PanopticSegmentationDataConfig(
+data_config = UniversalSegmentationDataConfig(
     data_path="/path/to/data",
     annotation_file="/path/to/annotations.json",
     batch_size=4
 )
 
 # Initialize model and data
-model = PanopticSegmentationModel(model_config)
-data_module = PanopticSegmentationDataModule(data_config)
+model = UniversalSegmentationModel(model_config)
+data_module = UniversalSegmentationDataModule(data_config)
 
 # Training
 trainer = pl.Trainer(max_epochs=10)
@@ -178,7 +178,7 @@ inference.visualize(image, mask, output_path="output.jpg")
 
 ## Key Differences
 
-| Aspect | Semantic | Instance | Panoptic |
+| Aspect | Semantic | Instance | Universal |
 |--------|----------|----------|----------|
 | **Output Type** | Single mask | Multiple masks | Unified mask |
 | **Object Handling** | Class-based | Instance-based | Both |

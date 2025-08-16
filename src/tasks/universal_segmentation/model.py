@@ -1,19 +1,31 @@
-from typing import Dict, Any, Optional, Union, List
-from dataclasses import dataclass
+"""
+Universal segmentation model implementation for the Databricks Computer Vision Pipeline.
 
-import torch
+This module provides a unified universal segmentation model that can work with any
+Hugging Face universal segmentation model through adapter patterns.
+"""
+
+from dataclasses import dataclass
+from typing import Any, Dict, List, Optional, Union
+
 import lightning as pl
-from torchmetrics.classification import Accuracy, F1Score, Precision, Recall, Dice, JaccardIndex
-from torchmetrics.detection import MeanAveragePrecision
-from transformers import (
-    AutoModelForUniversalSegmentation,
-    AutoConfig
+import torch
+from torchmetrics.classification import (
+    Accuracy,
+    Dice,
+    F1Score,
+    JaccardIndex,
+    Precision,
+    Recall,
 )
+from torchmetrics.detection import MeanAveragePrecision
+from transformers import AutoConfig, AutoModelForUniversalSegmentation
+
 from .adapters import get_input_adapter, get_output_adapter
 
 @dataclass
-class PanopticSegmentationModelConfig:
-    """Configuration for panoptic segmentation model."""
+class UniversalSegmentationModelConfig:
+    """Configuration for universal segmentation model."""
     model_name: str
     num_classes: int
     pretrained: bool = True
@@ -32,13 +44,13 @@ class PanopticSegmentationModelConfig:
         """Return True if num_workers > 1 (distributed training), False otherwise."""
         return self.num_workers > 1
 
-class PanopticSegmentationModel(pl.LightningModule):
-    """Panoptic segmentation model that works with Hugging Face panoptic segmentation models."""
+class UniversalSegmentationModel(pl.LightningModule):
+    """Universal segmentation model that works with Hugging Face universal segmentation models."""
     
-    def __init__(self, config: Union[Dict[str, Any], PanopticSegmentationModelConfig]):
+    def __init__(self, config: Union[Dict[str, Any], UniversalSegmentationModelConfig]):
         super().__init__()
         if isinstance(config, dict):
-            config = PanopticSegmentationModelConfig(**config)
+            config = UniversalSegmentationModelConfig(**config)
         self.config = config
         self.save_hyperparameters(config.__dict__)
         
@@ -61,7 +73,7 @@ class PanopticSegmentationModel(pl.LightningModule):
                 **self.config.model_kwargs or {}
             )
             
-            # Initialize panoptic segmentation model
+            # Initialize universal segmentation model
             self.model = AutoModelForUniversalSegmentation.from_pretrained(
                 self.config.model_name,
                 config=model_config,
@@ -73,7 +85,7 @@ class PanopticSegmentationModel(pl.LightningModule):
     
     def _init_metrics(self) -> None:
         """Initialize metrics for training, validation, and testing."""
-        # Panoptic segmentation metrics
+        # Universal segmentation metrics
         self.train_dice = Dice(num_classes=self.config.num_classes)
         self.train_iou = JaccardIndex(task="multiclass", num_classes=self.config.num_classes)
         self.train_accuracy = Accuracy(task="multiclass", num_classes=self.config.num_classes)
@@ -92,7 +104,7 @@ class PanopticSegmentationModel(pl.LightningModule):
         self.test_precision = Precision(task="multiclass", num_classes=self.config.num_classes)
         self.test_recall = Recall(task="multiclass", num_classes=self.config.num_classes)
         
-        # Panoptic-specific metrics (mAP)
+        # Universal-specific metrics (mAP)
         self.train_map = MeanAveragePrecision(
             box_format="xyxy",
             iou_type="segm",
@@ -460,7 +472,7 @@ class PanopticSegmentationModel(pl.LightningModule):
         model_name: str,
         num_classes: int,
         **kwargs
-    ) -> "PanopticSegmentationModel":
+    ) -> "UniversalSegmentationModel":
         """Create a model from a pretrained checkpoint.
         
         Args:
@@ -471,7 +483,7 @@ class PanopticSegmentationModel(pl.LightningModule):
         Returns:
             Model instance
         """
-        config = PanopticSegmentationModelConfig(
+        config = UniversalSegmentationModelConfig(
             model_name=model_name,
             num_classes=num_classes,
             **kwargs
@@ -502,4 +514,4 @@ class PanopticSegmentationModel(pl.LightningModule):
         """Called when loading a checkpoint."""
         # Load model configuration from checkpoint
         if "model_config" in checkpoint:
-            self.config = PanopticSegmentationModelConfig(**checkpoint["model_config"]) 
+            self.config = UniversalSegmentationModelConfig(**checkpoint["model_config"]) 

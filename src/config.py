@@ -1,9 +1,17 @@
-import os
-import yaml
-from dataclasses import dataclass, asdict, field
-from typing import List, Optional, Union, Dict, Any, Tuple
+"""
+Configuration management for the Databricks Computer Vision Pipeline.
 
-def tuple_constructor(loader, node):
+This module provides dataclasses and utilities for managing configuration
+across different computer vision tasks and training scenarios.
+"""
+
+import os
+from dataclasses import dataclass, asdict, field
+from typing import Any, Dict, List, Optional, Tuple, Union
+
+import yaml
+
+def tuple_constructor(loader: yaml.SafeLoader, node: yaml.Node) -> tuple:
     """Custom constructor for YAML tuples."""
     value = loader.construct_sequence(node)
     return tuple(value)
@@ -298,6 +306,37 @@ def get_default_config(task: str) -> Dict[str, Any]:
         })
         config['output'].update({
             'results_dir': "/Volumes/<catalog>/<schema>/<volume>/<path>/results/semantic_segmentation"
+        })
+        
+    elif task == "universal_segmentation":
+        config['model'].update({
+            'model_name': "facebook/mask2former-swin-base-coco-panoptic",
+            'num_classes': 133,
+            'segmentation_type': "universal",
+            'aux_loss_weight': 0.4,
+            'mask_threshold': 0.5
+        })
+        config['data'].update({
+            'model_name': "facebook/mask2former-swin-base-coco-panoptic",
+            'image_size': [512, 512],
+            'batch_size': 4
+        })
+        config['training'].update({
+            'max_epochs': 200,
+            'monitor_metric': "val_miou",
+            'monitor_mode': "max"
+        })
+        config['mlflow'].update({
+            'experiment_name': "universal_segmentation_training",
+            'run_name': "mask2former_swin_base",
+            'tags': {
+                "framework": "lightning",
+                "model": "mask2former",
+                "dataset": "coco"
+            }
+        })
+        config['output'].update({
+            'results_dir': "/Volumes/<catalog>/<schema>/<volume>/<path>/results/universal_segmentation"
         })
     
     return config 

@@ -1,0 +1,34 @@
+# PyFunc Model Serving Requirements
+# Complete dependencies for isolated environment (no Databricks runtime)
+
+# Core MLflow
+mlflow==2.21.3
+
+# PyTorch ecosystem (not provided by runtime)
+torch==2.8.0
+torchvision==0.23.0
+torchmetrics==1.6.0
+
+# Hugging Face ecosystem (not provided by runtime)
+transformers==4.50.2
+tokenizers==0.21.4
+
+# Lightning (not provided by runtime)
+lightning==2.5.2
+
+# Data handling (not provided by runtime)
+numpy==1.26.4
+pandas==1.5.3
+pillow==10.3.0
+requests==2.32.2
+
+# Computer Vision (not provided by runtime)
+pycocotools==2.0.10
+opencv-python==4.8.1.78
+
+# Utilities (not provided by runtime)
+pyyaml==6.0.2
+tqdm==4.67.1
+
+# Note: This file contains ALL dependencies needed for model serving
+# since there's no Databricks runtime in the isolated environment

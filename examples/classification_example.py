@@ -9,20 +9,28 @@ This script shows:
 4. How to visualize results
 """
 
+import os
+import sys
+from io import BytesIO
+from typing import Any, Dict, List
+
+import matplotlib.pyplot as plt
+import requests
 import torch
 import yaml
 from PIL import Image
-import requests
-from io import BytesIO
-import matplotlib.pyplot as plt
 from transformers import AutoImageProcessor, AutoModelForImageClassification
 
-# Import our custom modules
-import sys
-import os
+# Add src to Python path for imports
 sys.path.append(os.path.join(os.path.dirname(__file__), '..', 'src'))
 
-from tasks.classification.adapters import ViTAdapter, ConvNeXTAdapter, SwinAdapter, get_adapter, get_output_adapter
+from tasks.classification.adapters import (
+    ConvNeXTAdapter,
+    SwinAdapter,
+    ViTAdapter,
+    get_adapter,
+    get_output_adapter,
+)
 from tasks.classification.model import ClassificationModel, ClassificationModelConfig
 
 def load_config(config_path: str) -> dict:

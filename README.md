@@ -8,6 +8,9 @@ An advanced, modular, and extensible computer vision framework designed to signi
 
 Computer vision projects are often burdened by the overwhelming number of decisions that practitioners must make before getting to meaningful experimentation. From choosing the right model architecture and preprocessing pipeline to configuring training infrastructure and tracking results, these decisions can stall progress and increase costs. This architecture solves that problem through:
 
+* **Complete Model Abstraction**: The framework provides **zero-knowledge model management** through Hugging Face's Auto-classes (`AutoModel`, `AutoConfig`, `AutoImageProcessor`). Users can work with any Hugging Face model without understanding its internals - just specify the model name in configuration.
+* **Complete Training Loop Abstraction**: Built on PyTorch Lightning, the framework **eliminates the need for training code**. No training loops, optimizers, or schedulers to write - Lightning handles everything automatically.
+* **Seamless MLflow Integration**: **Zero-configuration experiment tracking** through Lightning's native MLflow integration. All metrics, parameters, and artifacts are logged automatically.
 * **Reducing cognitive and setup overhead:** The framework expects datasets in the MS COCO format—an image folder and a single `annotations.json`. For users bringing in new model architectures, only a small adapter class is needed to plug the model into the framework.
 * **Promoting best practices:** Built on PyTorch Lightning, Ray, MLflow, Hugging Face Transformers, and Albumentations, the framework incorporates community-standard tools to ensure reproducibility, traceability, and scalability.
 * **Enabling rapid experimentation:** Configuration files define models, datasets, and training settings, allowing users to switch tasks or models without rewriting core logic.
@@ -25,12 +28,66 @@ Once training is running, checkpoints are automatically saved to configured volu
 
 ## 🚀 Technology Stack and Its Significance
 
-* **Lightning**: Simplifies model training by structuring code for better maintainability and automatic integration of callbacks like early stopping and checkpointing.
+* **Lightning**: **Completely abstracts the training loop** - no training code needed. Provides automatic distributed training, checkpointing, early stopping, and MLflow integration.
+* **Hugging Face Transformers**: **Completely abstracts model management** through Auto-classes. Provides high-quality pre-trained vision models such as DETR, YOLO, ViT, SegFormer, and Mask2Former with zero setup - just specify the model name.
 * **Ray**: Powers distributed training and large-scale hyperparameter tuning. Enables multi-GPU/multi-node workloads on Databricks.
-* **Hugging Face Transformers**: Provides high-quality pre-trained vision models such as DETR, YOLO, ViT, SegFormer, and Mask2Former with minimal setup.
-* **MLflow**: Tracks parameters, metrics, models, and artifacts. Crucial for model governance, collaboration, and auditing.
+* **MLflow**: **Seamlessly integrated through Lightning** for automatic experiment tracking, model registry, and serving. Tracks parameters, metrics, models, and artifacts without any manual setup.
 * **Albumentations**: Standardizes and simplifies image augmentations to improve model robustness across datasets.
 * **PyCOCOTools**: Provides reliable annotation parsing, evaluation, and visualization tools using the COCO format.
+
+---
+
+## 🏗️ Architectural Abstraction Layers
+
+Our framework provides **complete abstraction at every level** of the computer vision pipeline:
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                    USER INTERFACE LAYER                        │
+│  ┌─────────────────┐  ┌─────────────────┐  ┌─────────────────┐ │
+│  │   YAML Config   │  │   Python API    │  │   Notebooks     │ │
+│  │   (Zero Code)   │  │   (Minimal)     │  │   (Interactive) │ │
+│  └─────────────────┘  └─────────────────┘  └─────────────────┘ │
+└─────────────────────────────────────────────────────────────────┘
+                                │
+┌─────────────────────────────────────────────────────────────────┐
+│                 FRAMEWORK ABSTRACTION LAYERS                   │
+│  ┌─────────────────┐  ┌─────────────────┐  ┌─────────────────┐ │
+│  │  Model Layer    │  │ Training Layer  │  │  Data Layer     │ │
+│  │  (AutoModel)    │  │  (Lightning)    │  │  (Adapters)     │ │
+│  │  Zero Knowledge │  │  Zero Code      │  │  Zero Format    │ │
+│  └─────────────────┘  └─────────────────┘  └─────────────────┘ │
+└─────────────────────────────────────────────────────────────────┘
+                                │
+┌─────────────────────────────────────────────────────────────────┐
+│                  INFRASTRUCTURE LAYER                          │
+│  ┌─────────────────┐  ┌─────────────────┐  ┌─────────────────┐ │
+│  │   Hugging Face  │  │ PyTorch Lightning│  │     MLflow      │ │
+│  │   Transformers  │  │                 │  │                 │ │
+│  │   (Auto-Classes)│  │ (Training Loop) │  │ (Observability) │ │
+│  └─────────────────┘  └─────────────────┘  └─────────────────┘ │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+### Key Abstraction Benefits:
+
+**🔧 Model Management (Zero Knowledge)**
+```
+Traditional: model = MyCustomModel(backbone='resnet50', heads='detection', ...)
+Framework:  model = AutoModel.from_pretrained("facebook/detr-resnet-50")
+```
+
+**⚡ Training Loop (Zero Code)**
+```
+Traditional: for epoch in epochs: for batch in dataloader: loss = model(batch)...
+Framework:  trainer.fit(model, datamodule)  # Lightning handles everything
+```
+
+**📊 Observability (Zero Configuration)**
+```
+Traditional: mlflow.log_metric("loss", loss); mlflow.log_param("lr", lr)...
+Framework:  # Lightning automatically logs everything to MLflow
+```
 
 ---
 
@@ -38,7 +95,7 @@ Once training is running, checkpoints are automatically saved to configured volu
 
 * **UnifiedTrainer**: Handles all training logic, seamlessly switching between local and distributed modes.
 * **DetectionModel & DetectionDataModule**: Encapsulate task-specific logic, keeping model code separate from dataset management.
-* **Adapter System**: Minimizes the work needed to plug in new models—define input and output adapters (e.g., MyModelInputAdapter, MyModelOutputAdapter), register them with get_input_adapter() and get_output_adapter(), and start training.
+* **Adapter System**: **Complete abstraction of model-specific data processing** - input and output adapters handle all format conversions automatically. Minimizes the work needed to plug in new models—define input and output adapters (e.g., MyModelInputAdapter, MyModelOutputAdapter), register them with get_input_adapter() and get_output_adapter(), and start training.
 
 ---
 
@@ -48,8 +105,18 @@ Once training is running, checkpoints are automatically saved to configured volu
 
 ```python
 class YourModelInputAdapter(BaseAdapter):
+    def __init__(self, model_name: str, image_size: int = 800):
+        # Use AutoImageProcessor for automatic preprocessing
+        self.processor = AutoImageProcessor.from_pretrained(
+            model_name,
+            size={"height": image_size, "width": image_size},
+            do_resize=True, do_rescale=True, do_normalize=True
+        )
+    
     def __call__(self, image: Image.Image, target: Dict) -> Tuple[torch.Tensor, Dict]:
-        return processed_image, adapted_target
+        # Automatic preprocessing through AutoImageProcessor
+        processed = self.processor(image, return_tensors="pt")
+        return processed.pixel_values.squeeze(0), adapted_target
 ```
 
 ```python
@@ -82,9 +149,11 @@ def get_output_adapter(model_name: str) -> BaseAdapter:
 ```yaml
 model:
   task_type: detection
-  model_name: your_model_identifier
+  model_name: your_model_identifier  # Just change this line
   ...
 ```
+
+**That's it!** The framework handles everything else automatically through Hugging Face Auto-classes and PyTorch Lightning.
 
 ---
 
@@ -141,7 +210,7 @@ Organize your Unity Catalog volume with the following structure:
 Example configuration:
 ```yaml
 model:
-  model_name: "facebook/detr-resnet-50"
+  model_name: "facebook/detr-resnet-50"  # Just change this to switch models
   task_type: "detection"
   num_classes: 80
 
@@ -175,23 +244,24 @@ Follow the provided reference notebooks in sequence. For object detection, start
 
 ### Step 5: MLflow Integration
 
-**Simplified MLflow Integration:** The framework uses a simplified MLflow integration approach that removes redundant checkpoint logging and relies on the native integration between MLFlowLogger and Lightning's ModelCheckpoint callback. This provides more reliable and maintainable logging.
+**Zero-Configuration MLflow Integration:** The framework uses Lightning's native MLflow integration for automatic experiment tracking, model registry, and serving.
 
 **Key Features:**
-- Automatic checkpoint logging with `log_model="all"`
-- Centralized logger creation with `create_databricks_logger_for_task()`
-- Automatic parameter logging from LightningModule's `save_hyperparameters()`
-- Volume checkpointing for persistent storage
+- **Automatic checkpoint logging** with `log_model="all"`
+- **Automatic parameter logging** from LightningModule's `save_hyperparameters()`
+- **Automatic metric logging** through Lightning's `self.log()` calls
+- **Automatic model registry** in Unity Catalog
+- **Volume checkpointing** for persistent storage
 
 **Usage Example:**
 ```python
-from utils.logging import create_databricks_logger_for_task
+from utils.logging import create_databricks_logger
 from training.trainer import UnifiedTrainer
 
 # Create logger with automatic integration
-mlf_logger = create_databricks_logger_for_task(
-    task="detection",
-    model_name="detr-resnet50",
+mlf_logger = create_databricks_logger(
+    experiment_name=experiment_name,
+    run_name=run_name,
     log_model="all"  # Automatically log all checkpoints
 )
 
@@ -207,7 +277,43 @@ unified_trainer = UnifiedTrainer(
 result = unified_trainer.train()
 ```
 
+**Everything is automatic:**
+- ✅ Parameter logging
+- ✅ Metric logging  
+- ✅ Checkpoint logging
+- ✅ Model registry
+- ✅ Model serving
+
 **For more details, see:** [`SIMPLIFIED_MLFLOW_INTEGRATION.md`](SIMPLIFIED_MLFLOW_INTEGRATION.md)
+
+---
+
+## 🎯 Zero-Knowledge Development Philosophy
+
+The framework is designed for **zero-knowledge development** - you don't need deep ML expertise to use it effectively:
+
+### What You DON'T Need to Know:
+- ❌ Model architecture internals (DETR, YOLOS, ResNet, etc.)
+- ❌ Training loop implementation
+- ❌ Optimizer and scheduler configuration
+- ❌ Distributed training setup
+- ❌ MLflow logging code
+- ❌ Data preprocessing formats
+
+### What You DO Need to Know:
+- ✅ How to write a YAML configuration file
+- ✅ Your dataset structure (COCO format)
+- ✅ Basic ML concepts (learning rate, batch size, epochs)
+
+### Example: Switching from DETR to YOLOS
+```yaml
+# Just change this one line in your config:
+model:
+  model_name: "facebook/detr-resnet-50"  # Change to:
+  model_name: "hustvl/yolos-tiny"       # That's it!
+
+# No other changes needed - adapters handle everything automatically
+```
 
 ---
 

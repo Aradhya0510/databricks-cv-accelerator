@@ -114,7 +114,7 @@ class TestFrameworkSummary(BaseTaskTest):
         """Validate that our lightweight testing approach works."""
         # Test that we can create minimal configs
         task_types = ["classification", "detection", "semantic_segmentation", 
-                     "instance_segmentation", "panoptic_segmentation"]
+                     "instance_segmentation", "universal_segmentation"]
         
         for task_type in task_types:
             config = self.create_minimal_config(task_type)
@@ -208,7 +208,7 @@ def run_framework_summary():
     print("  📄 tests/test_detection.py - Detection task tests")
     print("  📄 tests/test_semantic_segmentation.py - Semantic segmentation tests")
     print("  📄 tests/test_instance_segmentation.py - Instance segmentation tests")
-    print("  📄 tests/test_panoptic_segmentation.py - Panoptic segmentation tests")
+    print("  📄 tests/test_universal_segmentation.py - Universal segmentation tests")
     print("  📄 tests/test_all_tasks.py - Comprehensive test runner")
     print("  📄 tests/test_framework_summary.py - This summary")
     

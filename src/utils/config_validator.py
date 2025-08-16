@@ -1,11 +1,14 @@
 """
 Configuration validator for the simplified MLflow integration approach.
-This utility helps ensure config files are compatible with the new UnifiedTrainer.
+
+This utility helps ensure config files are compatible with the new UnifiedTrainer
+and provides validation for the simplified MLflow integration approach.
 """
 
 import os
-from typing import Dict, Any, List, Optional
 from dataclasses import fields
+from typing import Any, Dict, List, Optional
+
 from training.trainer import UnifiedTrainerConfig
 
 

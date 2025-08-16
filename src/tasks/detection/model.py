@@ -1,10 +1,18 @@
-from typing import Dict, Any, Optional, Union, List
-from dataclasses import dataclass
+"""
+Detection model implementation for the Databricks Computer Vision Pipeline.
 
-import torch
+This module provides a unified detection model that can work with any
+Hugging Face object detection model through adapter patterns.
+"""
+
+from dataclasses import dataclass
+from typing import Any, Dict, List, Optional, Union
+
 import lightning as pl
+import torch
 from torchmetrics.detection import MeanAveragePrecision
-from transformers import AutoModelForObjectDetection, AutoConfig, PreTrainedModel
+from transformers import AutoConfig, AutoModelForObjectDetection, PreTrainedModel
+
 from .adapters import get_input_adapter, get_output_adapter
 
 @dataclass

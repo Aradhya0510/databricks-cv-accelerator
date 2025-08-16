@@ -11,17 +11,17 @@ import seaborn as sns
 from torchmetrics.classification import MulticlassJaccardIndex, Dice
 from torchmetrics.detection import MeanAveragePrecision
 
-from .model import PanopticSegmentationModel
-from .data import PanopticSegmentationDataModule
+from .model import UniversalSegmentationModel
+from .data import UniversalSegmentationDataModule
 
-class PanopticSegmentationEvaluator:
+class UniversalSegmentationEvaluator:
     def __init__(self, model_path: str, config_path: str):
         # Load configuration
         with open(config_path, 'r') as f:
             self.config = yaml.safe_load(f)
         
         # Load model
-        self.model = PanopticSegmentationModel.load_from_checkpoint(model_path, config=self.config)
+        self.model = UniversalSegmentationModel.load_from_checkpoint(model_path, config=self.config)
         self.model.eval()
         
         # Move model to GPU if available
@@ -86,7 +86,7 @@ class PanopticSegmentationEvaluator:
         
         return thing_classes + stuff_classes
     
-    def evaluate(self, data_module: PanopticSegmentationDataModule) -> Dict[str, Any]:
+    def evaluate(self, data_module: UniversalSegmentationDataModule) -> Dict[str, Any]:
         """Evaluate model on validation dataset."""
         # Initialize metrics
         self.iou_metric = self.iou_metric.to(self.device)
@@ -267,11 +267,11 @@ def evaluate_model(
         config = yaml.safe_load(f)
     
     # Initialize data module
-    data_module = PanopticSegmentationDataModule(config['data'])
+            data_module = UniversalSegmentationDataModule(config['data'])
     data_module.setup()
     
     # Initialize evaluator
-    evaluator = PanopticSegmentationEvaluator(model_path, config_path)
+    evaluator = UniversalSegmentationEvaluator(model_path, config_path)
     
     # Run evaluation
     metrics = evaluator.evaluate(data_module)
