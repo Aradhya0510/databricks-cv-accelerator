@@ -136,13 +136,57 @@ A "task" in our framework represents a specific computer vision problem type. Ea
 
 ### Common Task Types
 
-Our framework supports various computer vision tasks, each with its own specialized requirements:
+Our framework supports various computer vision tasks, each with its own specialized requirements and Hugging Face AutoModel integration:
 
-- **Classification Tasks**: Assign class labels to entire images
-- **Detection Tasks**: Locate and classify objects within images using bounding boxes
-- **Segmentation Tasks**: Perform pixel-level classification (semantic, instance, or panoptic)
-- **Keypoint Tasks**: Detect specific points of interest in images
-- **Custom Tasks**: Any specialized computer vision problem
+#### **Object Detection** 🔍
+- **Purpose**: Locate and classify objects within images using bounding boxes
+- **AutoModel**: `AutoModelForObjectDetection`
+- **Popular Models**: DETR, YOLOS, Table Transformer
+- **Documentation**: [🔗 AutoModelForObjectDetection](https://huggingface.co/docs/transformers/v4.53.3/en/model_doc/auto#transformers.AutoModelForObjectDetection)
+- **Example Models**:
+  - `facebook/detr-resnet-50` - DETR with ResNet-50 backbone
+  - `hustvl/yolos-tiny` - YOLOS tiny model
+  - `microsoft/table-transformer-detection` - Table detection
+
+#### **Image Classification** 🏷️
+- **Purpose**: Assign class labels to entire images
+- **AutoModel**: `AutoModelForImageClassification`
+- **Popular Models**: ViT, ResNet, ConvNeXT, Swin Transformer
+- **Documentation**: [🔗 AutoModelForImageClassification](https://huggingface.co/docs/transformers/v4.53.3/en/model_doc/auto#transformers.AutoModelForImageClassification)
+- **Example Models**:
+  - `google/vit-base-patch16-224` - Vision Transformer (ViT)
+  - `microsoft/resnet-50` - ResNet-50
+  - `facebook/convnext-base-224` - ConvNeXT Base
+
+#### **Semantic Segmentation** 🎨
+- **Purpose**: Pixel-level classification for semantic understanding
+- **AutoModel**: `AutoModelForSemanticSegmentation`
+- **Popular Models**: SegFormer, DeepLabV3
+- **Documentation**: [🔗 AutoModelForSemanticSegmentation](https://huggingface.co/docs/transformers/v4.53.3/en/model_doc/auto#transformers.AutoModelForSemanticSegmentation)
+- **Example Models**:
+  - `nvidia/segformer-b0-finetuned-ade-512-512` - SegFormer B0
+  - `facebook/detr-resnet-50-panoptic` - DETR Panoptic
+
+#### **Instance Segmentation** 🎯
+- **Purpose**: Individual object segmentation with instance IDs
+- **AutoModel**: `AutoModelForInstanceSegmentation`
+- **Popular Models**: Mask2Former
+- **Documentation**: [🔗 AutoModelForInstanceSegmentation](https://huggingface.co/docs/transformers/v4.53.3/en/model_doc/auto#transformers.AutoModelForInstanceSegmentation)
+- **Example Models**:
+  - `facebook/mask2former-swin-base-coco-instance` - Mask2Former Instance
+
+#### **Universal Segmentation** 🌐
+- **Purpose**: Unified segmentation (panoptic/instance) with single model
+- **AutoModel**: `AutoModelForUniversalSegmentation`
+- **Popular Models**: Mask2Former
+- **Documentation**: [🔗 AutoModelForUniversalSegmentation](https://huggingface.co/docs/transformers/v4.53.3/en/model_doc/auto#transformers.AutoModelForUniversalSegmentation)
+- **Example Models**:
+  - `facebook/mask2former-swin-base-coco-panoptic` - Mask2Former Panoptic
+
+#### **Custom Tasks** ⚙️
+- **Purpose**: Any specialized computer vision problem
+- **Implementation**: Extensible framework for custom tasks
+- **Requirements**: Define adapters, data modules, and model classes
 
 ### Task Architecture Components
 

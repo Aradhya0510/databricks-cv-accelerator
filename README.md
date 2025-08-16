@@ -288,6 +288,20 @@ result = unified_trainer.train()
 
 ---
 
+## 🎯 Supported Tasks and Models
+
+The framework supports multiple computer vision tasks with **zero-knowledge model management**. Simply specify the model name in your configuration, and the framework automatically handles all the complexity.
+
+**Supported Tasks:** Object Detection, Image Classification, Semantic Segmentation, Instance Segmentation, Universal Segmentation
+
+**Popular Models:** DETR, YOLOS, ViT, ResNet, ConvNeXT, SegFormer, Mask2Former
+
+**How to Use:** Just change the `model_name` in your configuration - the framework handles everything else automatically.
+
+**📖 For complete details:** [Supported Tasks and Models](docs/SUPPORTED_TASKS_AND_MODELS.md)
+
+---
+
 ## 🎯 Zero-Knowledge Development Philosophy
 
 The framework is designed for **zero-knowledge development** - you don't need deep ML expertise to use it effectively:

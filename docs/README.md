@@ -5,6 +5,7 @@ This directory contains the essential documentation for the Databricks Computer 
 ## 📚 Available Documentation
 
 ### Core Documentation
+- **[SUPPORTED_TASKS_AND_MODELS.md](SUPPORTED_TASKS_AND_MODELS.md)** - Complete guide to supported tasks and available models
 - **[ADAPTER_OVERVIEW.md](ADAPTER_OVERVIEW.md)** - Comprehensive guide to the adapter system architecture
 - **[DATA_CONFIGURATION.md](DATA_CONFIGURATION.md)** - Guide for configuring data paths and dataset splits
 - **[SIMPLIFIED_MLFLOW_INTEGRATION.md](SIMPLIFIED_MLFLOW_INTEGRATION.md)** - Simplified MLflow integration approach
