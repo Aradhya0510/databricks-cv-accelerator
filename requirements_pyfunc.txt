@@ -25,6 +25,7 @@ requests==2.32.2
 # Computer Vision (not provided by runtime)
 pycocotools==2.0.10
 opencv-python==4.8.1.78
+timm==0.9.0
 
 # Utilities (not provided by runtime)
 pyyaml==6.0.2

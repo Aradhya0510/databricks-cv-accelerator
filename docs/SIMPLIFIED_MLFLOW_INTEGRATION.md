@@ -1,4 +1,4 @@
-# Simplified MLflow Integration for Databricks Computer Vision Framework
+# Simplified MLflow Integration for Databricks Computer Vision Accelerator
 
 ## Overview
 
@@ -236,4 +236,4 @@ mlf_logger = create_databricks_logger_for_task(
 - `src/utils/logging.py` - Simplified logging utilities
 - `src/training/trainer.py` - Updated UnifiedTrainer
 
-This simplified approach provides a more robust, maintainable, and reliable MLflow integration for the Databricks Computer Vision Framework. 
+This simplified approach provides a more robust, maintainable, and reliable MLflow integration for the Databricks Computer Vision Accelerator. 

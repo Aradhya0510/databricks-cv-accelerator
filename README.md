@@ -1,6 +1,6 @@
-# Databricks Computer Vision Architecture
+# Databricks Computer Vision Accelerator
 
-An advanced, modular, and extensible computer vision framework designed to significantly reduce the complexity involved in building, training, and deploying computer vision models on Databricks. This project aims to serve as a reference implementation for best practices, abstracting away many of the difficult decisions related to model architecture, dataset format, training orchestration, distributed computing, and experiment tracking. By using this framework, practitioners can more easily transition from problem formulation to model deployment using well-defined and reusable components that promote clarity, scalability, and productivity.
+An advanced, modular, and extensible computer vision accelerator designed to significantly reduce the complexity involved in building, training, and deploying computer vision models on Databricks. This project aims to serve as a reference implementation for best practices, abstracting away many of the difficult decisions related to model architecture, dataset format, training orchestration, distributed computing, and experiment tracking. By using this accelerator, practitioners can more easily transition from problem formulation to model deployment using well-defined and reusable components that promote clarity, scalability, and productivity.
 
 ---
 

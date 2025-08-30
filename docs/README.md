@@ -1,6 +1,6 @@
 # Documentation Overview
 
-This directory contains the essential documentation for the Databricks Computer Vision Framework.
+This directory contains the essential documentation for the Databricks Computer Vision Accelerator.
 
 ## 📚 Available Documentation
 

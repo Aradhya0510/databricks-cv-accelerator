@@ -55,12 +55,8 @@ from pathlib import Path
 PROJECT_ROOT = os.environ.get('PROJECT_ROOT', '/Workspace/Repos/your-repo/Databricks_CV_ref')
 sys.path.append(f'{PROJECT_ROOT}/src')
 
-try:
-    from tasks.detection.model import DetectionModel
-    CONFIG_IMPORTS_SUCCESS = True
-except ImportError as e:
-    print(f"⚠️ DetectionModel import failed: {e}")
-    CONFIG_IMPORTS_SUCCESS = False
+from tasks.detection.model import DetectionModel
+CONFIG_IMPORTS_SUCCESS = True
 
 # Load configuration from previous notebooks
 CATALOG = os.environ.get('DATABRICKS_CATALOG', "your_catalog")
@@ -569,28 +565,23 @@ def load_trained_model_for_pyfunc():
     best_checkpoint = os.path.join(checkpoint_dir, checkpoint_files[0])
     print(f"✅ Found checkpoint: {best_checkpoint}")
     
-    try:
-        if CONFIG_IMPORTS_SUCCESS:
-            # Load using DetectionModel to extract the underlying Hugging Face model
-            model_config = config["model"].copy()
-            model_config["num_workers"] = config["data"]["num_workers"]
-            detection_model = DetectionModel.load_from_checkpoint(best_checkpoint, config=model_config)
-            
-            # Extract the underlying Hugging Face model
-            huggingface_model = detection_model.model
-            
-            print(f"✅ Hugging Face model extracted successfully")
-            print(f"   Model type: {type(huggingface_model)}")
-            print(f"   Parameters: {sum(p.numel() for p in huggingface_model.parameters()):,}")
-            print(f"   Device: {next(huggingface_model.parameters()).device}")
-            
-            return huggingface_model, best_checkpoint
-        else:
-            print("❌ DetectionModel not available, cannot extract Hugging Face model")
-            return None, None
+    if CONFIG_IMPORTS_SUCCESS:
+        # Load using DetectionModel to extract the underlying Hugging Face model
+        model_config = config["model"].copy()
+        model_config["num_workers"] = config["data"]["num_workers"]
+        detection_model = DetectionModel.load_from_checkpoint(best_checkpoint, config=model_config)
         
-    except Exception as e:
-        print(f"❌ Error loading model: {e}")
+        # Extract the underlying Hugging Face model
+        huggingface_model = detection_model.model
+        
+        print(f"✅ Hugging Face model extracted successfully")
+        print(f"   Model type: {type(huggingface_model)}")
+        print(f"   Parameters: {sum(p.numel() for p in huggingface_model.parameters()):,}")
+        print(f"   Device: {next(huggingface_model.parameters()).device}")
+        
+        return huggingface_model, best_checkpoint
+    else:
+        print("❌ DetectionModel not available, cannot extract Hugging Face model")
         return None, None
 
 model, checkpoint_path = load_trained_model_for_pyfunc()  # Don't overwrite global config
@@ -611,103 +602,84 @@ def create_signature_for_detection_model():
     
     print("🔍 Creating signature through inference...")
     
-    try:
-        # Create temporary PyFunc model for testing
-        pyfunc_model = DetectionPyFuncModel()
-        
-        # Create temporary files for artifacts
-        temp_checkpoint_path = f"{DEPLOYMENT_RESULTS_DIR}/temp_model_checkpoint"
-        temp_config_path = f"{DEPLOYMENT_RESULTS_DIR}/temp_config.json"
-        
-        # Save the model in Hugging Face format
-        os.makedirs(temp_checkpoint_path, exist_ok=True)
-        model.save_pretrained(temp_checkpoint_path)
-        
-        # Also save the image processor if available
-        try:
-            from transformers import AutoImageProcessor
-            image_processor = AutoImageProcessor.from_pretrained(config['model']['model_name'])
-            image_processor.save_pretrained(temp_checkpoint_path)
-        except Exception as e:
-            print(f"⚠️ Could not save image processor: {e}")
-        
-        # Save config
-        with open(temp_config_path, 'w') as f:
-            json.dump(config, f, indent=2)
-        
-        # Create mock context for loading
-        class MockContext:
-            def __init__(self, artifacts):
-                self.artifacts = artifacts
-        
-        mock_context = MockContext({
-            "model_checkpoint": temp_checkpoint_path,
-            "config": temp_config_path
-        })
-        
-        # Load context
-        pyfunc_model.load_context(mock_context)
-        
-        # Create sample inputs for different formats
-        sample_inputs = [
-            # Base64 image input
-            {
-                "image_base64": "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==",
-                "confidence_threshold": 0.7
-            },
-            # URL input (example)
-            {
-                "image_url": "https://example.com/image.jpg",
-                "confidence_threshold": 0.5,
-                "max_detections": 50
-            }
-        ]
-        
-        # Test with synthetic image data (more reliable than external URLs)
-        synthetic_image = Image.new('RGB', (800, 800), color='red')
-        img_buffer = io.BytesIO()
-        synthetic_image.save(img_buffer, format='PNG')
-        synthetic_base64 = base64.b64encode(img_buffer.getvalue()).decode()
-        
-        reliable_input = {
-            "image_base64": synthetic_base64,
-            "confidence_threshold": 0.7,
-            "max_detections": 100
-        }
-        
-        # Get prediction for signature inference
-        print("   Testing PyFunc model prediction...")
-        prediction = pyfunc_model.predict(None, reliable_input)
-        
-        print("   Prediction successful, inferring signature...")
-        
-        # Use infer_signature() - proven to work well
-        from mlflow.models.signature import infer_signature
-        
-        # Create sample input DataFrame for signature inference
-        sample_df = pd.DataFrame([reliable_input])
-        
-        # Infer signature from actual inputs and outputs
-        signature = infer_signature(sample_df, prediction)
-        
-        print("✅ Signature created successfully")
-        print(f"   Input schema: {signature.inputs}")
-        print(f"   Output schema: {signature.outputs}")
-        
-        # Cleanup temporary files
-        if os.path.exists(temp_checkpoint_path):
-            import shutil
-            shutil.rmtree(temp_checkpoint_path)
-        if os.path.exists(temp_config_path):
-            os.remove(temp_config_path)
-        
-        return signature, reliable_input
-        
-    except Exception as e:
-        print(f"❌ Signature creation failed: {e}")
-        import traceback
-        traceback.print_exc()
-        return None, None
+    # Create temporary PyFunc model for testing
+    pyfunc_model = DetectionPyFuncModel()
+    
+    # Create temporary files for artifacts
+    temp_checkpoint_path = f"{DEPLOYMENT_RESULTS_DIR}/temp_model_checkpoint"
+    temp_config_path = f"{DEPLOYMENT_RESULTS_DIR}/temp_config.json"
+    
+    # Save the model in Hugging Face format
+    os.makedirs(temp_checkpoint_path, exist_ok=True)
+    model.save_pretrained(temp_checkpoint_path)
+    
+    # Also save the image processor if available
+    from transformers import AutoImageProcessor
+    image_processor = AutoImageProcessor.from_pretrained(config['model']['model_name'])
+    image_processor.save_pretrained(temp_checkpoint_path)
+    
+    # Save config
+    with open(temp_config_path, 'w') as f:
+        json.dump(config, f, indent=2)
+    
+    # Create mock context for loading
+    class MockContext:
+        def __init__(self, artifacts):
+            self.artifacts = artifacts
+    
+    mock_context = MockContext({
+        "model_checkpoint": temp_checkpoint_path,
+        "config": temp_config_path
+    })
+    
+    # Load context
+    pyfunc_model.load_context(mock_context)
+    
+    # Use the same base64 generation approach as validate_pyfunc_model_before_registration
+    # Fetch real image and convert to base64 for realistic testing
+    image_url = "https://farm6.staticflickr.com/5260/5428948720_1db6b22432_z.jpg"
+    print(f"   Fetching test image from: {image_url}")
+    
+    response = requests.get(image_url, timeout=10)
+    response.raise_for_status()
+    
+    # Convert to base64
+    image_base64 = base64.b64encode(response.content).decode('utf-8')
+    print(f"   Successfully converted image to base64 ({len(image_base64)} characters)")
+    
+    reliable_input = {
+        "image_base64": image_base64,
+        "confidence_threshold": 0.5,
+        "max_detections": 100
+    }
+    
+    # Get prediction for signature inference
+    print("   Testing PyFunc model prediction...")
+    prediction = pyfunc_model.predict(None, reliable_input)
+    
+    print("   Prediction successful, inferring signature...")
+    
+    # Use infer_signature() - proven to work well
+    from mlflow.models.signature import infer_signature
+    
+    # Create sample input DataFrame for signature inference
+    sample_df = pd.DataFrame([reliable_input])
+    
+    # Infer signature from actual inputs and outputs
+    signature = infer_signature(sample_df, prediction)
+    
+    print("✅ Signature created successfully")
+    print(f"   Input schema: {signature.inputs}")
+    print(f"   Output schema: {signature.outputs}")
+    
+    # Cleanup temporary files
+    if os.path.exists(temp_checkpoint_path):
+        import shutil
+        shutil.rmtree(temp_checkpoint_path)
+    if os.path.exists(temp_config_path):
+        os.remove(temp_config_path)
+    
+    return signature, reliable_input
 
 signature, input_example = create_signature_for_detection_model()
 
@@ -723,27 +695,22 @@ def setup_unity_catalog_for_pyfunc():
     
     print("🏗️ Setting up Unity Catalog for PyFunc model...")
     
-    try:
-        # Create schema if needed
-        spark.sql(f"CREATE SCHEMA IF NOT EXISTS {CATALOG}.{SCHEMA}")
-        print(f"✅ Schema ensured: {CATALOG}.{SCHEMA}")
-        
-        # Set up MLflow for Unity Catalog
-        mlflow.set_registry_uri("databricks-uc")
-        
-        # Set experiment
-        experiment_name = f"/Users/{username}/pyfunc_model_registry"
-        mlflow.set_experiment(experiment_name)
-        
-        print(f"✅ Unity Catalog setup complete")
-        print(f"   Registry URI: databricks-uc")
-        print(f"   Experiment: {experiment_name}")
-        
-        return True
-        
-    except Exception as e:
-        print(f"❌ Unity Catalog setup failed: {e}")
-        return False
+    # Create schema if needed
+    spark.sql(f"CREATE SCHEMA IF NOT EXISTS {CATALOG}.{SCHEMA}")
+    print(f"✅ Schema ensured: {CATALOG}.{SCHEMA}")
+    
+    # Set up MLflow for Unity Catalog
+    mlflow.set_registry_uri("databricks-uc")
+    
+    # Set experiment
+    experiment_name = f"/Users/{username}/pyfunc_model_registry"
+    mlflow.set_experiment(experiment_name)
+    
+    print(f"✅ Unity Catalog setup complete")
+    print(f"   Registry URI: databricks-uc")
+    print(f"   Experiment: {experiment_name}")
+    
+    return True
 
 uc_ready = setup_unity_catalog_for_pyfunc()
 
@@ -758,131 +725,121 @@ def log_pyfunc_model():
     
     print("📤 Logging PyFunc model to MLflow...")
     
-    try:
-        # Create artifacts directory
-        artifacts_dir = f"{DEPLOYMENT_RESULTS_DIR}/model_artifacts"
-        os.makedirs(artifacts_dir, exist_ok=True)
+    # Create artifacts directory
+    artifacts_dir = f"{DEPLOYMENT_RESULTS_DIR}/model_artifacts"
+    os.makedirs(artifacts_dir, exist_ok=True)
+    
+    # Save the Hugging Face model in the correct format
+    model_checkpoint_path = f"{artifacts_dir}/model_checkpoint"
+    os.makedirs(model_checkpoint_path, exist_ok=True)
+    
+    # Save the model in Hugging Face format
+    model.save_pretrained(model_checkpoint_path)
+    
+    # Also save the image processor if available
+    from transformers import AutoImageProcessor
+    image_processor = AutoImageProcessor.from_pretrained(config['model']['model_name'])
+    image_processor.save_pretrained(model_checkpoint_path)
+    
+    # Save configuration
+    config_path = f"{artifacts_dir}/config.json"
+    with open(config_path, 'w') as f:
+        json.dump(config, f, indent=2)
+    
+    # Create artifacts dictionary for PyFunc
+    artifacts = {
+        "model_checkpoint": model_checkpoint_path,
+        "config": config_path
+    }
+    
+    # Use comprehensive requirements_pyfunc.txt for isolated environment
+    # Read the requirements file and include packages directly
+    requirements_path = f"{PROJECT_ROOT}/requirements_pyfunc.txt"
+    if os.path.exists(requirements_path):
+        with open(requirements_path, 'r') as f:
+            requirements = [line.strip() for line in f if line.strip() and not line.startswith('#')]
         
-        # Save the Hugging Face model in the correct format
-        model_checkpoint_path = f"{artifacts_dir}/model_checkpoint"
-        os.makedirs(model_checkpoint_path, exist_ok=True)
-        
-        # Save the model in Hugging Face format
-        model.save_pretrained(model_checkpoint_path)
-        
-        # Also save the image processor if available
-        try:
-            from transformers import AutoImageProcessor
-            image_processor = AutoImageProcessor.from_pretrained(config['model']['model_name'])
-            image_processor.save_pretrained(model_checkpoint_path)
-        except Exception as e:
-            print(f"⚠️ Could not save image processor: {e}")
-        
-        # Save configuration
-        config_path = f"{artifacts_dir}/config.json"
-        with open(config_path, 'w') as f:
-            json.dump(config, f, indent=2)
-        
-        # Create artifacts dictionary for PyFunc
-        artifacts = {
-            "model_checkpoint": model_checkpoint_path,
-            "config": config_path
+        conda_env = {
+            "channels": ["defaults", "pytorch"],
+            "dependencies": [
+                f"python={sys.version_info.major}.{sys.version_info.minor}",
+                "pip",
+                {
+                    "pip": requirements
+                }
+            ],
+            "name": "detection-serving-env"
         }
         
-        # Use comprehensive requirements_pyfunc.txt for isolated environment
-        # Read the requirements file and include packages directly
-        requirements_path = f"{PROJECT_ROOT}/requirements_pyfunc.txt"
-        if os.path.exists(requirements_path):
-            with open(requirements_path, 'r') as f:
-                requirements = [line.strip() for line in f if line.strip() and not line.startswith('#')]
-            
-            conda_env = {
-                "channels": ["defaults", "pytorch"],
-                "dependencies": [
-                    f"python={sys.version_info.major}.{sys.version_info.minor}",
-                    "pip",
-                    {
-                        "pip": requirements
-                    }
-                ],
-                "name": "detection-serving-env"
-            }
-            
-            print(f"✅ Using comprehensive requirements_pyfunc.txt for isolated environment")
-            print(f"   Requirements file: {requirements_path}")
-            print(f"   Packages: {len(requirements)} dependencies")
-            print(f"   Includes all dependencies needed for PyFunc serving (no Databricks runtime)")
-        else:
-            print(f"⚠️ requirements_pyfunc.txt not found at {requirements_path}")
-            # Fallback to basic dependencies
-            conda_env = {
-                "channels": ["defaults", "pytorch"],
-                "dependencies": [
-                    f"python={sys.version_info.major}.{sys.version_info.minor}",
-                    "pip",
-                    {
-                        "pip": [
-                            "mlflow==2.21.3",
-                            "torch==2.8.0",
-                            "torchvision==0.23.0",
-                            "transformers==4.50.2",
-                            "lightning==2.5.2",
-                            "numpy==1.26.4",
-                            "pandas==1.5.3",
-                            "pillow==10.3.0",
-                            "requests==2.32.2",
-                            "pycocotools==2.0.10",
-                            "opencv-python==4.8.1.78",
-                            "pyyaml==6.0.2",
-                            "tqdm==4.67.1"
-                        ]
-                    }
-                ],
-                "name": "detection-serving-env"
-            }
-        
-        # Log PyFunc model (without registration)
-        with mlflow.start_run(run_name=f"pyfunc_logging_{UNITY_CATALOG_MODEL_NAME}"):
-            
-            # Log additional metadata
-            mlflow.log_params({
-                "model_type": "pyfunc",
-                "original_model": MODEL_NAME,
-                "confidence_threshold": config.get('confidence_threshold', 0.7),
-                "max_detections": config.get('max_detections', 100),
-                "image_size": config.get('image_size', 800),
-                "logging_timestamp": datetime.now().isoformat()
-            })
-            
-            # Create PyFunc model instance
-            pyfunc_model = DetectionPyFuncModel()
-            
-            # Log the model (without registration)
-            model_info = mlflow.pyfunc.log_model(
-                artifact_path="model",
-                python_model=pyfunc_model,
-                artifacts=artifacts,
-                conda_env=conda_env,
-                signature=signature,
-                input_example=input_example,
-                metadata={
-                    "task": "object_detection",
-                    "architecture": "DETR",
-                    "framework": "pytorch_pyfunc"
+        print(f"✅ Using comprehensive requirements_pyfunc.txt for isolated environment")
+        print(f"   Requirements file: {requirements_path}")
+        print(f"   Packages: {len(requirements)} dependencies")
+        print(f"   Includes all dependencies needed for PyFunc serving (no Databricks runtime)")
+    else:
+        print(f"⚠️ requirements_pyfunc.txt not found at {requirements_path}")
+        # Fallback to basic dependencies
+        conda_env = {
+            "channels": ["defaults", "pytorch"],
+            "dependencies": [
+                f"python={sys.version_info.major}.{sys.version_info.minor}",
+                "pip",
+                {
+                    "pip": [
+                        "mlflow==2.21.3",
+                        "torch==2.8.0",
+                        "torchvision==0.23.0",
+                        "transformers==4.50.2",
+                        "lightning==2.5.2",
+                        "numpy==1.26.4",
+                        "pandas==1.5.3",
+                        "pillow==10.3.0",
+                        "requests==2.32.2",
+                        "pycocotools==2.0.10",
+                        "opencv-python==4.8.1.78",
+                        "pyyaml==6.0.2",
+                        "tqdm==4.67.1"
+                    ]
                 }
-            )
-            
-            print(f"✅ PyFunc model logged successfully")
-            print(f"   Model URI: {model_info.model_uri}")
-            print(f"   Run ID: {mlflow.active_run().info.run_id}")
-            
-            return model_info
-            
-    except Exception as e:
-        print(f"❌ PyFunc model logging failed: {e}")
-        import traceback
-        traceback.print_exc()
-        return None
+            ],
+            "name": "detection-serving-env"
+        }
+    
+    # Log PyFunc model (without registration)
+    with mlflow.start_run(run_name=f"pyfunc_logging_{UNITY_CATALOG_MODEL_NAME}"):
+        
+        # Log additional metadata
+        mlflow.log_params({
+            "model_type": "pyfunc",
+            "original_model": MODEL_NAME,
+            "confidence_threshold": config.get('confidence_threshold', 0.7),
+            "max_detections": config.get('max_detections', 100),
+            "image_size": config.get('image_size', 800),
+            "logging_timestamp": datetime.now().isoformat()
+        })
+        
+        # Create PyFunc model instance
+        pyfunc_model = DetectionPyFuncModel()
+        
+        # Log the model (without registration)
+        model_info = mlflow.pyfunc.log_model(
+            artifact_path="model",
+            python_model=pyfunc_model,
+            artifacts=artifacts,
+            conda_env=conda_env,
+            signature=signature,
+            input_example=input_example,
+            metadata={
+                "task": "object_detection",
+                "architecture": "DETR",
+                "framework": "pytorch_pyfunc"
+            }
+        )
+        
+        print(f"✅ PyFunc model logged successfully")
+        print(f"   Model URI: {model_info.model_uri}")
+        print(f"   Run ID: {mlflow.active_run().info.run_id}")
+        
+        return model_info
 
 # Step 1: Log the model (without registration)
 model_info = log_pyfunc_model()
@@ -903,95 +860,75 @@ def validate_pyfunc_model_before_registration():
     
     print("🔍 Validating PyFunc model before registration using MLflow's predict() API...")
     
-    try:
-        # Test input data that matches our model's expected format
-        # Fetch real image and convert to base64 for realistic testing
-        import requests
-        import base64
-        from io import BytesIO
-        
-        image_url = "https://farm6.staticflickr.com/5260/5428948720_1db6b22432_z.jpg"
-        print(f"   Fetching test image from: {image_url}")
-        
-        try:
-            response = requests.get(image_url, timeout=10)
-            response.raise_for_status()
-            
-            # Convert to base64
-            image_base64 = base64.b64encode(response.content).decode('utf-8')
-            print(f"   Successfully converted image to base64 ({len(image_base64)} characters)")
-            
-            test_input = {
-                "image_base64": image_base64,
-                "confidence_threshold": 0.5,
-                "max_detections": 100
-            }
-        except Exception as e:
-            print(f"   ⚠️ Failed to fetch image, using fallback: {e}")
-            # Fallback to a simple base64 image if URL fetch fails
-            test_input = {
-                "image_base64": "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==",
-                "confidence_threshold": 0.5,
-                "max_detections": 100
-            }
-        
-        print("   Using MLflow's predict() API for validation...")
-        print("   This will test model dependencies, input validation, and prediction in an isolated environment")
-        
-        # Use MLflow's built-in predict() API for validation
-        # This provides isolated execution and validates dependencies, input data, and environment
-        prediction = mlflow.models.predict(
-            model_uri=model_info.model_uri,
-            input_data=test_input,
-            env_manager="uv",  # Use uv for fast environment creation (MLflow 2.20.0+)
-            extra_envs={"UV_REINSTALL": "1"}  # Force uv to recreate environment
-        )
-        
-        print("✅ MLflow predict() validation successful!")
-        print(f"   Prediction type: {type(prediction)}")
-        print(f"   Prediction content: {prediction}")
-        
-        # The model is working correctly - it returned a prediction with detected objects!
-        # The prediction shows: 1 detection with score 0.706 and label 0
-        
-        # Handle both string and dict predictions
-        if isinstance(prediction, str):
-            try:
-                import json
-                prediction_dict = json.loads(prediction)
-                print("✅ Successfully parsed JSON prediction")
-                prediction = prediction_dict
-            except json.JSONDecodeError:
-                print("⚠️ Could not parse prediction as JSON")
-        
-        # Check prediction structure
-        if isinstance(prediction, dict):
-            print(f"   Prediction keys: {list(prediction.keys())}")
-            if 'predictions' in prediction:
-                pred_data = prediction['predictions']
-                if isinstance(pred_data, list) and len(pred_data) > 0:
-                    print(f"   Number of predictions: {len(pred_data)}")
-                    if isinstance(pred_data[0], dict):
-                        print(f"   Prediction fields: {list(pred_data[0].keys())}")
-                        
-                        # Check if we have actual detections
-                        if 'predictions' in pred_data[0]:
-                            detections = pred_data[0]['predictions']
-                            if 'num_detections' in detections:
-                                num_detections = detections['num_detections']
-                                print(f"   ✅ Model detected {num_detections} objects!")
-                                if num_detections > 0:
-                                    print(f"   ✅ Real objects detected - validation successful!")
-        
-        print("✅ Model validation passed! Dependencies, input validation, and prediction all working.")
-        return True
-            
-    except Exception as e:
-        print(f"❌ MLflow predict() validation failed: {e}")
-        print("   This indicates issues with model dependencies, input validation, or environment setup")
-        import traceback
-        traceback.print_exc()
-        return False
+    # Test input data that matches our model's expected format
+    # Fetch real image and convert to base64 for realistic testing
+    import requests
+    import base64
+    from io import BytesIO
+    
+    image_url = "https://farm6.staticflickr.com/5260/5428948720_1db6b22432_z.jpg"
+    print(f"   Fetching test image from: {image_url}")
+    
+    response = requests.get(image_url, timeout=10)
+    response.raise_for_status()
+    
+    # Convert to base64
+    image_base64 = base64.b64encode(response.content).decode('utf-8')
+    print(f"   Successfully converted image to base64 ({len(image_base64)} characters)")
+    
+    test_input = {
+        "image_base64": image_base64,
+        "confidence_threshold": 0.5,
+        "max_detections": 100
+    }
+    
+    print("   Using MLflow's predict() API for validation...")
+    print("   This will test model dependencies, input validation, and prediction in an isolated environment")
+    
+    # Use MLflow's built-in predict() API for validation
+    # This provides isolated execution and validates dependencies, input data, and environment
+    prediction = mlflow.models.predict(
+        model_uri=model_info.model_uri,
+        input_data=test_input,
+        env_manager="uv",  # Use uv for fast environment creation (MLflow 2.20.0+)
+        extra_envs={"UV_REINSTALL": "1"}  # Force uv to recreate environment
+    )
+    
+    print("✅ MLflow predict() validation successful!")
+    print(f"   Prediction type: {type(prediction)}")
+    print(f"   Prediction content: {prediction}")
+    
+    # The model is working correctly - it returned a prediction with detected objects!
+    # The prediction shows: 1 detection with score 0.706 and label 0
+    
+    # Handle both string and dict predictions
+    if isinstance(prediction, str):
+        import json
+        prediction_dict = json.loads(prediction)
+        print("✅ Successfully parsed JSON prediction")
+        prediction = prediction_dict
+    
+    # Check prediction structure
+    if isinstance(prediction, dict):
+        print(f"   Prediction keys: {list(prediction.keys())}")
+        if 'predictions' in prediction:
+            pred_data = prediction['predictions']
+            if isinstance(pred_data, list) and len(pred_data) > 0:
+                print(f"   Number of predictions: {len(pred_data)}")
+                if isinstance(pred_data[0], dict):
+                    print(f"   Prediction fields: {list(pred_data[0].keys())}")
+                    
+                    # Check if we have actual detections
+                    if 'predictions' in pred_data[0]:
+                        detections = pred_data[0]['predictions']
+                        if 'num_detections' in detections:
+                            num_detections = detections['num_detections']
+                            print(f"   ✅ Model detected {num_detections} objects!")
+                            if num_detections > 0:
+                                print(f"   ✅ Real objects detected - validation successful!")
+    
+    print("✅ Model validation passed! Dependencies, input validation, and prediction all working.")
+    return True
 
 # Validate the model before proceeding with registration
 model_validation_passed = validate_pyfunc_model_before_registration()
@@ -1019,26 +956,19 @@ def register_pyfunc_model(model_info):
     
     print("📤 Registering PyFunc model in Unity Catalog...")
     
-    try:
-        # Create model registry name
-        registered_model_name = f"{CATALOG}.{SCHEMA}.{UNITY_CATALOG_MODEL_NAME}"
-        
-        # Register the model
-        mlflow.register_model(
-            model_uri=model_info.model_uri,
-            name=registered_model_name
-        )
-        
-        print(f"✅ PyFunc model registered successfully")
-        print(f"   Registered name: {registered_model_name}")
-        
-        return registered_model_name
-        
-    except Exception as e:
-        print(f"❌ PyFunc model registration failed: {e}")
-        import traceback
-        traceback.print_exc()
-        return None
+    # Create model registry name
+    registered_model_name = f"{CATALOG}.{SCHEMA}.{UNITY_CATALOG_MODEL_NAME}"
+    
+    # Register the model
+    mlflow.register_model(
+        model_uri=model_info.model_uri,
+        name=registered_model_name
+    )
+    
+    print(f"✅ PyFunc model registered successfully")
+    print(f"   Registered name: {registered_model_name}")
+    
+    return registered_model_name
 
 # Step 2: Register the validated model
 registered_model_name = register_pyfunc_model(model_info)
@@ -1065,52 +995,42 @@ def create_pyfunc_serving_endpoint(registered_model_name=None, model_validation_
     
     print("🚀 Creating PyFunc serving endpoint with WorkspaceClient...")
     
-    try:
-        from databricks.sdk import WorkspaceClient
-        from databricks.sdk.service.serving import EndpointCoreConfigInput, ServedModelInput, ServedModelInputWorkloadSize
-        
-        # Initialize workspace client
-        client = WorkspaceClient()
-        
-        # Define endpoint name
-        endpoint_name = f"pyfunc-detr-{UNITY_CATALOG_MODEL_NAME}".lower()
-        
-        # Handle existing endpoints
-        try:
-            existing_endpoint = client.serving_endpoints.get(endpoint_name)
-            print(f"⚠️ Endpoint '{endpoint_name}' already exists")
-            print(f"   Current state: {existing_endpoint.state}")
-            
-            # Delete existing endpoint for clean deployment
-            print(f"   Deleting existing endpoint for clean deployment...")
-            client.serving_endpoints.delete(endpoint_name)
-            
-            # Wait for deletion
-            import time
-            time.sleep(15)
-            print("   Endpoint deleted, proceeding with creation...")
-            
-        except Exception as e:
-            print(f"   Endpoint doesn't exist or can't be accessed: {e}")
-        
-        # Get model registry information
-        registered_model_name = f"{CATALOG}.{SCHEMA}.{UNITY_CATALOG_MODEL_NAME}"
-        
-        # Get latest model version
-        try:
-            mlflow_client = mlflow.tracking.MlflowClient()
-            model_versions = mlflow_client.search_model_versions(f"name='{registered_model_name}'")
-            
-            if model_versions:
-                latest_version = max([int(v.version) for v in model_versions])
-                print(f"   Latest model version: {latest_version}")
-            else:
-                latest_version = 1
-                print(f"   Using default version: {latest_version}")
-                
-        except Exception as e:
-            print(f"   Could not determine version, using 1: {e}")
-            latest_version = 1
+    from databricks.sdk import WorkspaceClient
+    from databricks.sdk.service.serving import EndpointCoreConfigInput, ServedModelInput, ServedModelInputWorkloadSize
+    
+    # Initialize workspace client
+    client = WorkspaceClient()
+    
+    # Define endpoint name
+    endpoint_name = f"pyfunc-detr-{UNITY_CATALOG_MODEL_NAME}".lower()
+    
+    # Handle existing endpoints
+    existing_endpoint = client.serving_endpoints.get(endpoint_name)
+    print(f"⚠️ Endpoint '{endpoint_name}' already exists")
+    print(f"   Current state: {existing_endpoint.state}")
+    
+    # Delete existing endpoint for clean deployment
+    print(f"   Deleting existing endpoint for clean deployment...")
+    client.serving_endpoints.delete(endpoint_name)
+    
+    # Wait for deletion
+    import time
+    time.sleep(15)
+    print("   Endpoint deleted, proceeding with creation...")
+    
+    # Get model registry information
+    registered_model_name = f"{CATALOG}.{SCHEMA}.{UNITY_CATALOG_MODEL_NAME}"
+    
+    # Get latest model version
+    mlflow_client = mlflow.tracking.MlflowClient()
+    model_versions = mlflow_client.search_model_versions(f"name='{registered_model_name}'")
+    
+    if model_versions:
+        latest_version = max([int(v.version) for v in model_versions])
+        print(f"   Latest model version: {latest_version}")
+    else:
+        latest_version = 1
+        print(f"   Using default version: {latest_version}")
         
         # Create served model configuration
         served_model = ServedModelInput(
@@ -1145,12 +1065,6 @@ def create_pyfunc_serving_endpoint(registered_model_name=None, model_validation_
         print(f"   Status: Creating...")
         
         return endpoint_name
-        
-    except Exception as e:
-        print(f"❌ Endpoint creation failed: {e}")
-        import traceback
-        traceback.print_exc()
-        return None
 
 endpoint_name = create_pyfunc_serving_endpoint(registered_model_name, model_validation_passed)
 
@@ -1166,49 +1080,36 @@ def wait_for_pyfunc_endpoint_ready(endpoint_name, timeout_minutes=20):
     print(f"⏳ Waiting for PyFunc endpoint '{endpoint_name}' to be ready...")
     print(f"   Timeout: {timeout_minutes} minutes")
     
-    try:
-        from databricks.sdk import WorkspaceClient
+    from databricks.sdk import WorkspaceClient
+    
+    client = WorkspaceClient()
+    start_time = time.time()
+    timeout_seconds = timeout_minutes * 60
+    
+    while time.time() - start_time < timeout_seconds:
+        endpoint = client.serving_endpoints.get(endpoint_name)
         
-        client = WorkspaceClient()
-        start_time = time.time()
-        timeout_seconds = timeout_minutes * 60
-        
-        while time.time() - start_time < timeout_seconds:
-            try:
-                endpoint = client.serving_endpoints.get(endpoint_name)
-                
-                # Check endpoint state
-                if hasattr(endpoint.state, 'ready') and endpoint.state.ready:
-                    print(f"✅ PyFunc endpoint '{endpoint_name}' is ready!")
-                    print(f"   State: {endpoint.state}")
-                    print(f"   Config ready: {endpoint.state.config_update}")
-                    
-                    # Get endpoint URL
-                    try:
-                        if hasattr(endpoint.state, 'config') and hasattr(endpoint.state.config, 'served_models'):
-                            print(f"   Served models: {len(endpoint.state.config.served_models)}")
-                        print(f"   Endpoint ready for PyFunc serving")
-                    except Exception as url_e:
-                        print(f"   URL info: Error getting details - {url_e}")
-                    
-                    return True
-                else:
-                    state_info = endpoint.state
-                    print(f"   Current state: {state_info}")
-                    if hasattr(state_info, 'ready'):
-                        print(f"   Ready status: {state_info.ready}")
-                    time.sleep(30)
-                    
-            except Exception as e:
-                print(f"   Error checking endpoint status: {e}")
-                time.sleep(30)
-        
-        print(f"❌ PyFunc endpoint '{endpoint_name}' did not become ready within {timeout_minutes} minutes")
-        return False
-        
-    except Exception as e:
-        print(f"❌ Error waiting for PyFunc endpoint: {e}")
-        return False
+        # Check endpoint state
+        if hasattr(endpoint.state, 'ready') and endpoint.state.ready:
+            print(f"✅ PyFunc endpoint '{endpoint_name}' is ready!")
+            print(f"   State: {endpoint.state}")
+            print(f"   Config ready: {endpoint.state.config_update}")
+            
+            # Get endpoint URL
+            if hasattr(endpoint.state, 'config') and hasattr(endpoint.state.config, 'served_models'):
+                print(f"   Served models: {len(endpoint.state.config.served_models)}")
+            print(f"   Endpoint ready for PyFunc serving")
+            
+            return True
+        else:
+            state_info = endpoint.state
+            print(f"   Current state: {state_info}")
+            if hasattr(state_info, 'ready'):
+                print(f"   Ready status: {state_info.ready}")
+            time.sleep(30)
+    
+    print(f"❌ PyFunc endpoint '{endpoint_name}' did not become ready within {timeout_minutes} minutes")
+    return False
 
 endpoint_ready = wait_for_pyfunc_endpoint_ready(endpoint_name)
 
@@ -1228,130 +1129,134 @@ def test_pyfunc_endpoint_comprehensive(endpoint_name):
     
     print("🧪 Testing PyFunc endpoint comprehensively...")
     
-    try:
-        from databricks.sdk import WorkspaceClient
-        
-        client = WorkspaceClient()
-        endpoint = client.serving_endpoints.get(endpoint_name)
-        
-        # Get endpoint URL (construct it manually if needed)
-        workspace_url = dbutils.notebook.entry_point.getDbutils().notebook().getContext().tags().apply('browserHostName')
-        endpoint_url = f"https://{workspace_url}/serving-endpoints/{endpoint_name}/invocations"
-        
-        # Get authentication token
-        auth_token = dbutils.notebook.entry_point.getDbutils().notebook().getContext().apiToken().get()
-        
-        headers = {
-            "Authorization": f"Bearer {auth_token}",
-            "Content-Type": "application/json"
+    from databricks.sdk import WorkspaceClient
+    
+    client = WorkspaceClient()
+    endpoint = client.serving_endpoints.get(endpoint_name)
+    
+    # Get endpoint URL (construct it manually if needed)
+    workspace_url = dbutils.notebook.entry_point.getDbutils().notebook().getContext().tags().apply('browserHostName')
+    endpoint_url = f"https://{workspace_url}/serving-endpoints/{endpoint_name}/invocations"
+    
+    # Get authentication token
+    auth_token = dbutils.notebook.entry_point.getDbutils().notebook().getContext().apiToken().get()
+    
+    headers = {
+        "Authorization": f"Bearer {auth_token}",
+        "Content-Type": "application/json"
+    }
+    
+    # Test 1: Base64 image input
+    print("   Test 1: Base64 image input...")
+    
+    # Use the same base64 generation approach as validate_pyfunc_model_before_registration
+    # Fetch real image and convert to base64 for realistic testing
+    image_url = "https://farm6.staticflickr.com/5260/5428948720_1db6b22432_z.jpg"
+    print(f"      Fetching test image from: {image_url}")
+    
+    response = requests.get(image_url, timeout=10)
+    response.raise_for_status()
+    
+    # Convert to base64
+    test_base64 = base64.b64encode(response.content).decode('utf-8')
+    print(f"      Successfully converted image to base64 ({len(test_base64)} characters)")
+    
+    payload_1 = {
+        "inputs": {
+            "image_base64": test_base64,
+            "confidence_threshold": 0.5,
+            "max_detections": 100
         }
-        
-        # Test 1: Base64 image input
-        print("   Test 1: Base64 image input...")
-        
-        # Create a simple test image
-        test_image = Image.new('RGB', (800, 800), color=(255, 0, 0))  # Red image
-        img_buffer = io.BytesIO()
-        test_image.save(img_buffer, format='PNG')
-        test_base64 = base64.b64encode(img_buffer.getvalue()).decode()
-        
-        payload_1 = {
-            "inputs": {
-                "image_base64": test_base64,
-                "confidence_threshold": 0.5,
-                "max_detections": 100
-            }
+    }
+    
+    response_1 = requests.post(endpoint_url, json=payload_1, headers=headers, timeout=30)
+    
+    if response_1.status_code == 200:
+        result_1 = response_1.json()
+        print("   ✅ Base64 test successful")
+        print(f"      Response keys: {list(result_1.keys())}")
+        if 'predictions' in result_1 and len(result_1['predictions']) > 0:
+            pred = result_1['predictions'][0]
+            print(f"      Detections: {pred.get('num_detections', 0)}")
+    else:
+        print(f"   ❌ Base64 test failed: {response_1.status_code}")
+        print(f"      Response: {response_1.text[:500]}")
+    
+    # Test 2: Batch input
+    print("   Test 2: Batch input...")
+    
+    # Use a different real image for batch testing
+    image_url_2 = "https://farm4.staticflickr.com/3441/3350733109_7c8c0c8b8b_z.jpg"
+    print(f"      Fetching second test image from: {image_url_2}")
+    
+    response_2 = requests.get(image_url_2, timeout=10)
+    response_2.raise_for_status()
+    
+    # Convert to base64
+    test_base64_2 = base64.b64encode(response_2.content).decode('utf-8')
+    print(f"      Successfully converted second image to base64 ({len(test_base64_2)} characters)")
+    
+    payload_2 = {
+        "inputs": {
+            "instances": [
+                {
+                    "image_base64": test_base64,
+                    "confidence_threshold": 0.6
+                },
+                {
+                    "image_base64": test_base64_2,
+                    "confidence_threshold": 0.7
+                }
+            ]
         }
-        
-        response_1 = requests.post(endpoint_url, json=payload_1, headers=headers, timeout=30)
-        
-        if response_1.status_code == 200:
-            result_1 = response_1.json()
-            print("   ✅ Base64 test successful")
-            print(f"      Response keys: {list(result_1.keys())}")
-            if 'predictions' in result_1 and len(result_1['predictions']) > 0:
-                pred = result_1['predictions'][0]
-                print(f"      Detections: {pred.get('num_detections', 0)}")
-        else:
-            print(f"   ❌ Base64 test failed: {response_1.status_code}")
-            print(f"      Response: {response_1.text[:500]}")
-        
-        # Test 2: Batch input
-        print("   Test 2: Batch input...")
-        
-        # Create another test image
-        test_image_2 = Image.new('RGB', (800, 800), color=(0, 255, 0))  # Green image
-        img_buffer_2 = io.BytesIO()
-        test_image_2.save(img_buffer_2, format='PNG')
-        test_base64_2 = base64.b64encode(img_buffer_2.getvalue()).decode()
-        
-        payload_2 = {
-            "inputs": {
-                "instances": [
-                    {
-                        "image_base64": test_base64,
-                        "confidence_threshold": 0.6
-                    },
-                    {
-                        "image_base64": test_base64_2,
-                        "confidence_threshold": 0.7
-                    }
-                ]
-            }
+    }
+    
+    response_2 = requests.post(endpoint_url, json=payload_2, headers=headers, timeout=45)
+    
+    if response_2.status_code == 200:
+        result_2 = response_2.json()
+        print("   ✅ Batch test successful")
+        if 'predictions' in result_2:
+            print(f"      Batch predictions: {len(result_2['predictions'])}")
+    else:
+        print(f"   ❌ Batch test failed: {response_2.status_code}")
+        print(f"      Response: {response_2.text[:500]}")
+    
+    # Test 3: Error handling
+    print("   Test 3: Error handling...")
+    
+    payload_3 = {
+        "inputs": {
+            "invalid_field": "test"
         }
-        
-        response_2 = requests.post(endpoint_url, json=payload_2, headers=headers, timeout=45)
-        
-        if response_2.status_code == 200:
-            result_2 = response_2.json()
-            print("   ✅ Batch test successful")
-            if 'predictions' in result_2:
-                print(f"      Batch predictions: {len(result_2['predictions'])}")
-        else:
-            print(f"   ❌ Batch test failed: {response_2.status_code}")
-            print(f"      Response: {response_2.text[:500]}")
-        
-        # Test 3: Error handling
-        print("   Test 3: Error handling...")
-        
-        payload_3 = {
-            "inputs": {
-                "invalid_field": "test"
-            }
-        }
-        
-        response_3 = requests.post(endpoint_url, json=payload_3, headers=headers, timeout=30)
-        
-        if response_3.status_code == 200:
-            result_3 = response_3.json()
-            print("   ✅ Error handling test completed")
-            if 'error' in str(result_3) or 'predictions' in result_3:
-                print("      Model handled invalid input gracefully")
-        else:
-            print(f"   ⚠️ Error handling test: {response_3.status_code}")
-        
-        # Summarize test results
-        test_results = {
-            'endpoint_name': endpoint_name,
-            'endpoint_url': endpoint_url,
-            'base64_test': response_1.status_code == 200,
-            'batch_test': response_2.status_code == 200,
-            'error_handling': response_3.status_code == 200,
-            'test_timestamp': datetime.now().isoformat()
-        }
-        
-        print(f"📊 PyFunc Endpoint Test Summary:")
-        print(f"   Base64 test: {'✅' if test_results['base64_test'] else '❌'}")
-        print(f"   Batch test: {'✅' if test_results['batch_test'] else '❌'}")
-        print(f"   Error handling: {'✅' if test_results['error_handling'] else '❌'}")
-        
-        return test_results
-        
-    except Exception as e:
-        print(f"❌ PyFunc endpoint testing failed: {e}")
-        import traceback
-        traceback.print_exc()
-        return None
+    }
+    
+    response_3 = requests.post(endpoint_url, json=payload_3, headers=headers, timeout=30)
+    
+    if response_3.status_code == 200:
+        result_3 = response_3.json()
+        print("   ✅ Error handling test completed")
+        if 'error' in str(result_3) or 'predictions' in result_3:
+            print("      Model handled invalid input gracefully")
+    else:
+        print(f"   ⚠️ Error handling test: {response_3.status_code}")
+    
+    # Summarize test results
+    test_results = {
+        'endpoint_name': endpoint_name,
+        'endpoint_url': endpoint_url,
+        'base64_test': response_1.status_code == 200,
+        'batch_test': response_2.status_code == 200,
+        'error_handling': response_3.status_code == 200,
+        'test_timestamp': datetime.now().isoformat()
+    }
+    
+    print(f"📊 PyFunc Endpoint Test Summary:")
+    print(f"   Base64 test: {'✅' if test_results['base64_test'] else '❌'}")
+    print(f"   Batch test: {'✅' if test_results['batch_test'] else '❌'}")
+    print(f"   Error handling: {'✅' if test_results['error_handling'] else '❌'}")
+    
+    return test_results
 
 test_results = test_pyfunc_endpoint_comprehensive(endpoint_name)
 
@@ -1380,11 +1285,17 @@ def performance_test_pyfunc_endpoint(endpoint_name, num_requests=10):
             "Content-Type": "application/json"
         }
         
-        # Create test image
-        test_image = Image.new('RGB', (800, 800), color=(128, 128, 128))
-        img_buffer = io.BytesIO()
-        test_image.save(img_buffer, format='PNG')
-        test_base64 = base64.b64encode(img_buffer.getvalue()).decode()
+        # Use the same base64 generation approach for performance testing
+        # Fetch real image and convert to base64 for realistic testing
+        image_url = "https://farm6.staticflickr.com/5260/5428948720_1db6b22432_z.jpg"
+        print(f"   Fetching test image from: {image_url}")
+        
+        response = requests.get(image_url, timeout=10)
+        response.raise_for_status()
+        
+        # Convert to base64
+        test_base64 = base64.b64encode(response.content).decode('utf-8')
+        print(f"   Successfully converted image to base64 ({len(test_base64)} characters)")
         
         payload = {
             "inputs": {
@@ -1875,55 +1786,42 @@ def diagnose_pyfunc_deployment():
     
     # Check 2: Unity Catalog Access
     print("\n2. Unity Catalog Access:")
-    try:
-        spark.sql(f"DESCRIBE CATALOG {CATALOG}")
-        print(f"   ✅ Catalog {CATALOG} accessible")
-        
-        spark.sql(f"DESCRIBE SCHEMA {CATALOG}.{SCHEMA}")
-        print(f"   ✅ Schema {CATALOG}.{SCHEMA} accessible")
-    except Exception as e:
-        print(f"   ❌ Unity Catalog access error: {e}")
+    spark.sql(f"DESCRIBE CATALOG {CATALOG}")
+    print(f"   ✅ Catalog {CATALOG} accessible")
+    
+    spark.sql(f"DESCRIBE SCHEMA {CATALOG}.{SCHEMA}")
+    print(f"   ✅ Schema {CATALOG}.{SCHEMA} accessible")
     
     # Check 3: Model Registry
     print("\n3. Model Registry Check:")
-    try:
-        mlflow.set_registry_uri("databricks-uc")
-        client = mlflow.tracking.MlflowClient()
-        
-        registered_model_name = f"{CATALOG}.{SCHEMA}.{UNITY_CATALOG_MODEL_NAME}"
-        model_info = client.get_registered_model(registered_model_name)
-        print(f"   ✅ Model {registered_model_name} found in registry")
-        print(f"   Latest versions: {len(model_info.latest_versions)}")
-    except Exception as e:
-        print(f"   ❌ Model registry error: {e}")
+    mlflow.set_registry_uri("databricks-uc")
+    client = mlflow.tracking.MlflowClient()
+    
+    registered_model_name = f"{CATALOG}.{SCHEMA}.{UNITY_CATALOG_MODEL_NAME}"
+    model_info = client.get_registered_model(registered_model_name)
+    print(f"   ✅ Model {registered_model_name} found in registry")
+    print(f"   Latest versions: {len(model_info.latest_versions)}")
     
     # Check 4: Serving Endpoint
     print("\n4. Serving Endpoint Check:")
     if endpoint_name:
-        try:
-            client = WorkspaceClient()
-            endpoint = client.serving_endpoints.get(endpoint_name)
-            print(f"   ✅ Endpoint {endpoint_name} exists")
-            print(f"   State: {endpoint.state}")
-        except Exception as e:
-            print(f"   ❌ Endpoint error: {e}")
+        client = WorkspaceClient()
+        endpoint = client.serving_endpoints.get(endpoint_name)
+        print(f"   ✅ Endpoint {endpoint_name} exists")
+        print(f"   State: {endpoint.state}")
     else:
         print("   ⚠️ No endpoint name available")
     
     # Check 5: File System Access
     print("\n5. File System Check:")
-    try:
-        os.listdir(BASE_VOLUME_PATH)
-        print(f"   ✅ Base volume path accessible: {BASE_VOLUME_PATH}")
-        
-        if os.path.exists(f"{BASE_VOLUME_PATH}/checkpoints"):
-            checkpoints = os.listdir(f"{BASE_VOLUME_PATH}/checkpoints")
-            print(f"   ✅ Checkpoints found: {len(checkpoints)}")
-        else:
-            print("   ⚠️ No checkpoint directory found")
-            
-    except Exception as e:
-        print(f"   ❌ File system error: {e}")
+    os.listdir(BASE_VOLUME_PATH)
+    print(f"   ✅ Base volume path accessible: {BASE_VOLUME_PATH}")
+    
+    if os.path.exists(f"{BASE_VOLUME_PATH}/checkpoints"):
+        checkpoints = os.listdir(f"{BASE_VOLUME_PATH}/checkpoints")
+        print(f"   ✅ Checkpoints found: {len(checkpoints)}")
+    else:
+        print("   ⚠️ No checkpoint directory found")
     
     print("=" * 60)
     print("Diagnostics complete. Check above for any ❌ errors.")
@@ -1933,31 +1831,24 @@ def cleanup_failed_deployment():
     
     print("🧹 Cleaning up failed deployment resources...")
     
-    try:
-        # Clean up temporary files
-        temp_files = [
-            f"{DEPLOYMENT_RESULTS_DIR}/temp_pytorch_model.pth",
-            f"{DEPLOYMENT_RESULTS_DIR}/temp_config.json"
-        ]
-        
-        for temp_file in temp_files:
-            if os.path.exists(temp_file):
-                os.remove(temp_file)
-                print(f"   ✅ Removed: {temp_file}")
-        
-        # Optionally clean up failed endpoints (commented out for safety)
-        # if endpoint_name:
-        #     try:
-        #         client = WorkspaceClient()
-        #         client.serving_endpoints.delete(endpoint_name)
-        #         print(f"   ✅ Deleted endpoint: {endpoint_name}")
-        #     except Exception as e:
-        #         print(f"   ⚠️ Endpoint deletion failed: {e}")
-        
-        print("✅ Cleanup completed")
-        
-    except Exception as e:
-        print(f"❌ Cleanup error: {e}")
+    # Clean up temporary files
+    temp_files = [
+        f"{DEPLOYMENT_RESULTS_DIR}/temp_pytorch_model.pth",
+        f"{DEPLOYMENT_RESULTS_DIR}/temp_config.json"
+    ]
+    
+    for temp_file in temp_files:
+        if os.path.exists(temp_file):
+            os.remove(temp_file)
+            print(f"   ✅ Removed: {temp_file}")
+    
+    # Optionally clean up failed endpoints (commented out for safety)
+    # if endpoint_name:
+    #     client = WorkspaceClient()
+    #     client.serving_endpoints.delete(endpoint_name)
+    #     print(f"   ✅ Deleted endpoint: {endpoint_name}")
+    
+    print("✅ Cleanup completed")
 
 def test_pyfunc_model_locally():
     """Test PyFunc model locally before deployment."""
@@ -1968,58 +1859,53 @@ def test_pyfunc_model_locally():
     
     print("🧪 Testing PyFunc model locally...")
     
-    try:
-        # Create temporary PyFunc model
-        pyfunc_model = DetectionPyFuncModel()
-        
-        # Create temporary artifacts
-        temp_model_path = f"{DEPLOYMENT_RESULTS_DIR}/local_test_model.pth"
-        temp_config_path = f"{DEPLOYMENT_RESULTS_DIR}/local_test_config.json"
-        
-        torch.save(model, temp_model_path)
-        with open(temp_config_path, 'w') as f:
-            json.dump(config, f)
-        
-        # Mock context
-        class MockContext:
-            def __init__(self, artifacts):
-                self.artifacts = artifacts
-        
-        mock_context = MockContext({
-            "pytorch_model": temp_model_path,
-            "config": temp_config_path
-        })
-        
-        # Load and test
-        pyfunc_model.load_context(mock_context)
-        
-        # Test with synthetic image
-        test_image = Image.new('RGB', (400, 400), color='red')
-        img_buffer = io.BytesIO()
-        test_image.save(img_buffer, format='PNG')
-        test_base64 = base64.b64encode(img_buffer.getvalue()).decode()
-        
-        test_input = {
-            "image_base64": test_base64,
-            "confidence_threshold": 0.5
-        }
-        
-        prediction = pyfunc_model.predict(None, test_input)
-        
-        # Cleanup
-        os.remove(temp_model_path)
-        os.remove(temp_config_path)
-        
-        if isinstance(prediction, dict) and 'predictions' in prediction:
-            print("✅ Local PyFunc test successful")
-            print(f"   Prediction keys: {list(prediction.keys())}")
-            return True
-        else:
-            print("❌ Local PyFunc test failed")
-            return False
-            
-    except Exception as e:
-        print(f"❌ Local testing error: {e}")
+    # Create temporary PyFunc model
+    pyfunc_model = DetectionPyFuncModel()
+    
+    # Create temporary artifacts
+    temp_model_path = f"{DEPLOYMENT_RESULTS_DIR}/local_test_model.pth"
+    temp_config_path = f"{DEPLOYMENT_RESULTS_DIR}/local_test_config.json"
+    
+    torch.save(model, temp_model_path)
+    with open(temp_config_path, 'w') as f:
+        json.dump(config, f)
+    
+    # Mock context
+    class MockContext:
+        def __init__(self, artifacts):
+            self.artifacts = artifacts
+    
+    mock_context = MockContext({
+        "pytorch_model": temp_model_path,
+        "config": temp_config_path
+    })
+    
+    # Load and test
+    pyfunc_model.load_context(mock_context)
+    
+    # Test with synthetic image
+    test_image = Image.new('RGB', (400, 400), color='red')
+    img_buffer = io.BytesIO()
+    test_image.save(img_buffer, format='PNG')
+    test_base64 = base64.b64encode(img_buffer.getvalue()).decode()
+    
+    test_input = {
+        "image_base64": test_base64,
+        "confidence_threshold": 0.5
+    }
+    
+    prediction = pyfunc_model.predict(None, test_input)
+    
+    # Cleanup
+    os.remove(temp_model_path)
+    os.remove(temp_config_path)
+    
+    if isinstance(prediction, dict) and 'predictions' in prediction:
+        print("✅ Local PyFunc test successful")
+        print(f"   Prediction keys: {list(prediction.keys())}")
+        return True
+    else:
+        print("❌ Local PyFunc test failed")
         return False
 
 # Utility functions available for troubleshooting

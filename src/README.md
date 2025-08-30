@@ -1,6 +1,6 @@
-# Technical Overview: Databricks Computer Vision Framework
+# Technical Overview: Databricks Computer Vision Accelerator
 
-This document provides a comprehensive technical overview of the Databricks Computer Vision Framework, explaining both the technical implementation details and the design philosophy that guides our architectural decisions.
+This document provides a comprehensive technical overview of the Databricks Computer Vision Accelerator, explaining both the technical implementation details and the design philosophy that guides our architectural decisions.
 
 ---
 
@@ -542,7 +542,7 @@ The adapter system is documented in detail, covering:
 
 ## 🎯 Conclusion
 
-The Databricks Computer Vision Framework provides a **revolutionary approach** to enterprise computer vision by providing **complete abstraction at every level**:
+The Databricks Computer Vision Accelerator provides a **revolutionary approach** to enterprise computer vision by providing **complete abstraction at every level**:
 
 1. **Model Abstraction**: Hugging Face Auto-classes eliminate the need for model knowledge
 2. **Training Abstraction**: PyTorch Lightning eliminates the need for training code
