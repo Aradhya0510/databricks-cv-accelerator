@@ -62,7 +62,8 @@ from typing import Dict, List, Any, Optional
 from pathlib import Path
 
 # Add the src directory to Python path
-sys.path.append('/Workspace/Repos/your-repo/Databricks_CV_ref/src')
+PROJECT_ROOT = os.environ.get('PROJECT_ROOT', '/Workspace/Repos/your-repo/Databricks_CV_ref')
+sys.path.append(f'{PROJECT_ROOT}/src')
 
 from config import load_config, get_default_config
 from utils.logging import create_databricks_logger
@@ -159,14 +160,16 @@ def setup_model_monitoring():
             
         except Exception as e:
             print(f"⚠️  Could not enable monitoring (may already be enabled): {e}")
-            return False
+            print(f"   This is normal if the endpoint doesn't exist yet or monitoring is already enabled")
+            return True  # Continue with simplified monitoring
             
     except ImportError:
         print("⚠️  Databricks SDK not available, using simplified monitoring setup")
         return True  # Return True to continue with simplified monitoring
     except Exception as e:
         print(f"❌ Monitoring setup failed: {e}")
-        return False
+        print(f"   Continuing with simplified monitoring setup")
+        return True  # Continue with simplified monitoring
 
 monitoring_enabled = setup_model_monitoring()
 

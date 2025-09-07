@@ -662,8 +662,21 @@ def create_signature_for_detection_model():
     # Use infer_signature() - proven to work well
     from mlflow.models.signature import infer_signature
     
-    # Create sample input DataFrame for signature inference
-    sample_df = pd.DataFrame([reliable_input])
+    # Create sample inputs for both single and batch formats
+    # Single instance format (for direct API calls)
+    single_input = reliable_input.copy()
+    
+    # Batch format (for batch API calls)
+    batch_input = {
+        "instances": [reliable_input, reliable_input]  # Two instances for batch testing
+    }
+    
+    # Test batch prediction
+    print("   Testing batch prediction...")
+    batch_prediction = pyfunc_model.predict(None, batch_input)
+    
+    # Create sample input DataFrame for signature inference (use single format)
+    sample_df = pd.DataFrame([single_input])
     
     # Infer signature from actual inputs and outputs
     signature = infer_signature(sample_df, prediction)
@@ -679,7 +692,14 @@ def create_signature_for_detection_model():
     if os.path.exists(temp_config_path):
         os.remove(temp_config_path)
     
-    return signature, reliable_input
+    # Create comprehensive input example that shows both single and batch formats
+    input_example = {
+        "single_format": single_input,
+        "batch_format": batch_input,
+        "description": "This model supports both single instance and batch inputs"
+    }
+    
+    return signature, input_example
 
 signature, input_example = create_signature_for_detection_model()
 
@@ -1161,12 +1181,11 @@ def test_pyfunc_endpoint_comprehensive(endpoint_name):
     test_base64 = base64.b64encode(response.content).decode('utf-8')
     print(f"      Successfully converted image to base64 ({len(test_base64)} characters)")
     
+    # Use the correct single instance format that matches the signature
     payload_1 = {
-        "inputs": {
-            "image_base64": test_base64,
-            "confidence_threshold": 0.5,
-            "max_detections": 100
-        }
+        "image_base64": test_base64,
+        "confidence_threshold": 0.5,
+        "max_detections": 100
     }
     
     response_1 = requests.post(endpoint_url, json=payload_1, headers=headers, timeout=30)
@@ -1196,19 +1215,18 @@ def test_pyfunc_endpoint_comprehensive(endpoint_name):
     test_base64_2 = base64.b64encode(response_2.content).decode('utf-8')
     print(f"      Successfully converted second image to base64 ({len(test_base64_2)} characters)")
     
+    # Use the correct batch format that matches the signature
     payload_2 = {
-        "inputs": {
-            "instances": [
-                {
-                    "image_base64": test_base64,
-                    "confidence_threshold": 0.6
-                },
-                {
-                    "image_base64": test_base64_2,
-                    "confidence_threshold": 0.7
-                }
-            ]
-        }
+        "instances": [
+            {
+                "image_base64": test_base64,
+                "confidence_threshold": 0.6
+            },
+            {
+                "image_base64": test_base64_2,
+                "confidence_threshold": 0.7
+            }
+        ]
     }
     
     response_2 = requests.post(endpoint_url, json=payload_2, headers=headers, timeout=45)
@@ -1225,10 +1243,9 @@ def test_pyfunc_endpoint_comprehensive(endpoint_name):
     # Test 3: Error handling
     print("   Test 3: Error handling...")
     
+    # Test error handling with invalid input
     payload_3 = {
-        "inputs": {
-            "invalid_field": "test"
-        }
+        "invalid_field": "test"
     }
     
     response_3 = requests.post(endpoint_url, json=payload_3, headers=headers, timeout=30)
@@ -1297,12 +1314,11 @@ def performance_test_pyfunc_endpoint(endpoint_name, num_requests=10):
         test_base64 = base64.b64encode(response.content).decode('utf-8')
         print(f"   Successfully converted image to base64 ({len(test_base64)} characters)")
         
+        # Use the correct single instance format that matches the signature
         payload = {
-            "inputs": {
-                "image_base64": test_base64,
-                "confidence_threshold": 0.6,
-                "max_detections": 50
-            }
+            "image_base64": test_base64,
+            "confidence_threshold": 0.6,
+            "max_detections": 50
         }
         
         # Performance testing
@@ -1509,7 +1525,7 @@ def save_pyfunc_deployment_summary():
             'schema': SCHEMA,
             'registered_model_name': f"{CATALOG}.{SCHEMA}.{UNITY_CATALOG_MODEL_NAME}",
             'registry_uri': 'databricks-uc',
-            'model_validated': model_validated,
+            'model_validated': model_validation_passed,
             'model_promoted': model_promoted
         },
         'serving_info': {
@@ -1568,7 +1584,7 @@ def save_pyfunc_deployment_summary():
         "",
         "## Deployment Status",
         f"- Model Registered: {'✅' if model_info else '❌'}",
-        f"- Model Validated: {'✅' if model_validated else '❌'}",
+        f"- Model Validated: {'✅' if model_validation_passed else '❌'}",
         f"- Endpoint Created: {'✅' if endpoint_name else '❌'}",
         f"- Endpoint Ready: {'✅' if endpoint_ready else '❌'}",
         f"- Model Promoted: {'✅' if model_promoted else '❌'}",
@@ -1655,7 +1671,7 @@ print(f"\n📋 Deployment Status:")
 print(f"   Model Loaded: {'✅' if model else '❌'}")
 print(f"   Signature Created: {'✅' if signature else '❌'}")
 print(f"   Model Registered: {'✅' if model_info else '❌'}")
-print(f"   Model Validated: {'✅' if model_validated else '❌'}")
+print(f"   Model Validated: {'✅' if model_validation_passed else '❌'}")
 print(f"   Endpoint Created: {'✅' if endpoint_name else '❌'}")
 print(f"   Endpoint Ready: {'✅' if endpoint_ready else '❌'}")
 print(f"   Model Promoted: {'✅' if model_promoted else '❌'}")
@@ -1733,7 +1749,7 @@ completed_steps = sum([
     bool(model),
     bool(signature),
     bool(model_info),
-    bool(model_validated),
+    bool(model_validation_passed),
     bool(endpoint_name),
     bool(endpoint_ready),
     bool(model_promoted)

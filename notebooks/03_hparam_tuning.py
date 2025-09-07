@@ -61,7 +61,8 @@ import yaml
 import json
 
 # Add the src directory to Python path
-sys.path.append('/Workspace/Repos/your-repo/Databricks_CV_ref/src')
+PROJECT_ROOT = os.environ.get('PROJECT_ROOT', '/Workspace/Repos/your-repo/Databricks_CV_ref')
+sys.path.append(f'{PROJECT_ROOT}/src')
 
 from config import load_config, get_default_config
 from tasks.detection.model import DetectionModel
