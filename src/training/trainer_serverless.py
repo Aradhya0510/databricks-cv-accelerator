@@ -45,23 +45,21 @@ from utils.logging import VolumeCheckpoint, create_databricks_logger
 @dataclass
 class UnifiedTrainerConfig:
     """Configuration for the unified trainer."""
-    # Task and model info
+    # Required fields (no default values)
     task: str
     model_name: str
-    
-    # Training parameters
     max_epochs: int
     log_every_n_steps: int
     monitor_metric: str
     monitor_mode: str
     early_stopping_patience: int
+    checkpoint_dir: str
+    
+    # Optional fields (with default values)
     learning_rate: float = 1e-4
     weight_decay: float = 1e-5
     gradient_clip_val: float = 1.0
     accumulate_grad_batches: int = 1
-    
-    # Checkpoint settings
-    checkpoint_dir: str
     volume_checkpoint_dir: Optional[str] = None
     save_top_k: int = 3
     
