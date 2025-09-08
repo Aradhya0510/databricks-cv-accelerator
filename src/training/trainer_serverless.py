@@ -55,6 +55,10 @@ class UnifiedTrainerConfig:
     monitor_metric: str
     monitor_mode: str
     early_stopping_patience: int
+    learning_rate: float = 1e-4
+    weight_decay: float = 1e-5
+    gradient_clip_val: float = 1.0
+    accumulate_grad_batches: int = 1
     
     # Checkpoint settings
     checkpoint_dir: str
@@ -77,6 +81,22 @@ class UnifiedTrainerConfig:
     # Model and data configurations (for serverless GPU distributed training)
     data_config: Optional[Dict[str, Any]] = None
     model_config: Optional[Dict[str, Any]] = None
+    
+    # MLflow configuration
+    mlflow_experiment_name: Optional[str] = None
+    mlflow_run_name: Optional[str] = None
+    mlflow_tags: Optional[Dict[str, str]] = None
+    mlflow_autolog: bool = True
+    
+    # Output configuration
+    output_dir: Optional[str] = None
+    save_predictions: bool = False
+    save_metrics: bool = False
+    save_model: bool = True
+    model_save_path: Optional[str] = None
+    predictions_save_path: Optional[str] = None
+    metrics_save_path: Optional[str] = None
+    use_volume_checkpoints: bool = False
     
     def __post_init__(self):
         """Validate and set default values."""
