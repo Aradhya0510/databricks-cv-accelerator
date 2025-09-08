@@ -226,8 +226,6 @@ class UnifiedTrainerServerless:
     
     def train(self):
         """Train the model using either local or distributed training."""
-        self._init_trainer()
-        
         print("\n🚀 Starting training...")
         print(f"   Task: {self.config.task}")
         print(f"   Model: {self.config.model_name}")
@@ -244,6 +242,8 @@ class UnifiedTrainerServerless:
         
         try:
             if self.config.distributed and self.config.use_ray:
+                # Initialize trainer for Ray training
+                self._init_trainer()
                 # Use the LightningTrainer from Ray Train for multi-node
                 from ray.train.lightning import LightningTrainer
 
@@ -302,6 +302,7 @@ class UnifiedTrainerServerless:
                 result = distributed_train.distributed()
             else:
                 # Local or traditional distributed training
+                self._init_trainer()
                 self.trainer.fit(self.model, datamodule=self.data_module)
                 result = self.trainer.callback_metrics
 
