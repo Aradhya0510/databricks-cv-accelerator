@@ -79,12 +79,17 @@ training:
   log_every_n_steps: 50
   
   # Distributed training
-  distributed: false
+  distributed: true
   use_ray: false  # Set to true for multi-node training with Ray
+  use_serverless_gpu: true  # Set to true for Serverless GPU compute
   use_gpu: true
   resources_per_worker:
     CPU: 4
     GPU: 1
+  
+  # Serverless GPU specific settings (only used when use_serverless_gpu: true)
+  serverless_gpu_type: "A10"  # A10 or H100
+  serverless_gpu_count: 4  # Number of GPUs to use
 
 # MLflow Configuration
 mlflow:

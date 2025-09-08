@@ -228,21 +228,78 @@ training:
   checkpoint_dir: "/Volumes/your_catalog/your_schema/your_volume/checkpoints"
 ```
 
-### Step 4: Notebook Workflow
+### Step 4: Choose Your Compute Environment
 
-Follow the provided reference notebooks in sequence. For object detection, start by copying and customizing `detection_detr_config.yaml` to your Unity Catalog configs folder.
+The framework supports two compute environments for maximum flexibility:
 
-**Recommended Notebook Sequence:**
-1. **`00_setup_and_config.py`** - Environment validation and configuration setup
-2. **`01_data_preparation.py`** - Dataset analysis and preprocessing validation
-3. **`02_model_training.py`** - Model training with MLflow tracking
-4. **`03_hparam_tuning.py`** - Hyperparameter optimization (optional)
-5. **`04_model_evaluation.py`** - Comprehensive model evaluation
-6. **`05_model_registration_deployment.py`** - Model deployment and serving setup
+#### Option A: Standard Databricks Compute
+Use the standard notebooks and configurations for traditional Databricks compute:
+
+**Notebooks:** `notebooks/` directory
+**Configs:** `configs/` directory
+**Import:** `from config import load_config` and `from training.trainer import UnifiedTrainer`
+
+#### Option B: Serverless GPU Compute (Recommended)
+Use the serverless GPU notebooks and configurations for optimized deep learning workloads:
+
+**Notebooks:** `notebooks_serverless/` directory
+**Configs:** `configs_serverless/` directory
+**Import:** `from config_serverless import load_config` and `from training.trainer_serverless import UnifiedTrainerServerless`
+
+**Serverless GPU Benefits:**
+- 🚀 **Automatic environment management** with pre-configured ML frameworks
+- 💰 **Cost optimization** with pay-per-use pricing
+- ⚡ **Optimized GPU utilization** and automatic scaling
+- 🔧 **Interactive development** support for both interactive and batch workloads
+- 🎯 **A10 and H100 GPU support** with automatic distributed training setup
+
+### Step 5: Notebook Workflow
+
+Follow the provided reference notebooks in sequence. Choose the appropriate path based on your compute environment:
+
+**Standard Compute Notebook Sequence:**
+1. **`notebooks/00_setup_and_config.py`** - Environment validation and configuration setup
+2. **`notebooks/01_data_preparation.py`** - Dataset analysis and preprocessing validation
+3. **`notebooks/02_model_training.py`** - Model training with MLflow tracking
+4. **`notebooks/03_hparam_tuning.py`** - Hyperparameter optimization (optional)
+5. **`notebooks/04_model_evaluation.py`** - Comprehensive model evaluation
+6. **`notebooks/05_model_registration_deployment.py`** - Model deployment and serving setup
+
+**Serverless GPU Notebook Sequence:**
+1. **`notebooks_serverless/00_setup_and_config_serverless.py`** - Serverless GPU environment setup
+2. **`notebooks_serverless/01_data_preparation.py`** - Dataset analysis and preprocessing validation
+3. **`notebooks_serverless/02_model_training_serverless.py`** - Serverless GPU training with MLflow tracking
+4. **`notebooks_serverless/03_hparam_tuning.py`** - Hyperparameter optimization with serverless GPU
+5. **`notebooks_serverless/04_model_evaluation_serverless.py`** - Comprehensive model evaluation
+6. **`notebooks_serverless/05_model_registration_deployment.py`** - Model deployment and serving setup
+
+**Configuration Setup:**
+- **Standard:** Copy and customize configs from `configs/` directory
+- **Serverless GPU:** Copy and customize configs from `configs_serverless/` directory
 
 **Important:** Ensure your configuration parameters align with your available compute resources, particularly GPU memory, batch size, and training duration.
 
-### Step 5: MLflow Integration
+### Step 6: Serverless GPU Configuration (Optional)
+
+If using Serverless GPU compute, configure the following parameters in your `configs_serverless/` config files:
+
+```yaml
+training:
+  # Enable serverless GPU
+  use_serverless_gpu: true
+  distributed: true
+  use_ray: false  # Disabled when using serverless GPU
+  
+  # Serverless GPU specific settings
+  serverless_gpu_type: "A10"  # A10 or H100
+  serverless_gpu_count: 4     # Number of GPUs to use
+```
+
+**GPU Type Options:**
+- **A10**: Multi-node support, cost-effective for most workloads
+- **H100**: Single-node only, high-performance for large models
+
+### Step 7: MLflow Integration
 
 **Zero-Configuration MLflow Integration:** The framework uses Lightning's native MLflow integration for automatic experiment tracking, model registry, and serving.
 
@@ -381,6 +438,40 @@ We welcome contributions from the community! To contribute:
 For detailed information about each task module, see:
 * [Tasks Documentation](src/tasks/README.md) - Comprehensive guide to all task modules
 * [Improved Adapters Documentation](docs/IMPROVED_ADAPTERS.md) - Detailed adapter system documentation
+
+---
+
+## 🚀 Quick Start Guide
+
+### Standard Databricks Compute
+```bash
+# Use standard notebooks and configs
+notebooks/00_setup_and_config.py
+configs/detection_detr_config.yaml
+from config import load_config
+from training.trainer import UnifiedTrainer
+```
+
+### Serverless GPU Compute (Recommended)
+```bash
+# Use serverless notebooks and configs
+notebooks_serverless/00_setup_and_config_serverless.py
+configs_serverless/detection_detr_config.yaml
+from config_serverless import load_config
+from training.trainer_serverless import UnifiedTrainerServerless
+```
+
+### Key Differences
+| Feature | Standard Compute | Serverless GPU |
+|---------|------------------|----------------|
+| **Environment** | Traditional Databricks | Serverless GPU |
+| **Notebooks** | `notebooks/` | `notebooks_serverless/` |
+| **Configs** | `configs/` | `configs_serverless/` |
+| **Trainer** | `UnifiedTrainer` | `UnifiedTrainerServerless` |
+| **Config Module** | `config` | `config_serverless` |
+| **Distributed Training** | Ray or DDP | @distributed decorator |
+| **Cost Model** | Per-hour cluster | Pay-per-use GPU time |
+| **Environment Setup** | Manual | Automatic |
 
 ---
 

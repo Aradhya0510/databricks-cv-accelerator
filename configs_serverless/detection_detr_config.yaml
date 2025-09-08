@@ -1,14 +1,15 @@
 # Model Configuration
 model:
-  model_name: "facebook/mask2former-swin-base-coco-instance"
-  task_type: "instance_segmentation"
+  model_name: "facebook/detr-resnet-50"
+  task_type: "detection"
   num_classes: 80  # COCO dataset has 80 classes
   pretrained: true
   
-  # Segmentation-specific settings
-  segmentation_type: "instance"
-  aux_loss_weight: 0.4
-  mask_threshold: 0.5
+  # Detection-specific settings
+  confidence_threshold: 0.7
+  iou_threshold: 0.5
+  max_detections: 100
+  image_size: 800  # DETR's default image size
   
   # Training hyperparameters
   learning_rate: 1e-4
@@ -17,7 +18,6 @@ model:
   scheduler_params:
     T_max: 300
     eta_min: 1e-6
-  epochs: 300
 
 # Data Configuration
 data:
@@ -30,9 +30,9 @@ data:
   test_annotation_file: "/Volumes/<catalog>/<schema>/<volume>/<path>/data/instances_test2017.json"
   
   # Data loading parameters
-  batch_size: 8
+  batch_size: 16
   num_workers: 4
-  model_name: "facebook/mask2former-swin-base-coco-instance"  # For adapter initialization
+  model_name: "facebook/detr-resnet-50"  # For adapter initialization
   
   # Image processing
   image_size: [800, 800]
@@ -45,18 +45,13 @@ data:
     horizontal_flip: true
     vertical_flip: false
     rotation: 10
-    color_jitter:
-      brightness: 0.2
-      contrast: 0.2
-      saturation: 0.2
-      hue: 0.1
-    random_crop: true
-    random_resize: [0.8, 1.2]
+    brightness_contrast: 0.2
+    hue_saturation: 0.1
 
 # Training Configuration
 training:
   # Basic training parameters
-  max_epochs: 300
+  max_epochs: 50
   
   # Learning rate and optimization
   learning_rate: 1e-4
@@ -67,39 +62,37 @@ training:
     eta_min: 1e-6
   
   # Early stopping
-  early_stopping_patience: 30
+  early_stopping_patience: 20
   monitor_metric: "val_map"
   monitor_mode: "max"
   
   # Checkpointing
-  checkpoint_dir: "/Volumes/<catalog>/<schema>/<volume>/<path>/checkpoints/instance_segmentation"
+  checkpoint_dir: "/Volumes/<catalog>/<schema>/<volume>/<path>/checkpoints/detection"
+  volume_checkpoint_dir: "/Volumes/<catalog>/<schema>/<volume>/<path>/volume_checkpoints/detection"
   save_top_k: 3
   
   # Logging
   log_every_n_steps: 50
   
   # Distributed training
-  distributed: false
+  distributed: true
   use_ray: false  # Set to true for multi-node training with Ray
+  use_serverless_gpu: true  # Set to true for Serverless GPU compute
   use_gpu: true
+  num_workers: 1
   resources_per_worker:
     CPU: 4
     GPU: 1
-
-# MLflow Configuration
-mlflow:
-  experiment_name: "instance_segmentation_training"
-  run_name: "mask2former_swin_base"
-  log_model: true
-  tags:
-    framework: "lightning"
-    model: "mask2former"
-    dataset: "coco"
+  
+  # Serverless GPU specific settings (only used when use_serverless_gpu: true)
+  serverless_gpu_type: "A10"  # A10 or H100
+  serverless_gpu_count: 4  # Number of GPUs to use
 
 # Output Configuration
 output:
-  results_dir: "/Volumes/<catalog>/<schema>/<volume>/<path>/results/instance_segmentation"
+  results_dir: "/Volumes/<catalog>/<schema>/<volume>/<path>/results/detection"
   save_predictions: true
   visualization:
     save_images: true
-    max_images: 10 
+    confidence_threshold: 0.5
+    max_boxes: 20 

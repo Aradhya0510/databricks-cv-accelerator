@@ -80,6 +80,7 @@ training:
   
   # Distributed training
   distributed: false
+  use_ray: false  # Set to true for multi-node training with Ray
   use_gpu: true
   resources_per_worker:
     CPU: 4

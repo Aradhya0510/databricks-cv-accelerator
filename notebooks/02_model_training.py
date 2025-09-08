@@ -400,7 +400,8 @@ def setup_trainer_config():
             'checkpoint_dir': f"{BASE_VOLUME_PATH}/checkpoints",
             'volume_checkpoint_dir': f"{BASE_VOLUME_PATH}/volume_checkpoints",
             'save_top_k': 3,
-            'distributed': config['training']['distributed']
+            'distributed': config['training']['distributed'],
+            'use_ray': config['training'].get('use_ray', False)  # Default to False if not specified
         }
         
         print(f"✅ Trainer configuration setup complete!")
@@ -419,7 +420,8 @@ def setup_trainer_config():
             print(f"   Distributed training: {config['training']['distributed']}")
             
             if config['training']['distributed']:
-                print(f"   Strategy: DDP")
+                strategy = "Ray (multi-node)" if config['training'].get('use_ray', False) else "Databricks DDP (single-node)"
+                print(f"   Strategy: {strategy}")
                 print(f"   Sync batch norm: Enabled")
         
         return trainer_config

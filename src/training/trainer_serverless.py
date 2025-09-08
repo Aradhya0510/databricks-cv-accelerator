@@ -1,9 +1,9 @@
 """
-Unified trainer for computer vision tasks using Ray or Databricks DDP.
+Unified trainer for computer vision tasks using Databricks Serverless GPU compute.
 
-This module provides a unified training interface that supports both
-single-node distributed training (Databricks DDP) and multi-node
-distributed training (Ray) on Databricks.
+This module provides a unified training interface that leverages Databricks Serverless GPU
+compute for distributed training, allowing for interactive notebook-based multi-GPU training
+without the limitations of traditional Lightning DDP strategies.
 """
 
 import os
@@ -63,11 +63,16 @@ class UnifiedTrainerConfig:
     
     # Distributed training settings
     distributed: bool = False
-    use_ray: bool = False  # Whether to use Ray (multi-node) or Databricks DDP (single-node)
+    use_ray: bool = False  # Whether to use Ray (multi-node) or Serverless GPU (single-node)
+    use_serverless_gpu: bool = False  # Whether to use Serverless GPU compute
     num_workers: int = 1
     use_gpu: bool = True
     resources_per_worker: Dict[str, int] = field(default_factory=lambda: {"CPU": 1, "GPU": 1})
-    master_port: Optional[str] = None  # Optional master port for Databricks DDP
+    master_port: Optional[str] = None  # Optional master port for traditional DDP
+    
+    # Serverless GPU specific settings
+    serverless_gpu_type: str = "A10"  # A10 or H100
+    serverless_gpu_count: int = 4  # Number of GPUs to use
     
     def __post_init__(self):
         """Validate and set default values."""
@@ -78,9 +83,16 @@ class UnifiedTrainerConfig:
         # Validate distributed settings
         if self.distributed and self.use_ray and not self.use_gpu:
             raise ValueError("Ray distributed training requires GPU support")
+        
+        # Validate serverless GPU settings
+        if self.use_serverless_gpu and self.serverless_gpu_type not in ["A10", "H100"]:
+            raise ValueError("Serverless GPU type must be 'A10' or 'H100'")
+        
+        if self.use_serverless_gpu and self.serverless_gpu_type == "H100" and self.serverless_gpu_count > 1:
+            raise ValueError("H100 GPUs only support single-node workflows")
 
-class UnifiedTrainer:
-    """Unified trainer for computer vision tasks using Ray or Databricks DDP on Databricks."""
+class UnifiedTrainerServerless:
+    """Unified trainer for computer vision tasks using Databricks Serverless GPU compute."""
     
     def __init__(
         self,
@@ -99,7 +111,7 @@ class UnifiedTrainer:
         self.trainer = None
         
         self.logger = logger
-        print("✅ UnifiedTrainer initialized with simplified MLflow integration.")
+        print("✅ UnifiedTrainerServerless initialized with Serverless GPU support.")
     
     def _init_callbacks(self) -> List[pl.Callback]:
         """Initialize all necessary training callbacks."""
@@ -144,43 +156,27 @@ class UnifiedTrainer:
         print(f"✅ Total callbacks initialized: {len(callbacks)}")
         return callbacks
     
-    def _setup_databricks_ddp_environment(self):
-        """Set up Databricks-specific DDP environment variables and configurations."""
+    def _setup_serverless_gpu_environment(self):
+        """Set up environment for Serverless GPU compute."""
         try:
-            from pyspark.sql import SparkSession
-            import socket
+            # Check if serverless_gpu is available
+            from serverless_gpu import distributed
+            print("✅ Serverless GPU API available")
             
-            # Get Spark session for Databricks-specific configurations
-            spark = SparkSession.getActiveSession()
-            if spark is not None:
-                master_addr = spark.conf.get("spark.driver.host")
-                if master_addr:
-                    # Set up environment variables for distributed training
-                    os.environ.setdefault("NCCL_DEBUG", "WARN")
-                    os.environ["NCCL_SOCKET_IFNAME"] = "eth0"
-                    os.environ["MASTER_ADDR"] = master_addr
-                    
-                    # Use provided master port or find a free one
-                    if self.config.master_port:
-                        os.environ["MASTER_PORT"] = str(self.config.master_port)
-                    else:
-                        # Find a free port
-                        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
-                            s.bind(("", 0))
-                            free_port = s.getsockname()[1]
-                            os.environ["MASTER_PORT"] = str(free_port)
-                    
-                    print(f"🔧 Databricks DDP environment configured:")
-                    print(f"   MASTER_ADDR: {master_addr}")
-                    print(f"   MASTER_PORT: {os.environ['MASTER_PORT']}")
-                    print(f"   NCCL_SOCKET_IFNAME: eth0")
-                else:
-                    print("⚠️  Could not get spark.driver.host, using default DDP configuration")
-            else:
-                print("⚠️  No active Spark session found, using default DDP configuration")
-                
+            # Set up environment variables for better performance
+            os.environ.setdefault("NCCL_DEBUG", "WARN")
+            os.environ.setdefault("NCCL_SOCKET_IFNAME", "eth0")
+            
+            print(f"🔧 Serverless GPU environment configured:")
+            print(f"   GPU Type: {self.config.serverless_gpu_type}")
+            print(f"   GPU Count: {self.config.serverless_gpu_count}")
+            print(f"   NCCL_SOCKET_IFNAME: eth0")
+            
+        except ImportError:
+            raise ImportError("Serverless GPU API not available. Please ensure you're running on Databricks Serverless GPU compute.")
         except Exception as e:
-            print(f"⚠️  Databricks DDP setup failed: {e}, using default DDP configuration")
+            print(f"⚠️  Serverless GPU setup failed: {e}")
+            raise
     
     def _init_trainer(self):
         """Initialize the PyTorch Lightning trainer."""
@@ -205,16 +201,25 @@ class UnifiedTrainer:
                 })
                 self.trainer = pl.Trainer(**trainer_params)
                 self.trainer = prepare_trainer(self.trainer)  # Prepare for Ray
-            else:
-                # Use standard DDP strategy - requires Jobs compute for multi-GPU training
-                self._setup_databricks_ddp_environment()
+                print("✅ Using Ray strategy for multi-node training.")
+            elif self.config.use_serverless_gpu:
+                # Use Serverless GPU for distributed training
+                self._setup_serverless_gpu_environment()
+                # For serverless GPU, we'll use standard DDP since the environment handles distribution
                 trainer_params.update({
-                    "strategy": "ddp",  # Standard DDP strategy for Jobs compute
+                    "strategy": "ddp",
                     "sync_batchnorm": True
                 })
                 self.trainer = pl.Trainer(**trainer_params)
-                print("✅ Using DDP strategy for single-node multi-GPU training.")
-                print("⚠️  Note: Multi-GPU training requires Jobs compute (non-interactive environment).")
+                print("✅ Using DDP strategy with Serverless GPU compute.")
+            else:
+                # Fallback to traditional DDP (shouldn't be used in serverless context)
+                trainer_params.update({
+                    "strategy": "ddp",
+                    "sync_batchnorm": True
+                })
+                self.trainer = pl.Trainer(**trainer_params)
+                print("✅ Using traditional DDP strategy.")
         else:
             self.trainer = pl.Trainer(**trainer_params)
             print("✅ Using single-device training strategy.")
@@ -232,8 +237,10 @@ class UnifiedTrainer:
         if self.config.distributed:
             if self.config.use_ray:
                 print(f"   Strategy: Ray (multi-node)")
+            elif self.config.use_serverless_gpu:
+                print(f"   Strategy: Serverless GPU ({self.config.serverless_gpu_type} x{self.config.serverless_gpu_count})")
             else:
-                print(f"   Strategy: DDP with Databricks optimizations (single-node multi-GPU)")
+                print(f"   Strategy: Traditional DDP")
         
         try:
             if self.config.distributed and self.config.use_ray:
@@ -264,8 +271,37 @@ class UnifiedTrainer:
                     run_config=run_config
                 )
                 result = ray_trainer.fit()
+            elif self.config.distributed and self.config.use_serverless_gpu:
+                # Use Serverless GPU distributed training
+                from serverless_gpu import distributed
+                
+                @distributed(
+                    gpus=self.config.serverless_gpu_count, 
+                    gpu_type=self.config.serverless_gpu_type, 
+                    remote=True
+                )
+                def distributed_train():
+                    """Distributed training function for Serverless GPU."""
+                    # Initialize trainer for this distributed process
+                    trainer = pl.Trainer(
+                        max_epochs=self.config.max_epochs,
+                        accelerator="gpu",
+                        devices="auto",
+                        callbacks=self._init_callbacks(),
+                        log_every_n_steps=self.config.log_every_n_steps,
+                        logger=self.logger,
+                        strategy="ddp",
+                        sync_batchnorm=True
+                    )
+                    
+                    # Train the model
+                    trainer.fit(self.model, datamodule=self.data_module)
+                    return trainer.callback_metrics
+                
+                # Execute distributed training
+                result = distributed_train.distributed()
             else:
-                # Local or single-node multi-GPU training
+                # Local or traditional distributed training
                 self.trainer.fit(self.model, datamodule=self.data_module)
                 result = self.trainer.callback_metrics
 

@@ -115,6 +115,7 @@ class TrainingConfig:
     
     # Distributed training
     distributed: bool = False
+    use_ray: bool = False  # Whether to use Ray (multi-node) or Databricks DDP (single-node)
     use_gpu: bool = True
     resources_per_worker: Dict[str, int] = field(default_factory=lambda: {
         "CPU": 4,
@@ -185,7 +186,7 @@ def load_config(config_path: str) -> Dict[str, Any]:
                 config['training'][key] = float(config['training'][key])
         
         # Boolean fields
-        for key in ['distributed', 'use_gpu']:
+        for key in ['distributed', 'use_ray', 'use_gpu']:
             if key in config['training']:
                 config['training'][key] = bool(config['training'][key])
     

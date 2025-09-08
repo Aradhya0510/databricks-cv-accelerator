@@ -1,6 +1,9 @@
 # Development Environment Dependencies (Databricks ML Runtime)
 # Only includes packages NOT provided by DBR ML 16.4 LTS runtime
 
+# Core dependencies
+lightning==2.5.2
+
 # Training and optimization
 optuna>=3.2.0
 
@@ -29,7 +32,6 @@ numpy==1.26.4
 # Note: The following are provided by DBR ML runtime and don't need to be installed:
 # - torch, torchvision, torchmetrics
 # - transformers, tokenizers
-# - lightning
 # - numpy, pandas, pillow, requests
 # - opencv-python
 # - pyyaml, tqdm
