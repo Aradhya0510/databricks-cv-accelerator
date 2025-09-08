@@ -191,7 +191,7 @@ def load_config(config_path: str) -> Dict[str, Any]:
     if 'model' in config:
         # Integer fields
         for key in ['num_classes', 'epochs', 'max_detections', 'num_queries', 'image_size', 'num_workers']:
-            if key in config['model']:
+            if key in config['model'] and not isinstance(config['model'][key], list):
                 config['model'][key] = int(config['model'][key])
         
         # Float fields
@@ -206,13 +206,13 @@ def load_config(config_path: str) -> Dict[str, Any]:
     
     if 'data' in config:
         # Integer fields
-        for key in ['batch_size', 'num_workers', 'image_size']:
-            if key in config['data']:
+        for key in ['batch_size', 'num_workers']:
+            if key in config['data'] and not isinstance(config['data'][key], list):
                 config['data'][key] = int(config['data'][key])
         
         # Float fields
         for key in ['rotation', 'brightness', 'contrast', 'saturation', 'hue']:
-            if key in config['data']:
+            if key in config['data'] and not isinstance(config['data'][key], list):
                 config['data'][key] = float(config['data'][key])
         
         # Boolean fields
@@ -223,23 +223,18 @@ def load_config(config_path: str) -> Dict[str, Any]:
     if 'training' in config:
         # Integer fields
         for key in ['max_epochs', 'early_stopping_patience', 'save_top_k', 'log_every_n_steps', 'serverless_gpu_count', 'master_port', 'accumulate_grad_batches']:
-            if key in config['training']:
+            if key in config['training'] and not isinstance(config['training'][key], list):
                 config['training'][key] = int(config['training'][key])
         
         # Float fields
         for key in ['learning_rate', 'weight_decay', 'gradient_clip_val']:
-            if key in config['training']:
+            if key in config['training'] and not isinstance(config['training'][key], list):
                 config['training'][key] = float(config['training'][key])
         
         # Boolean fields
         for key in ['distributed', 'use_ray', 'use_serverless_gpu', 'use_gpu']:
             if key in config['training']:
                 config['training'][key] = bool(config['training'][key])
-        
-        # Integer fields for serverless GPU
-        for key in ['serverless_gpu_count']:
-            if key in config['training']:
-                config['training'][key] = int(config['training'][key])
     
     return config
 
