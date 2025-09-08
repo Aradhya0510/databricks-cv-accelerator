@@ -275,31 +275,127 @@ class UnifiedTrainerServerless:
                 # Use Serverless GPU distributed training
                 from serverless_gpu import distributed
                 
+                # Serialize only the configuration, not the large objects
+                config_dict = {
+                    'task': self.config.task,
+                    'model_name': self.config.model_name,
+                    'max_epochs': self.config.max_epochs,
+                    'log_every_n_steps': self.config.log_every_n_steps,
+                    'monitor_metric': self.config.monitor_metric,
+                    'checkpoint_dir': self.config.checkpoint_dir,
+                    'early_stopping_patience': self.config.early_stopping_patience,
+                    'save_top_k': self.config.save_top_k,
+                    'learning_rate': self.config.learning_rate,
+                    'weight_decay': self.config.weight_decay,
+                    'gradient_clip_val': self.config.gradient_clip_val,
+                    'accumulate_grad_batches': self.config.accumulate_grad_batches,
+                    'use_gpu': self.config.use_gpu,
+                    'distributed': self.config.distributed,
+                    'use_serverless_gpu': self.config.use_serverless_gpu,
+                    'serverless_gpu_type': self.config.serverless_gpu_type,
+                    'serverless_gpu_count': self.config.serverless_gpu_count,
+                    'use_ray': self.config.use_ray,
+                    'num_workers': self.config.num_workers,
+                    'master_port': self.config.master_port,
+                    'mlflow_experiment_name': self.config.mlflow_experiment_name,
+                    'mlflow_run_name': self.config.mlflow_run_name,
+                    'mlflow_tags': self.config.mlflow_tags,
+                    'mlflow_autolog': self.config.mlflow_autolog,
+                    'output_dir': self.config.output_dir,
+                    'save_predictions': self.config.save_predictions,
+                    'save_metrics': self.config.save_metrics,
+                    'save_model': self.config.save_model,
+                    'model_save_path': self.config.model_save_path,
+                    'predictions_save_path': self.config.predictions_save_path,
+                    'metrics_save_path': self.config.metrics_save_path,
+                    'volume_checkpoint_dir': self.config.volume_checkpoint_dir,
+                    'use_volume_checkpoints': self.config.use_volume_checkpoints,
+                    'data_config': self.data_config,
+                    'model_config': self.model_config
+                }
+                
                 @distributed(
                     gpus=self.config.serverless_gpu_count, 
                     gpu_type=self.config.serverless_gpu_type, 
                     remote=True
                 )
-                def distributed_train():
+                def distributed_train(config_dict):
                     """Distributed training function for Serverless GPU."""
+                    import pytorch_lightning as pl
+                    from src.tasks import get_task_module
+                    from src.utils.logging import setup_mlflow_logger
+                    
+                    # Recreate the model and data module inside the distributed function
+                    task_module = get_task_module(config_dict['task'])
+                    
+                    # Get the correct model and data module classes based on task
+                    if config_dict['task'] == 'classification':
+                        model = task_module.ClassificationModel(config_dict['model_config'])
+                        data_module = task_module.ClassificationDataModule(config_dict['data_config'])
+                    elif config_dict['task'] == 'detection':
+                        model = task_module.DetectionModel(config_dict['model_config'])
+                        data_module = task_module.DetectionDataModule(config_dict['data_config'])
+                    elif config_dict['task'] == 'semantic_segmentation':
+                        model = task_module.SemanticSegmentationModel(config_dict['model_config'])
+                        data_module = task_module.SemanticSegmentationDataModule(config_dict['data_config'])
+                    elif config_dict['task'] == 'instance_segmentation':
+                        model = task_module.InstanceSegmentationModel(config_dict['model_config'])
+                        data_module = task_module.InstanceSegmentationDataModule(config_dict['data_config'])
+                    elif config_dict['task'] == 'universal_segmentation':
+                        model = task_module.UniversalSegmentationModel(config_dict['model_config'])
+                        data_module = task_module.UniversalSegmentationDataModule(config_dict['data_config'])
+                    else:
+                        raise ValueError(f"Unsupported task: {config_dict['task']}")
+                    
+                    # Setup logger
+                    logger = setup_mlflow_logger(
+                        experiment_name=config_dict['mlflow_experiment_name'],
+                        run_name=config_dict['mlflow_run_name'],
+                        tags=config_dict['mlflow_tags'],
+                        autolog=config_dict['mlflow_autolog']
+                    )
+                    
+                    # Initialize callbacks
+                    callbacks = []
+                    if config_dict['checkpoint_dir']:
+                        from pytorch_lightning.callbacks import ModelCheckpoint, EarlyStopping, LearningRateMonitor
+                        callbacks.append(ModelCheckpoint(
+                            dirpath=config_dict['checkpoint_dir'],
+                            monitor=config_dict['monitor_metric'],
+                            mode='max',
+                            save_top_k=config_dict['save_top_k'],
+                            save_last=True
+                        ))
+                        callbacks.append(EarlyStopping(
+                            monitor=config_dict['monitor_metric'],
+                            patience=config_dict['early_stopping_patience'],
+                            mode='max'
+                        ))
+                        callbacks.append(LearningRateMonitor(logging_interval='step'))
+                    
+                    # Add volume checkpoint callback if enabled
+                    if config_dict.get('use_volume_checkpoints', False) and config_dict.get('volume_checkpoint_dir'):
+                        from src.utils.logging import VolumeCheckpoint
+                        callbacks.append(VolumeCheckpoint(config_dict['volume_checkpoint_dir']))
+                    
                     # Initialize trainer for this distributed process
                     trainer = pl.Trainer(
-                        max_epochs=self.config.max_epochs,
+                        max_epochs=config_dict['max_epochs'],
                         accelerator="gpu",
                         devices="auto",
-                        callbacks=self._init_callbacks(),
-                        log_every_n_steps=self.config.log_every_n_steps,
-                        logger=self.logger,
+                        callbacks=callbacks,
+                        log_every_n_steps=config_dict['log_every_n_steps'],
+                        logger=logger,
                         strategy="ddp",
                         sync_batchnorm=True
                     )
                     
                     # Train the model
-                    trainer.fit(self.model, datamodule=self.data_module)
+                    trainer.fit(model, datamodule=data_module)
                     return trainer.callback_metrics
                 
                 # Execute distributed training
-                result = distributed_train.distributed()
+                result = distributed_train.distributed(config_dict)
             else:
                 # Local or traditional distributed training
                 self._init_trainer()
