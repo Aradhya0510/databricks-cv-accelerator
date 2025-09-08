@@ -235,7 +235,9 @@ def setup_serverless_trainer():
         'distributed': config['training']['distributed'],
         'use_serverless_gpu': config['training']['use_serverless_gpu'],
         'serverless_gpu_type': config['training']['serverless_gpu_type'],
-        'serverless_gpu_count': config['training']['serverless_gpu_count']
+        'serverless_gpu_count': config['training']['serverless_gpu_count'],
+        'data_config': config['data'],
+        'model_config': config['model']
     }
     
     # Create experiment name using Databricks user pattern

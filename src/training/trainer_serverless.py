@@ -74,6 +74,10 @@ class UnifiedTrainerConfig:
     serverless_gpu_type: str = "A10"  # A10 or H100
     serverless_gpu_count: int = 4  # Number of GPUs to use
     
+    # Model and data configurations (for serverless GPU distributed training)
+    data_config: Optional[Dict[str, Any]] = None
+    model_config: Optional[Dict[str, Any]] = None
+    
     def __post_init__(self):
         """Validate and set default values."""
         os.makedirs(self.checkpoint_dir, exist_ok=True)
@@ -103,8 +107,16 @@ class UnifiedTrainerServerless:
     ):
         """Initialize the trainer with a config, model, data, and optionally a logger."""
         if isinstance(config, dict):
+            # Store the original config dict to access data_config and model_config
+            self.original_config = config
             config = UnifiedTrainerConfig(**config)
+        else:
+            self.original_config = None
         self.config = config
+        
+        # Store data_config and model_config for distributed training
+        self.data_config = self.config.data_config
+        self.model_config = self.config.model_config
         
         self.model = model
         self.data_module = data_module
