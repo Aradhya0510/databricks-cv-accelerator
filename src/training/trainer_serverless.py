@@ -349,64 +349,9 @@ class UnifiedTrainerServerless:
                     gpu_type=self.config.serverless_gpu_type, 
                     remote=True
                 )
-                def distributed_train(config_dict):
+                def distributed_train(model, data_module, callbacks, logger, config_dict):
                     """Distributed training function for Serverless GPU."""
-                    import pytorch_lightning as pl
-                    from src.tasks import get_task_module
-                    from src.utils.logging import setup_mlflow_logger
-                    
-                    # Recreate the model and data module inside the distributed function
-                    task_module = get_task_module(config_dict['task'])
-                    
-                    # Get the correct model and data module classes based on task
-                    if config_dict['task'] == 'classification':
-                        model = task_module.ClassificationModel(config_dict['model_config'])
-                        data_module = task_module.ClassificationDataModule(config_dict['data_config'])
-                    elif config_dict['task'] == 'detection':
-                        model = task_module.DetectionModel(config_dict['model_config'])
-                        data_module = task_module.DetectionDataModule(config_dict['data_config'])
-                    elif config_dict['task'] == 'semantic_segmentation':
-                        model = task_module.SemanticSegmentationModel(config_dict['model_config'])
-                        data_module = task_module.SemanticSegmentationDataModule(config_dict['data_config'])
-                    elif config_dict['task'] == 'instance_segmentation':
-                        model = task_module.InstanceSegmentationModel(config_dict['model_config'])
-                        data_module = task_module.InstanceSegmentationDataModule(config_dict['data_config'])
-                    elif config_dict['task'] == 'universal_segmentation':
-                        model = task_module.UniversalSegmentationModel(config_dict['model_config'])
-                        data_module = task_module.UniversalSegmentationDataModule(config_dict['data_config'])
-                    else:
-                        raise ValueError(f"Unsupported task: {config_dict['task']}")
-                    
-                    # Setup logger
-                    logger = setup_mlflow_logger(
-                        experiment_name=config_dict['mlflow_experiment_name'],
-                        run_name=config_dict['mlflow_run_name'],
-                        tags=config_dict['mlflow_tags'],
-                        autolog=config_dict['mlflow_autolog']
-                    )
-                    
-                    # Initialize callbacks
-                    callbacks = []
-                    if config_dict['checkpoint_dir']:
-                        from pytorch_lightning.callbacks import ModelCheckpoint, EarlyStopping, LearningRateMonitor
-                        callbacks.append(ModelCheckpoint(
-                            dirpath=config_dict['checkpoint_dir'],
-                            monitor=config_dict['monitor_metric'],
-                            mode='max',
-                            save_top_k=config_dict['save_top_k'],
-                            save_last=True
-                        ))
-                        callbacks.append(EarlyStopping(
-                            monitor=config_dict['monitor_metric'],
-                            patience=config_dict['early_stopping_patience'],
-                            mode='max'
-                        ))
-                        callbacks.append(LearningRateMonitor(logging_interval='step'))
-                    
-                    # Add volume checkpoint callback if enabled
-                    if config_dict.get('use_volume_checkpoints', False) and config_dict.get('volume_checkpoint_dir'):
-                        from src.utils.logging import VolumeCheckpoint
-                        callbacks.append(VolumeCheckpoint(config_dict['volume_checkpoint_dir']))
+                    import lightning as pl
                     
                     # Initialize trainer for this distributed process
                     trainer = pl.Trainer(
@@ -425,7 +370,14 @@ class UnifiedTrainerServerless:
                     return trainer.callback_metrics
                 
                 # Execute distributed training
-                result = distributed_train.distributed(config_dict)
+                # Pass the objects directly - clean and simple approach
+                result = distributed_train.distributed(
+                    self.model,           # Pass the model object
+                    self.data_module,     # Pass the data module object
+                    self._init_callbacks(), # Pass the callbacks
+                    self.logger,          # Pass the logger
+                    config_dict           # Pass the config
+                )
             else:
                 # Local or traditional distributed training
                 self._init_trainer()
