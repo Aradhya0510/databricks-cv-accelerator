@@ -37,7 +37,24 @@
 # COMMAND ----------
 
 # MAGIC %md
-# MAGIC ## 1. Import Dependencies and Load Configuration
+# MAGIC ## 1. Setup Serverless GPU Environment
+# MAGIC 
+# MAGIC **Important**: Before running this notebook, you need to configure the Serverless GPU environment to include your workspace:
+# MAGIC 
+# MAGIC 1. **Select Serverless GPU**: From the notebook's compute selector, select **Serverless GPU**
+# MAGIC 2. **Open Environment Panel**: Click the ⚙️ to open the **Environment** side panel
+# MAGIC 3. **Add Workspace Path**: In the **Dependencies** section, add your workspace path:
+# MAGIC    - Click **Add dependency**
+# MAGIC    - Select **Workspace** 
+# MAGIC    - Enter: `/Workspace/Users/your_username/Computer Vision/databricks-cv-accelerator`
+# MAGIC 4. **Apply Changes**: Click **Apply** and then **Confirm**
+# MAGIC 
+# MAGIC This makes the `src/` directory available in the serverless GPU environment, allowing the distributed training to import your custom modules.
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC ## 2. Import Dependencies and Load Configuration
 
 # COMMAND ----------
 
@@ -50,13 +67,19 @@ import numpy as np
 import matplotlib.pyplot as plt
 from pathlib import Path
 
-# Add the src directory to Python path
-sys.path.append('/Workspace/Repos/your-repo/Databricks_CV_ref/src')
+# Add the workspace to Python path for serverless GPU environment
+# This ensures the src/ directory is available for imports
+workspace_path = "/Workspace/Users/<your_username>/Computer Vision/databricks-cv-accelerator"
+if workspace_path not in sys.path:
+    sys.path.append(workspace_path)
+    print(f"✅ Added workspace to Python path: {workspace_path}")
+else:
+    print(f"✅ Workspace already in Python path: {workspace_path}")
 
-from config_serverless import load_config
-from tasks.detection.model import DetectionModel
-from tasks.detection.data import DetectionDataModule
-from training.trainer_serverless import UnifiedTrainerServerless
+from src.config_serverless import load_config
+from src.tasks.detection.model import DetectionModel
+from src.tasks.detection.data import DetectionDataModule
+from src.training.trainer_serverless import UnifiedTrainerServerless
 from lightning.pytorch.loggers import MLFlowLogger
 
 # Load configuration from previous notebooks
