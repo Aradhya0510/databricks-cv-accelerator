@@ -244,7 +244,7 @@ Use the serverless GPU notebooks and configurations for optimized deep learning 
 
 **Notebooks:** `notebooks_serverless/` directory
 **Configs:** `configs_serverless/` directory
-**Import:** `from config_serverless import load_config` and `from training.trainer_serverless import UnifiedTrainerServerless`
+**Import:** `from config_serverless import load_config` and `from training.trainer import UnifiedTrainer`
 
 **Serverless GPU Benefits:**
 - 🚀 **Automatic environment management** with pre-configured ML frameworks
@@ -458,7 +458,7 @@ from training.trainer import UnifiedTrainer
 notebooks_serverless/00_setup_and_config_serverless.py
 configs_serverless/detection_detr_config.yaml
 from config_serverless import load_config
-from training.trainer_serverless import UnifiedTrainerServerless
+from training.trainer import UnifiedTrainer
 ```
 
 ### Key Differences
@@ -467,7 +467,7 @@ from training.trainer_serverless import UnifiedTrainerServerless
 | **Environment** | Traditional Databricks | Serverless GPU |
 | **Notebooks** | `notebooks/` | `notebooks_serverless/` |
 | **Configs** | `configs/` | `configs_serverless/` |
-| **Trainer** | `UnifiedTrainer` | `UnifiedTrainerServerless` |
+| **Trainer** | `UnifiedTrainer` | `UnifiedTrainer` (with `@distributed`) |
 | **Config Module** | `config` | `config_serverless` |
 | **Distributed Training** | Ray or DDP | @distributed decorator |
 | **Cost Model** | Per-hour cluster | Pay-per-use GPU time |

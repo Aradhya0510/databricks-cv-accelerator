@@ -1,7 +1,7 @@
 """
 Configuration validator for the Serverless GPU training approach.
 
-This utility helps ensure config files are compatible with the UnifiedTrainerServerless
+This utility helps ensure config files are compatible with serverless GPU training
 and provides validation for the Serverless GPU training approach.
 """
 
@@ -9,7 +9,7 @@ import os
 from dataclasses import fields
 from typing import Any, Dict, List, Optional
 
-from training.trainer_serverless import UnifiedTrainerServerless
+from training.trainer import UnifiedTrainer
 
 
 def validate_config_for_serverless_gpu(config: Dict[str, Any]) -> Dict[str, Any]:
@@ -30,7 +30,7 @@ def validate_config_for_serverless_gpu(config: Dict[str, Any]) -> Dict[str, Any]
     # Create a copy to avoid modifying the original
     validated_config = config.copy()
     
-    # 1. Check for required UnifiedTrainerServerless fields
+    # 1. Check for required serverless GPU fields
     required_fields = {
         'task': 'model.task_type',
         'model_name': 'model.model_name', 
