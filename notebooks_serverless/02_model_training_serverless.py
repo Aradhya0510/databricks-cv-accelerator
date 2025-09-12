@@ -403,15 +403,11 @@ from serverless_gpu import distributed
     gpu_type=config['training']['serverless_gpu_type'], 
     remote=True
 )
-def distributed_train(config_dict):
+def distributed_train(config_dict, DetectionModel, DetectionDataModule, UnifiedTrainer, MLFlowLogger):
     """Distributed training function for Serverless GPU using UnifiedTrainer."""
     import lightning as pl
-    from src.tasks.detection.model import DetectionModel
-    from src.tasks.detection.data import DetectionDataModule
-    from src.training.trainer import UnifiedTrainer
-    from lightning.pytorch.loggers import MLFlowLogger
     
-    # Create model and data module inside distributed function
+    # Create model and data module inside distributed function using passed classes
     model = DetectionModel(config_dict['model_config'])
     data_module = DetectionDataModule(config_dict['data_config'])
     
@@ -451,8 +447,14 @@ try:
         print("✅ Serverless GPU configuration ready.")
         print("🚀 Starting distributed training...")
         
-        # Run distributed training
-        distributed_result = distributed_train.distributed(result['config'])
+        # Run distributed training - pass the class definitions
+        distributed_result = distributed_train.distributed(
+            result['config'],
+            DetectionModel,
+            DetectionDataModule, 
+            UnifiedTrainer,
+            MLFlowLogger
+        )
         
         print("\n✅ Distributed training completed successfully!")
         print(f"Final metrics: {distributed_result}")
