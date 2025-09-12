@@ -33,6 +33,7 @@ sys.path.append('/Workspace/Repos/your-repo/Databricks_CV_ref/src')
 from config_serverless import load_config
 from tasks.detection.model import DetectionModel
 from tasks.detection.data import DetectionDataModule
+from tasks.detection.adapters import get_input_adapter
 from training.trainer import UnifiedTrainer
 
 # COMMAND ----------
@@ -175,14 +176,33 @@ from serverless_gpu import distributed
     gpu_type=config['training']['serverless_gpu_type'], 
     remote=True
 )
-def distributed_train(config_dict, DetectionModel, DetectionDataModule, UnifiedTrainer):
+def distributed_train(config_dict, DetectionModel, DetectionDataModule, UnifiedTrainer, get_input_adapter):
     """Distributed training function for Serverless GPU using UnifiedTrainer."""
     import lightning as pl
     from lightning.pytorch.loggers import MLFlowLogger
     
-    # Create model and data module inside distributed function using passed classes
-    model = DetectionModel(config_dict['model_config'])
+    # Setup model with proper configuration (like setup_model function)
+    model_config = config_dict['model_config'].copy()
+    model_config["num_workers"] = config_dict['data_config']["num_workers"]
+    model = DetectionModel(model_config)
+    
+    # Setup data module with adapter (like setup_data_module function)
+    adapter = get_input_adapter(
+        config_dict['model_config']["model_name"], 
+        image_size=config_dict['data_config'].get("image_size", 800)
+    )
+    
+    if adapter is None:
+        raise ValueError(f"Could not create adapter for model: {config_dict['model_config']['model_name']}")
+    
+    # Create data module with data config only
     data_module = DetectionDataModule(config_dict['data_config'])
+    
+    # Assign adapter to data module (CRITICAL!)
+    data_module.adapter = adapter
+    
+    # Setup the data module to create datasets (CRITICAL!)
+    data_module.setup()
     
     # Create logger
     logger = MLFlowLogger(
@@ -216,12 +236,13 @@ try:
     print("✅ Serverless GPU configuration ready.")
     print("🚀 Starting distributed training...")
     
-    # Run distributed training directly - pass the class definitions
+    # Run distributed training directly - pass the class definitions and functions
     distributed_result = distributed_train.distributed(
         trainer_config,
         DetectionModel,
         DetectionDataModule, 
-        UnifiedTrainer
+        UnifiedTrainer,
+        get_input_adapter
     )
     
     print("\n✅ Distributed training completed successfully!")
