@@ -79,7 +79,6 @@ else:
 from src.config_serverless import load_config
 from src.tasks.detection.model import DetectionModel
 from src.tasks.detection.data import DetectionDataModule
-from src.training.trainer_serverless import UnifiedTrainerServerless
 from src.training.trainer import UnifiedTrainer
 from lightning.pytorch.loggers import MLFlowLogger
 
@@ -285,15 +284,7 @@ def setup_serverless_trainer():
         }
     )
     
-    # Create serverless trainer
-    unified_trainer = UnifiedTrainerServerless(
-        config=trainer_config,
-        model=model,
-        data_module=data_module,
-        logger=logger
-    )
-    
-    print(f"✅ Serverless trainer initialized")
+    print(f"✅ Serverless training components initialized")
     print(f"   Task: {config['model']['task_type']}")
     print(f"   Model: {config['model']['model_name']}")
     print(f"   Max epochs: {config['training']['max_epochs']}")
@@ -303,9 +294,9 @@ def setup_serverless_trainer():
     print(f"   GPU Type: {config['training']['serverless_gpu_type']}")
     print(f"   GPU Count: {config['training']['serverless_gpu_count']}")
     
-    return unified_trainer, logger
+    return model, data_module, logger, trainer_config
 
-unified_trainer, logger = setup_serverless_trainer()
+model, data_module, logger, trainer_config = setup_serverless_trainer()
 
 # COMMAND ----------
 
@@ -440,27 +431,20 @@ print("🎯 Starting Serverless GPU training...")
 print("=" * 60)
 
 try:
-    # Get configuration from UnifiedTrainerServerless
-    result = unified_trainer.train()
+    print("✅ Serverless GPU configuration ready.")
+    print("🚀 Starting distributed training...")
     
-    if result.get('status') == 'serverless_gpu_ready':
-        print("✅ Serverless GPU configuration ready.")
-        print("🚀 Starting distributed training...")
-        
-        # Run distributed training - pass the class definitions
-        distributed_result = distributed_train.distributed(
-            result['config'],
-            DetectionModel,
-            DetectionDataModule, 
-            UnifiedTrainer,
-            MLFlowLogger
-        )
-        
-        print("\n✅ Distributed training completed successfully!")
-        print(f"Final metrics: {distributed_result}")
-    else:
-        print("\n✅ Training completed successfully!")
-        print(f"Final metrics: {result}")
+    # Run distributed training directly - pass the class definitions
+    distributed_result = distributed_train.distributed(
+        trainer_config,
+        DetectionModel,
+        DetectionDataModule, 
+        UnifiedTrainer,
+        MLFlowLogger
+    )
+    
+    print("\n✅ Distributed training completed successfully!")
+    print(f"Final metrics: {distributed_result}")
     
 except Exception as e:
     print(f"\n❌ Training failed: {e}")

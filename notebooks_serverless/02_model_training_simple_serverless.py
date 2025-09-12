@@ -33,7 +33,7 @@ sys.path.append('/Workspace/Repos/your-repo/Databricks_CV_ref/src')
 from config_serverless import load_config
 from tasks.detection.model import DetectionModel
 from tasks.detection.data import DetectionDataModule
-from training.trainer_serverless import UnifiedTrainerServerless
+from training.trainer import UnifiedTrainer
 
 # COMMAND ----------
 
@@ -157,16 +157,50 @@ trainer_config = {
     'serverless_gpu_count': config['training']['serverless_gpu_count']
 }
 
-# Create serverless trainer
-unified_trainer = UnifiedTrainerServerless(
-    config=trainer_config,
-    model=model,
-    data_module=data_module
-)
-
-print("✅ Serverless trainer created")
+print("✅ Serverless training components created")
 print(f"   GPU Type: {config['training']['serverless_gpu_type']}")
 print(f"   GPU Count: {config['training']['serverless_gpu_count']}")
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC ### Define Distributed Training Function
+
+# COMMAND ----------
+
+from serverless_gpu import distributed
+
+@distributed(
+    gpus=config['training']['serverless_gpu_count'], 
+    gpu_type=config['training']['serverless_gpu_type'], 
+    remote=True
+)
+def distributed_train(config_dict, DetectionModel, DetectionDataModule, UnifiedTrainer):
+    """Distributed training function for Serverless GPU using UnifiedTrainer."""
+    import lightning as pl
+    from lightning.pytorch.loggers import MLFlowLogger
+    
+    # Create model and data module inside distributed function using passed classes
+    model = DetectionModel(config_dict['model_config'])
+    data_module = DetectionDataModule(config_dict['data_config'])
+    
+    # Create logger
+    logger = MLFlowLogger(
+        experiment_name=config_dict.get('mlflow_experiment_name', 'serverless-gpu-simple-training'),
+        run_name=config_dict.get('mlflow_run_name', 'simple-distributed-training'),
+        tags=config_dict.get('mlflow_tags', {})
+    )
+    
+    # Create UnifiedTrainer and run training
+    trainer = UnifiedTrainer(
+        config=config_dict,
+        model=model,
+        data_module=data_module,
+        logger=logger
+    )
+    
+    # Run training using the existing UnifiedTrainer
+    return trainer.train()
 
 # COMMAND ----------
 
@@ -179,11 +213,19 @@ print("🎯 Starting simple serverless GPU training...")
 print("=" * 50)
 
 try:
-    # Start training
-    result = unified_trainer.train()
+    print("✅ Serverless GPU configuration ready.")
+    print("🚀 Starting distributed training...")
     
-    print("\n✅ Training completed successfully!")
-    print(f"Final metrics: {result}")
+    # Run distributed training directly - pass the class definitions
+    distributed_result = distributed_train.distributed(
+        trainer_config,
+        DetectionModel,
+        DetectionDataModule, 
+        UnifiedTrainer
+    )
+    
+    print("\n✅ Distributed training completed successfully!")
+    print(f"Final metrics: {distributed_result}")
     
 except Exception as e:
     print(f"\n❌ Training failed: {e}")
