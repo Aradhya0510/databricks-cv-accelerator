@@ -80,6 +80,7 @@ from src.config_serverless import load_config
 from src.tasks.detection.model import DetectionModel
 from src.tasks.detection.data import DetectionDataModule
 from src.training.trainer_serverless import UnifiedTrainerServerless
+from src.training.trainer import UnifiedTrainer
 from lightning.pytorch.loggers import MLFlowLogger
 
 # Load configuration from previous notebooks
@@ -391,6 +392,50 @@ clear_gpu_memory()
 # COMMAND ----------
 
 # MAGIC %md
+# MAGIC ### Define Distributed Training Function
+
+# COMMAND ----------
+
+from serverless_gpu import distributed
+
+@distributed(
+    gpus=config['training']['serverless_gpu_count'], 
+    gpu_type=config['training']['serverless_gpu_type'], 
+    remote=True
+)
+def distributed_train(config_dict):
+    """Distributed training function for Serverless GPU using UnifiedTrainer."""
+    import lightning as pl
+    from src.tasks.detection.model import DetectionModel
+    from src.tasks.detection.data import DetectionDataModule
+    from src.training.trainer import UnifiedTrainer
+    from lightning.pytorch.loggers import MLFlowLogger
+    
+    # Create model and data module inside distributed function
+    model = DetectionModel(config_dict['model_config'])
+    data_module = DetectionDataModule(config_dict['data_config'])
+    
+    # Create logger
+    logger = MLFlowLogger(
+        experiment_name=config_dict.get('mlflow_experiment_name', 'serverless-gpu-training'),
+        run_name=config_dict.get('mlflow_run_name', 'distributed-training'),
+        tags=config_dict.get('mlflow_tags', {})
+    )
+    
+    # Create UnifiedTrainer and run training
+    trainer = UnifiedTrainer(
+        config=config_dict,
+        model=model,
+        data_module=data_module,
+        logger=logger
+    )
+    
+    # Run training using the existing UnifiedTrainer
+    return trainer.train()
+
+# COMMAND ----------
+
+# MAGIC %md
 # MAGIC ### Launch Training
 
 # COMMAND ----------
@@ -399,11 +444,21 @@ print("🎯 Starting Serverless GPU training...")
 print("=" * 60)
 
 try:
-    # Start training
+    # Get configuration from UnifiedTrainerServerless
     result = unified_trainer.train()
     
-    print("\n✅ Training completed successfully!")
-    print(f"Final metrics: {result}")
+    if result.get('status') == 'serverless_gpu_ready':
+        print("✅ Serverless GPU configuration ready.")
+        print("🚀 Starting distributed training...")
+        
+        # Run distributed training
+        distributed_result = distributed_train.distributed(result['config'])
+        
+        print("\n✅ Distributed training completed successfully!")
+        print(f"Final metrics: {distributed_result}")
+    else:
+        print("\n✅ Training completed successfully!")
+        print(f"Final metrics: {result}")
     
 except Exception as e:
     print(f"\n❌ Training failed: {e}")

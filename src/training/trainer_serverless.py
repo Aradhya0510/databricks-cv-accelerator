@@ -302,18 +302,24 @@ class UnifiedTrainerServerless:
                 )
                 result = ray_trainer.fit()
             elif self.config.distributed and self.config.use_serverless_gpu:
-                # Use Serverless GPU distributed training
-                from serverless_gpu import distributed
+                # For serverless GPU training, the @distributed function should be defined
+                # in the notebook where imports are available. This trainer just provides
+                # the configuration and objects for the notebook to use.
+                print("✅ Serverless GPU configuration ready.")
+                print("   Note: Use the @distributed function in your notebook to run training.")
+                print("   The @distributed function should import and use UnifiedTrainer.")
                 
-                # Serialize only the configuration, not the large objects
+                # Return the configuration for the notebook to use
                 config_dict = {
                     'task': self.config.task,
                     'model_name': self.config.model_name,
                     'max_epochs': self.config.max_epochs,
                     'log_every_n_steps': self.config.log_every_n_steps,
                     'monitor_metric': self.config.monitor_metric,
-                    'checkpoint_dir': self.config.checkpoint_dir,
+                    'monitor_mode': self.config.monitor_mode,
                     'early_stopping_patience': self.config.early_stopping_patience,
+                    'checkpoint_dir': self.config.checkpoint_dir,
+                    'volume_checkpoint_dir': self.config.volume_checkpoint_dir,
                     'save_top_k': self.config.save_top_k,
                     'learning_rate': self.config.learning_rate,
                     'weight_decay': self.config.weight_decay,
@@ -338,46 +344,20 @@ class UnifiedTrainerServerless:
                     'model_save_path': self.config.model_save_path,
                     'predictions_save_path': self.config.predictions_save_path,
                     'metrics_save_path': self.config.metrics_save_path,
-                    'volume_checkpoint_dir': self.config.volume_checkpoint_dir,
                     'use_volume_checkpoints': self.config.use_volume_checkpoints,
                     'data_config': self.data_config,
                     'model_config': self.model_config
                 }
                 
-                @distributed(
-                    gpus=self.config.serverless_gpu_count, 
-                    gpu_type=self.config.serverless_gpu_type, 
-                    remote=True
-                )
-                def distributed_train(model, data_module, callbacks, logger, config_dict):
-                    """Distributed training function for Serverless GPU."""
-                    import lightning as pl
-                    
-                    # Initialize trainer for this distributed process
-                    trainer = pl.Trainer(
-                        max_epochs=config_dict['max_epochs'],
-                        accelerator="gpu",
-                        devices="auto",
-                        callbacks=callbacks,
-                        log_every_n_steps=config_dict['log_every_n_steps'],
-                        logger=logger,
-                        strategy="ddp",
-                        sync_batchnorm=True
-                    )
-                    
-                    # Train the model
-                    trainer.fit(model, datamodule=data_module)
-                    return trainer.callback_metrics
-                
-                # Execute distributed training
-                # Pass the objects directly - clean and simple approach
-                result = distributed_train.distributed(
-                    self.model,           # Pass the model object
-                    self.data_module,     # Pass the data module object
-                    self._init_callbacks(), # Pass the callbacks
-                    self.logger,          # Pass the logger
-                    config_dict           # Pass the config
-                )
+                # For serverless GPU, we don't actually run training here
+                # The notebook should handle the @distributed function
+                result = {
+                    'status': 'serverless_gpu_ready',
+                    'config': config_dict,
+                    'model': self.model,
+                    'data_module': self.data_module,
+                    'logger': self.logger
+                }
             else:
                 # Local or traditional distributed training
                 self._init_trainer()
