@@ -847,11 +847,13 @@ def log_pyfunc_model():
             artifacts=artifacts,
             conda_env=conda_env,
             signature=signature,
-            input_example=input_example,
+            input_example=input_example["single_format"],
             metadata={
                 "task": "object_detection",
                 "architecture": "DETR",
-                "framework": "pytorch_pyfunc"
+                "framework": "pytorch_pyfunc",
+                "supports_batch_processing": "true",
+                "input_formats": "base64_images,image_urls,numpy_arrays"
             }
         )
         
@@ -1052,39 +1054,39 @@ def create_pyfunc_serving_endpoint(registered_model_name=None, model_validation_
         latest_version = 1
         print(f"   Using default version: {latest_version}")
         
-        # Create served model configuration
-        served_model = ServedModelInput(
-            model_name=registered_model_name,
-            model_version=str(latest_version),
-            workload_size=ServedModelInputWorkloadSize.SMALL,
-            scale_to_zero_enabled=True
-        )
-        
-        # Create endpoint configuration
-        endpoint_config = EndpointCoreConfigInput(
-            name=endpoint_name,
-            served_models=[served_model]
-        )
-        
-        print(f"   Creating endpoint configuration:")
-        print(f"   Name: {endpoint_name}")
-        print(f"   Model: {registered_model_name}")
-        print(f"   Version: {latest_version}")
-        print(f"   Workload size: Small")
-        print(f"   Scale to zero: Enabled")
-        
-        # Create endpoint
-        endpoint = client.serving_endpoints.create(
-            name=endpoint_name,
-            config=endpoint_config
-        )
-        
-        print(f"✅ PyFunc serving endpoint created successfully")
-        print(f"   Endpoint name: {endpoint_name}")
-        print(f"   Model type: PyFunc")
-        print(f"   Status: Creating...")
-        
-        return endpoint_name
+    # Create served model configuration
+    served_model = ServedModelInput(
+        model_name=registered_model_name,
+        model_version=str(latest_version),
+        workload_size=ServedModelInputWorkloadSize.SMALL,
+        scale_to_zero_enabled=True
+    )
+    
+    # Create endpoint configuration
+    endpoint_config = EndpointCoreConfigInput(
+        name=endpoint_name,
+        served_models=[served_model]
+    )
+    
+    print(f"   Creating endpoint configuration:")
+    print(f"   Name: {endpoint_name}")
+    print(f"   Model: {registered_model_name}")
+    print(f"   Version: {latest_version}")
+    print(f"   Workload size: Small")
+    print(f"   Scale to zero: Enabled")
+    
+    # Create endpoint
+    endpoint = client.serving_endpoints.create(
+        name=endpoint_name,
+        config=endpoint_config
+    )
+    
+    print(f"✅ PyFunc serving endpoint created successfully")
+    print(f"   Endpoint name: {endpoint_name}")
+    print(f"   Model type: PyFunc")
+    print(f"   Status: Creating...")
+    
+    return endpoint_name
 
 endpoint_name = create_pyfunc_serving_endpoint(registered_model_name, model_validation_passed)
 
