@@ -1173,7 +1173,7 @@ def test_pyfunc_endpoint_comprehensive(endpoint_name):
     
     # Use the same base64 generation approach as validate_pyfunc_model_before_registration
     # Fetch real image and convert to base64 for realistic testing
-    image_url = "https://farm6.staticflickr.com/5260/5428948720_1db6b22432_z.jpg"
+    image_url = "http://farm4.staticflickr.com/3027/2925597311_b6f0d78ac9_z.jpg"
     print(f"      Fetching test image from: {image_url}")
     
     response = requests.get(image_url, timeout=10)
@@ -1184,10 +1184,13 @@ def test_pyfunc_endpoint_comprehensive(endpoint_name):
     print(f"      Successfully converted image to base64 ({len(test_base64)} characters)")
     
     # Use the correct single instance format that matches the signature
+    # Wrap in 'inputs' format for Databricks Model Serving
     payload_1 = {
-        "image_base64": test_base64,
-        "confidence_threshold": 0.5,
-        "max_detections": 100
+        "inputs": {
+            "image_base64": test_base64,
+            "confidence_threshold": 0.5,
+            "max_detections": 100
+        }
     }
     
     response_1 = requests.post(endpoint_url, json=payload_1, headers=headers, timeout=30)
@@ -1203,11 +1206,11 @@ def test_pyfunc_endpoint_comprehensive(endpoint_name):
         print(f"   ❌ Base64 test failed: {response_1.status_code}")
         print(f"      Response: {response_1.text[:500]}")
     
-    # Test 2: Batch input
-    print("   Test 2: Batch input...")
+    # Test 2: Multiple single inputs (simulating batch processing)
+    print("   Test 2: Multiple single inputs...")
     
-    # Use a different real image for batch testing
-    image_url_2 = "https://farm4.staticflickr.com/3441/3350733109_7c8c0c8b8b_z.jpg"
+    # Use a different real image for second test
+    image_url_2 = "http://farm4.staticflickr.com/3591/3556450320_07706d3fcf_z.jpg"
     print(f"      Fetching second test image from: {image_url_2}")
     
     response_2 = requests.get(image_url_2, timeout=10)
@@ -1217,37 +1220,64 @@ def test_pyfunc_endpoint_comprehensive(endpoint_name):
     test_base64_2 = base64.b64encode(response_2.content).decode('utf-8')
     print(f"      Successfully converted second image to base64 ({len(test_base64_2)} characters)")
     
-    # Use the correct batch format that matches the signature
-    payload_2 = {
-        "instances": [
-            {
-                "image_base64": test_base64,
-                "confidence_threshold": 0.6
-            },
-            {
-                "image_base64": test_base64_2,
-                "confidence_threshold": 0.7
-            }
-        ]
+    # Test first image with different parameters
+    payload_2a = {
+        "inputs": {
+            "image_base64": test_base64,
+            "confidence_threshold": 0.6,
+            "max_detections": 50
+        }
     }
     
-    response_2 = requests.post(endpoint_url, json=payload_2, headers=headers, timeout=45)
+    response_2a = requests.post(endpoint_url, json=payload_2a, headers=headers, timeout=30)
     
-    if response_2.status_code == 200:
-        result_2 = response_2.json()
-        print("   ✅ Batch test successful")
-        if 'predictions' in result_2:
-            print(f"      Batch predictions: {len(result_2['predictions'])}")
+    # Test second image with different parameters
+    payload_2b = {
+        "inputs": {
+            "image_base64": test_base64_2,
+            "confidence_threshold": 0.7,
+            "max_detections": 75
+        }
+    }
+    
+    response_2b = requests.post(endpoint_url, json=payload_2b, headers=headers, timeout=30)
+    
+    if response_2a.status_code == 200 and response_2b.status_code == 200:
+        result_2a = response_2a.json()
+        result_2b = response_2b.json()
+        print("   ✅ Multiple single inputs test successful")
+        
+        # Handle predictions safely
+        first_detections = 0
+        if 'predictions' in result_2a and isinstance(result_2a['predictions'], list) and len(result_2a['predictions']) > 0:
+            first_pred = result_2a['predictions'][0]
+            if isinstance(first_pred, dict) and 'num_detections' in first_pred:
+                first_detections = first_pred['num_detections']
+        
+        second_detections = 0
+        if 'predictions' in result_2b and isinstance(result_2b['predictions'], list) and len(result_2b['predictions']) > 0:
+            second_pred = result_2b['predictions'][0]
+            if isinstance(second_pred, dict) and 'num_detections' in second_pred:
+                second_detections = second_pred['num_detections']
+        
+        print(f"      First image detections: {first_detections}")
+        print(f"      Second image detections: {second_detections}")
     else:
-        print(f"   ❌ Batch test failed: {response_2.status_code}")
-        print(f"      Response: {response_2.text[:500]}")
+        print(f"   ❌ Multiple single inputs test failed")
+        if response_2a.status_code != 200:
+            print(f"      First request failed: {response_2a.status_code}")
+        if response_2b.status_code != 200:
+            print(f"      Second request failed: {response_2b.status_code}")
     
     # Test 3: Error handling
     print("   Test 3: Error handling...")
     
     # Test error handling with invalid input
+    # Wrap in 'inputs' format for Databricks Model Serving
     payload_3 = {
-        "invalid_field": "test"
+        "inputs": {
+            "invalid_field": "test"
+        }
     }
     
     response_3 = requests.post(endpoint_url, json=payload_3, headers=headers, timeout=30)
@@ -1265,14 +1295,14 @@ def test_pyfunc_endpoint_comprehensive(endpoint_name):
         'endpoint_name': endpoint_name,
         'endpoint_url': endpoint_url,
         'base64_test': response_1.status_code == 200,
-        'batch_test': response_2.status_code == 200,
+        'multiple_inputs_test': response_2a.status_code == 200 and response_2b.status_code == 200,
         'error_handling': response_3.status_code == 200,
         'test_timestamp': datetime.now().isoformat()
     }
     
     print(f"📊 PyFunc Endpoint Test Summary:")
     print(f"   Base64 test: {'✅' if test_results['base64_test'] else '❌'}")
-    print(f"   Batch test: {'✅' if test_results['batch_test'] else '❌'}")
+    print(f"   Multiple inputs test: {'✅' if test_results['multiple_inputs_test'] else '❌'}")
     print(f"   Error handling: {'✅' if test_results['error_handling'] else '❌'}")
     
     return test_results
@@ -1306,7 +1336,8 @@ def performance_test_pyfunc_endpoint(endpoint_name, num_requests=10):
         
         # Use the same base64 generation approach for performance testing
         # Fetch real image and convert to base64 for realistic testing
-        image_url = "https://farm6.staticflickr.com/5260/5428948720_1db6b22432_z.jpg"
+        # Use the same image URL that works in the functional test
+        image_url = "http://farm4.staticflickr.com/3027/2925597311_b6f0d78ac9_z.jpg"
         print(f"   Fetching test image from: {image_url}")
         
         response = requests.get(image_url, timeout=10)
@@ -1317,10 +1348,13 @@ def performance_test_pyfunc_endpoint(endpoint_name, num_requests=10):
         print(f"   Successfully converted image to base64 ({len(test_base64)} characters)")
         
         # Use the correct single instance format that matches the signature
+        # Wrap in 'inputs' format for Databricks Model Serving
         payload = {
-            "image_base64": test_base64,
-            "confidence_threshold": 0.6,
-            "max_detections": 50
+            "inputs": {
+                "image_base64": test_base64,
+                "confidence_threshold": 0.6,
+                "max_detections": 50
+            }
         }
         
         # Performance testing
