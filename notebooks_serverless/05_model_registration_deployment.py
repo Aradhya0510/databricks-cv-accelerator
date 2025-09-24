@@ -216,17 +216,42 @@ class DetectionPyFuncModel(mlflow.pyfunc.PythonModel):
         try:
             # Handle different input formats
             if isinstance(model_input, dict):
-                # Direct API call format
+                # Handle Databricks Model Serving wrapped formats
                 if 'instances' in model_input:
-                    # Batch of instances
+                    # Batch of instances (MLflow batch format)
                     instances = model_input['instances']
                     predictions = []
                     for instance in instances:
                         pred = self._predict_single(instance)
                         predictions.append(pred)
                     return predictions
+                elif 'inputs' in model_input:
+                    # Single instance wrapped in 'inputs' (Databricks Model Serving format)
+                    pred = self._predict_single(model_input['inputs'])
+                    return pred
+                elif 'dataframe_records' in model_input:
+                    # DataFrame records format (MLflow format)
+                    records = model_input['dataframe_records']
+                    predictions = []
+                    for record in records:
+                        pred = self._predict_single(record)
+                        predictions.append(pred)
+                    return predictions
+                elif 'dataframe_split' in model_input:
+                    # DataFrame split format (MLflow format)
+                    data = model_input['dataframe_split']
+                    if 'data' in data and 'columns' in data:
+                        # Convert to list of dicts
+                        columns = data['columns']
+                        records = data['data']
+                        predictions = []
+                        for record in records:
+                            record_dict = dict(zip(columns, record))
+                            pred = self._predict_single(record_dict)
+                            predictions.append(pred)
+                        return predictions
                 else:
-                    # Single instance
+                    # Direct single instance (fallback for backward compatibility)
                     pred = self._predict_single(model_input)
                     return pred
             
@@ -847,11 +872,13 @@ def log_pyfunc_model():
             artifacts=artifacts,
             conda_env=conda_env,
             signature=signature,
-            input_example=input_example,
+            input_example=input_example["single_format"],
             metadata={
                 "task": "object_detection",
                 "architecture": "DETR",
-                "framework": "pytorch_pyfunc"
+                "framework": "pytorch_pyfunc",
+                "supports_batch_processing": "true",
+                "input_formats": "base64_images,image_urls,numpy_arrays"
             }
         )
         
@@ -1052,39 +1079,39 @@ def create_pyfunc_serving_endpoint(registered_model_name=None, model_validation_
         latest_version = 1
         print(f"   Using default version: {latest_version}")
         
-        # Create served model configuration
-        served_model = ServedModelInput(
-            model_name=registered_model_name,
-            model_version=str(latest_version),
-            workload_size=ServedModelInputWorkloadSize.SMALL,
-            scale_to_zero_enabled=True
-        )
-        
-        # Create endpoint configuration
-        endpoint_config = EndpointCoreConfigInput(
-            name=endpoint_name,
-            served_models=[served_model]
-        )
-        
-        print(f"   Creating endpoint configuration:")
-        print(f"   Name: {endpoint_name}")
-        print(f"   Model: {registered_model_name}")
-        print(f"   Version: {latest_version}")
-        print(f"   Workload size: Small")
-        print(f"   Scale to zero: Enabled")
-        
-        # Create endpoint
-        endpoint = client.serving_endpoints.create(
-            name=endpoint_name,
-            config=endpoint_config
-        )
-        
-        print(f"✅ PyFunc serving endpoint created successfully")
-        print(f"   Endpoint name: {endpoint_name}")
-        print(f"   Model type: PyFunc")
-        print(f"   Status: Creating...")
-        
-        return endpoint_name
+    # Create served model configuration
+    served_model = ServedModelInput(
+        model_name=registered_model_name,
+        model_version=str(latest_version),
+        workload_size=ServedModelInputWorkloadSize.SMALL,
+        scale_to_zero_enabled=True
+    )
+    
+    # Create endpoint configuration
+    endpoint_config = EndpointCoreConfigInput(
+        name=endpoint_name,
+        served_models=[served_model]
+    )
+    
+    print(f"   Creating endpoint configuration:")
+    print(f"   Name: {endpoint_name}")
+    print(f"   Model: {registered_model_name}")
+    print(f"   Version: {latest_version}")
+    print(f"   Workload size: Small")
+    print(f"   Scale to zero: Enabled")
+    
+    # Create endpoint
+    endpoint = client.serving_endpoints.create(
+        name=endpoint_name,
+        config=endpoint_config
+    )
+    
+    print(f"✅ PyFunc serving endpoint created successfully")
+    print(f"   Endpoint name: {endpoint_name}")
+    print(f"   Model type: PyFunc")
+    print(f"   Status: Creating...")
+    
+    return endpoint_name
 
 endpoint_name = create_pyfunc_serving_endpoint(registered_model_name, model_validation_passed)
 
@@ -1171,7 +1198,7 @@ def test_pyfunc_endpoint_comprehensive(endpoint_name):
     
     # Use the same base64 generation approach as validate_pyfunc_model_before_registration
     # Fetch real image and convert to base64 for realistic testing
-    image_url = "https://farm6.staticflickr.com/5260/5428948720_1db6b22432_z.jpg"
+    image_url = "http://farm4.staticflickr.com/3027/2925597311_b6f0d78ac9_z.jpg"
     print(f"      Fetching test image from: {image_url}")
     
     response = requests.get(image_url, timeout=10)
@@ -1182,10 +1209,13 @@ def test_pyfunc_endpoint_comprehensive(endpoint_name):
     print(f"      Successfully converted image to base64 ({len(test_base64)} characters)")
     
     # Use the correct single instance format that matches the signature
+    # Wrap in 'inputs' format for Databricks Model Serving
     payload_1 = {
-        "image_base64": test_base64,
-        "confidence_threshold": 0.5,
-        "max_detections": 100
+        "inputs": {
+            "image_base64": test_base64,
+            "confidence_threshold": 0.5,
+            "max_detections": 100
+        }
     }
     
     response_1 = requests.post(endpoint_url, json=payload_1, headers=headers, timeout=30)
@@ -1201,11 +1231,11 @@ def test_pyfunc_endpoint_comprehensive(endpoint_name):
         print(f"   ❌ Base64 test failed: {response_1.status_code}")
         print(f"      Response: {response_1.text[:500]}")
     
-    # Test 2: Batch input
+    # Test 2: Batch input (using instances format)
     print("   Test 2: Batch input...")
     
     # Use a different real image for batch testing
-    image_url_2 = "https://farm4.staticflickr.com/3441/3350733109_7c8c0c8b8b_z.jpg"
+    image_url_2 = "http://farm4.staticflickr.com/3591/3556450320_07706d3fcf_z.jpg"
     print(f"      Fetching second test image from: {image_url_2}")
     
     response_2 = requests.get(image_url_2, timeout=10)
@@ -1216,15 +1246,18 @@ def test_pyfunc_endpoint_comprehensive(endpoint_name):
     print(f"      Successfully converted second image to base64 ({len(test_base64_2)} characters)")
     
     # Use the correct batch format that matches the signature
+    # Wrap in 'instances' format for Databricks Model Serving
     payload_2 = {
         "instances": [
             {
                 "image_base64": test_base64,
-                "confidence_threshold": 0.6
+                "confidence_threshold": 0.6,
+                "max_detections": 50
             },
             {
                 "image_base64": test_base64_2,
-                "confidence_threshold": 0.7
+                "confidence_threshold": 0.7,
+                "max_detections": 75
             }
         ]
     }
@@ -1234,8 +1267,12 @@ def test_pyfunc_endpoint_comprehensive(endpoint_name):
     if response_2.status_code == 200:
         result_2 = response_2.json()
         print("   ✅ Batch test successful")
-        if 'predictions' in result_2:
+        if 'predictions' in result_2 and isinstance(result_2['predictions'], list):
             print(f"      Batch predictions: {len(result_2['predictions'])}")
+            # Show detections for each image in the batch
+            for i, pred in enumerate(result_2['predictions']):
+                if isinstance(pred, dict) and 'num_detections' in pred:
+                    print(f"      Image {i+1} detections: {pred['num_detections']}")
     else:
         print(f"   ❌ Batch test failed: {response_2.status_code}")
         print(f"      Response: {response_2.text[:500]}")
@@ -1244,8 +1281,11 @@ def test_pyfunc_endpoint_comprehensive(endpoint_name):
     print("   Test 3: Error handling...")
     
     # Test error handling with invalid input
+    # Wrap in 'inputs' format for Databricks Model Serving
     payload_3 = {
-        "invalid_field": "test"
+        "inputs": {
+            "invalid_field": "test"
+        }
     }
     
     response_3 = requests.post(endpoint_url, json=payload_3, headers=headers, timeout=30)
@@ -1304,7 +1344,8 @@ def performance_test_pyfunc_endpoint(endpoint_name, num_requests=10):
         
         # Use the same base64 generation approach for performance testing
         # Fetch real image and convert to base64 for realistic testing
-        image_url = "https://farm6.staticflickr.com/5260/5428948720_1db6b22432_z.jpg"
+        # Use the same image URL that works in the functional test
+        image_url = "http://farm4.staticflickr.com/3027/2925597311_b6f0d78ac9_z.jpg"
         print(f"   Fetching test image from: {image_url}")
         
         response = requests.get(image_url, timeout=10)
@@ -1315,10 +1356,13 @@ def performance_test_pyfunc_endpoint(endpoint_name, num_requests=10):
         print(f"   Successfully converted image to base64 ({len(test_base64)} characters)")
         
         # Use the correct single instance format that matches the signature
+        # Wrap in 'inputs' format for Databricks Model Serving
         payload = {
-            "image_base64": test_base64,
-            "confidence_threshold": 0.6,
-            "max_detections": 50
+            "inputs": {
+                "image_base64": test_base64,
+                "confidence_threshold": 0.6,
+                "max_detections": 50
+            }
         }
         
         # Performance testing
