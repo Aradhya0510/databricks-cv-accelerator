@@ -216,17 +216,42 @@ class DetectionPyFuncModel(mlflow.pyfunc.PythonModel):
         try:
             # Handle different input formats
             if isinstance(model_input, dict):
-                # Direct API call format
+                # Handle Databricks Model Serving wrapped formats
                 if 'instances' in model_input:
-                    # Batch of instances
+                    # Batch of instances (MLflow batch format)
                     instances = model_input['instances']
                     predictions = []
                     for instance in instances:
                         pred = self._predict_single(instance)
                         predictions.append(pred)
                     return predictions
+                elif 'inputs' in model_input:
+                    # Single instance wrapped in 'inputs' (Databricks Model Serving format)
+                    pred = self._predict_single(model_input['inputs'])
+                    return pred
+                elif 'dataframe_records' in model_input:
+                    # DataFrame records format (MLflow format)
+                    records = model_input['dataframe_records']
+                    predictions = []
+                    for record in records:
+                        pred = self._predict_single(record)
+                        predictions.append(pred)
+                    return predictions
+                elif 'dataframe_split' in model_input:
+                    # DataFrame split format (MLflow format)
+                    data = model_input['dataframe_split']
+                    if 'data' in data and 'columns' in data:
+                        # Convert to list of dicts
+                        columns = data['columns']
+                        records = data['data']
+                        predictions = []
+                        for record in records:
+                            record_dict = dict(zip(columns, record))
+                            pred = self._predict_single(record_dict)
+                            predictions.append(pred)
+                        return predictions
                 else:
-                    # Single instance
+                    # Direct single instance (fallback for backward compatibility)
                     pred = self._predict_single(model_input)
                     return pred
             
@@ -1206,10 +1231,10 @@ def test_pyfunc_endpoint_comprehensive(endpoint_name):
         print(f"   ❌ Base64 test failed: {response_1.status_code}")
         print(f"      Response: {response_1.text[:500]}")
     
-    # Test 2: Multiple single inputs (simulating batch processing)
-    print("   Test 2: Multiple single inputs...")
+    # Test 2: Batch input (using instances format)
+    print("   Test 2: Batch input...")
     
-    # Use a different real image for second test
+    # Use a different real image for batch testing
     image_url_2 = "http://farm4.staticflickr.com/3591/3556450320_07706d3fcf_z.jpg"
     print(f"      Fetching second test image from: {image_url_2}")
     
@@ -1220,54 +1245,37 @@ def test_pyfunc_endpoint_comprehensive(endpoint_name):
     test_base64_2 = base64.b64encode(response_2.content).decode('utf-8')
     print(f"      Successfully converted second image to base64 ({len(test_base64_2)} characters)")
     
-    # Test first image with different parameters
-    payload_2a = {
-        "inputs": {
-            "image_base64": test_base64,
-            "confidence_threshold": 0.6,
-            "max_detections": 50
-        }
+    # Use the correct batch format that matches the signature
+    # Wrap in 'instances' format for Databricks Model Serving
+    payload_2 = {
+        "instances": [
+            {
+                "image_base64": test_base64,
+                "confidence_threshold": 0.6,
+                "max_detections": 50
+            },
+            {
+                "image_base64": test_base64_2,
+                "confidence_threshold": 0.7,
+                "max_detections": 75
+            }
+        ]
     }
     
-    response_2a = requests.post(endpoint_url, json=payload_2a, headers=headers, timeout=30)
+    response_2 = requests.post(endpoint_url, json=payload_2, headers=headers, timeout=45)
     
-    # Test second image with different parameters
-    payload_2b = {
-        "inputs": {
-            "image_base64": test_base64_2,
-            "confidence_threshold": 0.7,
-            "max_detections": 75
-        }
-    }
-    
-    response_2b = requests.post(endpoint_url, json=payload_2b, headers=headers, timeout=30)
-    
-    if response_2a.status_code == 200 and response_2b.status_code == 200:
-        result_2a = response_2a.json()
-        result_2b = response_2b.json()
-        print("   ✅ Multiple single inputs test successful")
-        
-        # Handle predictions safely
-        first_detections = 0
-        if 'predictions' in result_2a and isinstance(result_2a['predictions'], list) and len(result_2a['predictions']) > 0:
-            first_pred = result_2a['predictions'][0]
-            if isinstance(first_pred, dict) and 'num_detections' in first_pred:
-                first_detections = first_pred['num_detections']
-        
-        second_detections = 0
-        if 'predictions' in result_2b and isinstance(result_2b['predictions'], list) and len(result_2b['predictions']) > 0:
-            second_pred = result_2b['predictions'][0]
-            if isinstance(second_pred, dict) and 'num_detections' in second_pred:
-                second_detections = second_pred['num_detections']
-        
-        print(f"      First image detections: {first_detections}")
-        print(f"      Second image detections: {second_detections}")
+    if response_2.status_code == 200:
+        result_2 = response_2.json()
+        print("   ✅ Batch test successful")
+        if 'predictions' in result_2 and isinstance(result_2['predictions'], list):
+            print(f"      Batch predictions: {len(result_2['predictions'])}")
+            # Show detections for each image in the batch
+            for i, pred in enumerate(result_2['predictions']):
+                if isinstance(pred, dict) and 'num_detections' in pred:
+                    print(f"      Image {i+1} detections: {pred['num_detections']}")
     else:
-        print(f"   ❌ Multiple single inputs test failed")
-        if response_2a.status_code != 200:
-            print(f"      First request failed: {response_2a.status_code}")
-        if response_2b.status_code != 200:
-            print(f"      Second request failed: {response_2b.status_code}")
+        print(f"   ❌ Batch test failed: {response_2.status_code}")
+        print(f"      Response: {response_2.text[:500]}")
     
     # Test 3: Error handling
     print("   Test 3: Error handling...")
@@ -1295,14 +1303,14 @@ def test_pyfunc_endpoint_comprehensive(endpoint_name):
         'endpoint_name': endpoint_name,
         'endpoint_url': endpoint_url,
         'base64_test': response_1.status_code == 200,
-        'multiple_inputs_test': response_2a.status_code == 200 and response_2b.status_code == 200,
+        'batch_test': response_2.status_code == 200,
         'error_handling': response_3.status_code == 200,
         'test_timestamp': datetime.now().isoformat()
     }
     
     print(f"📊 PyFunc Endpoint Test Summary:")
     print(f"   Base64 test: {'✅' if test_results['base64_test'] else '❌'}")
-    print(f"   Multiple inputs test: {'✅' if test_results['multiple_inputs_test'] else '❌'}")
+    print(f"   Batch test: {'✅' if test_results['batch_test'] else '❌'}")
     print(f"   Error handling: {'✅' if test_results['error_handling'] else '❌'}")
     
     return test_results
