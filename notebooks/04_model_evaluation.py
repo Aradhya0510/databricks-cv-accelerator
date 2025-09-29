@@ -76,7 +76,7 @@ from config import load_config, get_default_config
 from tasks.detection.model import DetectionModel
 from tasks.detection.data import DetectionDataModule
 from tasks.detection.evaluate import DetectionEvaluator
-from tasks.detection.adapters import get_input_adapter
+from tasks.detection.adapters import get_input_adapter, get_output_adapter
 from utils.logging import create_databricks_logger
 from utils.coco_handler import COCOHandler
 
@@ -393,13 +393,26 @@ def visualize_predictions(model, data_module, num_samples=6):
     
     # Move to device
     device = next(model.parameters()).device
-    images = sample_batch['image'].to(device)
-    targets = sample_batch['target']
+    images = sample_batch['pixel_values'].to(device)
+    targets = sample_batch['labels']
     
     # Run inference
     model.eval()
     with torch.no_grad():
-        predictions = model(images)
+        raw_predictions = model(images)
+    
+    # Get output adapter for post-processing
+    model_name = config['model']['model_name']
+    image_size = config['data'].get('image_size', 800)
+    if isinstance(image_size, list):
+        image_size = image_size[0]
+    elif isinstance(image_size, dict):
+        image_size = image_size.get('height', 800)
+    
+    output_adapter = get_output_adapter(model_name, image_size)
+    
+    # Post-process predictions using the adapter
+    processed_predictions = output_adapter.format_predictions(raw_predictions, sample_batch)
     
     # Create visualization
     fig, axes = plt.subplots(2, 3, figsize=(18, 12))
@@ -420,10 +433,11 @@ def visualize_predictions(model, data_module, num_samples=6):
         ax.axis('off')
         
         # Add predictions if available
-        if hasattr(predictions, 'pred_boxes') and len(predictions.pred_boxes[i]) > 0:
-            boxes = predictions.pred_boxes[i].cpu().numpy()
-            scores = predictions.scores[i].cpu().numpy()
-            labels = predictions.pred_classes[i].cpu().numpy()
+        if i < len(processed_predictions):
+            pred = processed_predictions[i]
+            boxes = pred['boxes'].cpu().numpy()
+            scores = pred['scores'].cpu().numpy()
+            labels = pred['labels'].cpu().numpy()
             
             # Draw bounding boxes
             for box, score, label in zip(boxes, scores, labels):
@@ -637,7 +651,7 @@ def analyze_inference_speed(model, data_module):
     
     test_loader = data_module.test_dataloader()
     sample_batch = next(iter(test_loader))
-    images = sample_batch['image'].to(device)
+    images = sample_batch['pixel_values'].to(device)
     
     with torch.no_grad():
         for i in range(num_samples):
