@@ -1,0 +1,24 @@
+# Streamlit App Requirements for Databricks CV Accelerator
+# Version 0.1.0 - Local Development
+
+# Core UI Framework
+streamlit>=1.31.0
+
+# YAML Processing
+pyyaml>=6.0
+
+# Databricks Integration (Phase 2 - included for future)
+databricks-sdk>=0.28.0
+databricks-sql-connector>=3.0.0
+
+# Database (v0.2.0 - Lakebase)
+# psycopg[binary]>=3.1.0
+
+# Utilities
+python-dotenv>=1.0.0  # For local development secrets
+
+# Note: The following are provided by parent project requirements.txt:
+# - numpy, pandas
+# - torch, torchvision
+# - transformers
+# - lightning
