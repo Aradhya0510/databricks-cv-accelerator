@@ -1,0 +1,13 @@
+# Databricks Lakehouse App Configuration
+# Computer Vision Training Pipeline
+
+command: ["streamlit", "run", "app.py", "--server.port", "8080", "--server.address", "0.0.0.0"]
+
+env:
+  - name: STREAMLIT_SERVER_HEADLESS
+    value: "true"
+  - name: STREAMLIT_BROWSER_GATHER_USAGE_STATS
+    value: "false"
+  - name: STREAMLIT_SERVER_FILE_WATCHER_TYPE
+    value: "none"
+

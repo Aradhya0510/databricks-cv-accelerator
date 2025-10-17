@@ -475,6 +475,76 @@ from training.trainer import UnifiedTrainer
 
 ---
 
+## 🚀 Production Training with Databricks Lakeflow Jobs
+
+For **production training with full multi-GPU DDP support**, use the Python scripts in the `jobs/` directory with **Databricks Lakeflow Jobs UI**. This avoids PyTorch Lightning's limitations in interactive environments.
+
+### Why Use Lakeflow Jobs?
+
+**Notebooks (Interactive Environment):**
+```
+INFO:pytorch_lightning.utilities.rank_zero:Trainer will use only 1 of 4 GPUs because 
+it is running inside an interactive / notebook environment. Multi-GPU inside interactive 
+environments is considered experimental and unstable.
+```
+
+**Lakeflow Jobs (Non-Interactive):**
+- ✅ Full multi-GPU DDP support (all GPUs utilized automatically)
+- ✅ Production-grade stability
+- ✅ Simple UI-based configuration with job parameters
+- ✅ Scheduled runs and automation
+- ✅ Better resource management
+
+### Quick Start: Create a Training Job
+
+1. **Navigate to Workflows** in Databricks UI
+2. **Click "Create Job"**
+3. **Configure the task:**
+   - **Type**: Python script
+   - **Source**: Workspace
+   - **Path**: `/Workspace/.../jobs/model_training.py`
+4. **Add Job Parameter:**
+   - `config_path` = `/Volumes/main/cv/data/configs/detection_detr_config.yaml`
+5. **Select GPU Cluster:**
+   - Node type: `g5.12xlarge` (4x A10G GPUs)
+   - Workers: 0 (single-node for DDP)
+6. **Run Job** - Will automatically use all 4 GPUs with DDP!
+
+### Quick Start: Create a Deployment Job
+
+1. **Create another job**
+2. **Configure the task:**
+   - **Type**: Python script
+   - **Path**: `/Workspace/.../jobs/model_registration_deployment.py`
+3. **Add Job Parameters:**
+   ```
+   config_path: /Volumes/main/cv/data/configs/detection_detr_config.yaml
+   checkpoint_path: /Volumes/main/cv/data/checkpoints/best-model.ckpt
+   model_name: detr_coco_detector
+   deploy: true
+   ```
+4. **Select CPU Cluster** (no GPU needed)
+5. **Run Job**
+
+### Notebooks vs Lakeflow Jobs Comparison
+
+| Feature | Notebooks (Interactive) | Lakeflow Jobs (Non-Interactive) |
+|---------|------------------------|------------------------|
+| **Multi-GPU DDP** | ⚠️ Limited (1 GPU) | ✅ Full Support (All GPUs) |
+| **Configuration** | Manual code cells | UI Parameters |
+| **GPU Utilization** | Experimental | Stable & Production-Ready |
+| **Scheduling** | ❌ Not supported | ✅ Cron, triggers |
+| **Best For** | Development | Production |
+
+**Recommended Workflow:**
+1. 🧪 **Develop** in `notebooks/` - Interactive experimentation with single GPU
+2. 🚀 **Train** with `jobs/model_training.py` - Production multi-GPU training via Jobs UI
+3. 📦 **Deploy** with `jobs/model_registration_deployment.py` - Model serving via Jobs UI
+
+See [jobs/README.md](jobs/README.md) for detailed step-by-step instructions with screenshots.
+
+---
+
 ### 📬 Questions & Feedback
 
 Open an issue or start a discussion thread in the GitHub repo for support, ideas, or feedback.

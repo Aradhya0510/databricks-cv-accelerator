@@ -53,6 +53,14 @@ training:
   # Basic training parameters
   max_epochs: 50
   
+  # MLflow Experiment (REQUIRED for Databricks)
+  # Must be an absolute workspace path
+  # Examples:
+  #   - "/Users/your.email@databricks.com/cv_detection_experiment"
+  #   - "/Shared/cv_experiments/detection_detr"
+  #   - "/Workspace/Users/your.email@databricks.com/experiments/detection"
+  experiment_name: "/Users/<your.email@databricks.com>/cv_detection_detr"
+  
   # Learning rate and optimization
   learning_rate: 1e-4
   weight_decay: 1e-4
