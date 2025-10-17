@@ -1,0 +1,36 @@
+# Streamlit and UI dependencies
+streamlit==1.31.0
+plotly==5.18.0
+altair==5.2.0
+pandas==2.1.4
+numpy==1.26.2
+
+# Databricks integration
+databricks-sdk==0.18.0
+mlflow==2.10.0
+
+# Image processing
+Pillow==10.1.0
+opencv-python-headless==4.9.0.80
+
+# PyTorch and ML frameworks
+torch>=2.0.0
+torchvision>=0.15.0
+transformers>=4.36.0
+lightning>=2.1.0
+
+# Data processing
+pyarrow==14.0.1
+pyspark==3.5.0
+
+# YAML processing
+PyYAML==6.0.1
+
+# Visualization and charts
+matplotlib==3.8.2
+seaborn==0.13.0
+
+# Utilities
+python-dateutil==2.8.2
+pytz==2023.3
+
