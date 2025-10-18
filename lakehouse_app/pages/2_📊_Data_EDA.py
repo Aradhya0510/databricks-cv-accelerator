@@ -12,9 +12,7 @@ import random
 from typing import Dict, Any, List
 import os
 
-# Add parent directory to path
-sys.path.insert(0, str(Path(__file__).parent.parent))
-
+# Note: lakehouse_app is self-contained, no need for parent directory imports
 from utils.state_manager import StateManager
 from components.visualizations import VisualizationHelper
 from components.image_viewer import ImageViewer
