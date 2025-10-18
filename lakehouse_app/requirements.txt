@@ -9,19 +9,8 @@ numpy==1.26.2
 databricks-sdk==0.18.0
 mlflow==2.10.0
 
-# Image processing
+# Image processing (lightweight versions)
 Pillow==10.1.0
-opencv-python-headless==4.9.0.80
-
-# PyTorch and ML frameworks
-torch>=2.0.0
-torchvision>=0.15.0
-transformers>=4.36.0
-lightning>=2.1.0
-
-# Data processing
-pyarrow==14.0.1
-pyspark==3.5.0
 
 # YAML processing
 PyYAML==6.0.1
@@ -34,3 +23,5 @@ seaborn==0.13.0
 python-dateutil==2.8.2
 pytz==2023.3
 
+# Note: Heavy ML frameworks (torch, transformers, lightning, pyspark) are NOT needed
+# The app only orchestrates jobs - those libraries are installed on training clusters
