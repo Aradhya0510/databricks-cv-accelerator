@@ -7,10 +7,8 @@ import streamlit as st
 from pathlib import Path
 import sys
 
-# Add parent directory to path to import src modules
-workspace_root = Path(__file__).parent.parent
-if str(workspace_root) not in sys.path:
-    sys.path.insert(0, str(workspace_root))
+# Note: The lakehouse_app is self-contained and doesn't need parent directory imports
+# All required modules are within the lakehouse_app directory structure
 
 # Configure page
 st.set_page_config(
