@@ -8,11 +8,10 @@ import matplotlib.pyplot as plt
 from typing import Dict, List, Tuple, Optional, Union
 from pathlib import Path
 
-from ..base.inference import BaseInference
 from .model import ClassificationModel
 from .data import ClassificationDataModule
 
-class ClassificationInference(BaseInference):
+class ClassificationInference:
     """Inference class for classification models."""
     
     def __init__(self, config: Dict):
@@ -21,7 +20,7 @@ class ClassificationInference(BaseInference):
         Args:
             config: Configuration dictionary
         """
-        super().__init__(config)
+        self.config = config
         self.model = None
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         

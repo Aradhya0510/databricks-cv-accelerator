@@ -8,7 +8,16 @@ from pathlib import Path
 from typing import List, Dict, Any, Tuple
 import matplotlib.pyplot as plt
 import seaborn as sns
-from torchmetrics.classification import MulticlassJaccardIndex, Dice
+from torchmetrics.classification import MulticlassJaccardIndex
+# Import Dice with version compatibility
+try:
+    from torchmetrics import Dice
+except ImportError:
+    try:
+        from torchmetrics.classification import Dice
+    except ImportError:
+        # Dice not available, will use JaccardIndex if needed
+        Dice = None
 from torchmetrics.detection import MeanAveragePrecision
 
 from .model import UniversalSegmentationModel

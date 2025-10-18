@@ -108,6 +108,7 @@ class TrainingConfig:
     
     # Checkpointing
     checkpoint_dir: str = "/Volumes/<catalog>/<schema>/<volume>/<path>/checkpoints"
+    volume_checkpoint_dir: Optional[str] = None  # Persistent storage for checkpoints
     save_top_k: int = 3
     
     # Logging
@@ -116,11 +117,17 @@ class TrainingConfig:
     # Distributed training
     distributed: bool = False
     use_ray: bool = False  # Whether to use Ray (multi-node) or Databricks DDP (single-node)
+    num_workers: int = 1  # Number of distributed training workers (not DataLoader workers)
     use_gpu: bool = True
     resources_per_worker: Dict[str, int] = field(default_factory=lambda: {
         "CPU": 4,
         "GPU": 1
     })
+    master_port: Optional[int] = None  # Port for DDP communication
+    
+    # Strategy overrides (typically set by job scripts)
+    preferred_strategy: Optional[str] = None  # e.g., "ddp", "auto", "ddp_notebook"
+    preferred_devices: Optional[Union[str, int]] = None  # e.g., "auto", 4, 1
 
 @dataclass
 class MLflowConfig:
@@ -176,8 +183,8 @@ def load_config(config_path: str) -> Dict[str, Any]:
     
     if 'training' in config:
         # Integer fields
-        for key in ['max_epochs', 'early_stopping_patience', 'save_top_k', 'log_every_n_steps']:
-            if key in config['training']:
+        for key in ['max_epochs', 'early_stopping_patience', 'save_top_k', 'log_every_n_steps', 'num_workers', 'master_port', 'preferred_devices']:
+            if key in config['training'] and config['training'][key] is not None:
                 config['training'][key] = int(config['training'][key])
         
         # Float fields
@@ -189,6 +196,13 @@ def load_config(config_path: str) -> Dict[str, Any]:
         for key in ['distributed', 'use_ray', 'use_gpu']:
             if key in config['training']:
                 config['training'][key] = bool(config['training'][key])
+        
+        # Add defaults for new optional fields if missing
+        config['training'].setdefault('volume_checkpoint_dir', None)
+        config['training'].setdefault('num_workers', 1)
+        config['training'].setdefault('master_port', None)
+        config['training'].setdefault('preferred_strategy', None)
+        config['training'].setdefault('preferred_devices', None)
     
     return config
 

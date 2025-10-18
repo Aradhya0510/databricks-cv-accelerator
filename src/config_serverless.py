@@ -115,6 +115,7 @@ class TrainingConfig:
     
     # Checkpointing
     checkpoint_dir: str = "/Volumes/<catalog>/<schema>/<volume>/<path>/checkpoints"
+    volume_checkpoint_dir: Optional[str] = None  # Persistent storage for checkpoints
     save_top_k: int = 3
     
     # Logging
@@ -123,19 +124,24 @@ class TrainingConfig:
     # Distributed training
     distributed: bool = False
     use_ray: bool = False  # Whether to use Ray (multi-node) or Databricks DDP (single-node)
+    num_workers: int = 1  # Number of distributed training workers (not DataLoader workers)
     use_serverless_gpu: bool = False  # Whether to use Serverless GPU compute
     use_gpu: bool = True
     resources_per_worker: Dict[str, int] = field(default_factory=lambda: {
         "CPU": 4,
         "GPU": 1
     })
+    master_port: Optional[int] = None  # Port for DDP communication
     
     # Serverless GPU specific settings
     serverless_gpu_type: str = "A10"  # A10 or H100
     serverless_gpu_count: int = 4  # Number of GPUs to use
     
+    # Strategy overrides (typically set by job scripts)
+    preferred_strategy: Optional[str] = None  # e.g., "ddp", "auto", "ddp_notebook"
+    preferred_devices: Optional[Union[str, int]] = None  # e.g., "auto", 4, 1
+    
     # Additional training parameters
-    master_port: Optional[int] = None
     precision: str = "16-mixed"  # 16-mixed, 32, 16
     gradient_clip_val: float = 1.0
     accumulate_grad_batches: int = 1

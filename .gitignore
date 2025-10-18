@@ -84,5 +84,5 @@ site/
 *.swp
 *~.nib
 
-# Backup information
-BACKUP_INFO.md 
+# Internal documentation (audit traces, analysis, backups, etc.)
+docs/internal/ 

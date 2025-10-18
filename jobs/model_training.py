@@ -278,10 +278,11 @@ def main():
     # Create MLflow logger with experiment name from config
     # Experiment name must be an absolute workspace path on Databricks
     # Example: "/Users/user@email.com/my_experiment" or "/Shared/experiment_name"
-    experiment_name = config['training'].get('experiment_name')
+    # Read from mlflow section (not training section)
+    experiment_name = config.get('mlflow', {}).get('experiment_name')
     if not experiment_name:
         raise ValueError(
-            "Missing 'experiment_name' in config['training'].\n"
+            "Missing 'experiment_name' in config['mlflow'].\n"
             "Experiment name must be an absolute workspace path.\n"
             "Examples:\n"
             "  /Users/your.email@databricks.com/cv_detection_experiment\n"
