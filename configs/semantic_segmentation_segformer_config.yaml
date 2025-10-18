@@ -1,45 +1,39 @@
-# Model Configuration
 model:
-  model_name: "nvidia/mit-b0"
-  task_type: "semantic_segmentation"
-  num_classes: 19  # Cityscapes classes
+  model_name: nvidia/mit-b0
+  task_type: semantic_segmentation
+  num_classes: 19
   pretrained: true
-  
-  # Segmentation-specific settings
-  segmentation_type: "semantic"
+  segmentation_type: semantic
   aux_loss_weight: 0.4
   mask_threshold: 0.5
-  
-  # Training hyperparameters
   learning_rate: 1e-4
   weight_decay: 1e-4
-  scheduler: "cosine"
+  scheduler: cosine
   scheduler_params:
     T_max: 200
     eta_min: 1e-6
   epochs: 200
-
-# Data Configuration
 data:
-  # Dataset paths
-  train_data_path: "/Volumes/<catalog>/<schema>/<volume>/<path>/data/train"
-  train_annotation_file: "/Volumes/<catalog>/<schema>/<volume>/<path>/data/train/annotations.json"
-  val_data_path: "/Volumes/<catalog>/<schema>/<volume>/<path>/data/val"
-  val_annotation_file: "/Volumes/<catalog>/<schema>/<volume>/<path>/data/val/annotations.json"
-  test_data_path: "/Volumes/<catalog>/<schema>/<volume>/<path>/data/test"
-  test_annotation_file: "/Volumes/<catalog>/<schema>/<volume>/<path>/data/test/annotations.json"
-  
-  # Data loading parameters
+  train_data_path: /Volumes/<catalog>/<schema>/<volume>/<path>/data/train
+  train_annotation_file: /Volumes/<catalog>/<schema>/<volume>/<path>/data/train/annotations.json
+  val_data_path: /Volumes/<catalog>/<schema>/<volume>/<path>/data/val
+  val_annotation_file: /Volumes/<catalog>/<schema>/<volume>/<path>/data/val/annotations.json
+  test_data_path: /Volumes/<catalog>/<schema>/<volume>/<path>/data/test
+  test_annotation_file: /Volumes/<catalog>/<schema>/<volume>/<path>/data/test/annotations.json
   batch_size: 8
   num_workers: 4
-  model_name: "nvidia/mit-b0"  # For adapter initialization
-  
-  # Image processing
-  image_size: [512, 512]
-  normalize_mean: [0.485, 0.456, 0.406]
-  normalize_std: [0.229, 0.224, 0.225]
-  
-  # Augmentation
+  model_name: nvidia/mit-b0
+  image_size:
+  - 512
+  - 512
+  normalize_mean:
+  - 0.485
+  - 0.456
+  - 0.406
+  normalize_std:
+  - 0.229
+  - 0.224
+  - 0.225
   augment: true
   augmentations:
     horizontal_flip: true
@@ -51,55 +45,45 @@ data:
       saturation: 0.2
       hue: 0.1
     random_crop: true
-    random_resize: [0.8, 1.2]
-
-# Training Configuration
+    random_resize:
+    - 0.8
+    - 1.2
 training:
-  # Basic training parameters
   max_epochs: 200
-  
-  # Learning rate and optimization
   learning_rate: 1e-4
   weight_decay: 1e-4
-  scheduler: "cosine"
+  scheduler: cosine
   scheduler_params:
     T_max: 200
     eta_min: 1e-6
-  
-  # Early stopping
   early_stopping_patience: 30
-  monitor_metric: "val_miou"
-  monitor_mode: "max"
-  
-  # Checkpointing
-  checkpoint_dir: "/Volumes/<catalog>/<schema>/<volume>/<path>/checkpoints/semantic_segmentation"
+  monitor_metric: val_miou
+  monitor_mode: max
+  checkpoint_dir: /Volumes/<catalog>/<schema>/<volume>/<path>/checkpoints/semantic_segmentation
   save_top_k: 3
-  
-  # Logging
   log_every_n_steps: 50
-  
-  # Distributed training
   distributed: false
-  use_ray: false  # Set to true for multi-node training with Ray
+  use_ray: false
   use_gpu: true
   resources_per_worker:
     CPU: 4
     GPU: 1
-
-# MLflow Configuration
+  volume_checkpoint_dir: /Volumes/<catalog>/<schema>/<volume>/<path>/volume_checkpoints/semantic_segmentation
+  num_workers: 1
+  master_port: null
+  preferred_strategy: null
+  preferred_devices: null
 mlflow:
-  experiment_name: "semantic_segmentation_training"
-  run_name: "segformer_mit_b0"
+  experiment_name: /Users/<your.email@databricks.com>/cv_semantic_segmentation_segformer
+  run_name: segformer_mit_b0
   log_model: true
   tags:
-    framework: "lightning"
-    model: "segformer"
-    dataset: "cityscapes"
-
-# Output Configuration
+    framework: lightning
+    model: segformer
+    dataset: cityscapes
 output:
-  results_dir: "/Volumes/<catalog>/<schema>/<volume>/<path>/results/semantic_segmentation"
+  results_dir: /Volumes/<catalog>/<schema>/<volume>/<path>/results/semantic_segmentation
   save_predictions: true
   visualization:
     save_images: true
-    max_images: 10 
+    max_images: 10

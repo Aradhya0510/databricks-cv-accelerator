@@ -12,12 +12,21 @@ import lightning as pl
 import torch
 from torchmetrics.classification import (
     Accuracy,
-    Dice,
     F1Score,
     JaccardIndex,
     Precision,
     Recall,
 )
+# Import Dice with version compatibility
+try:
+    from torchmetrics import Dice
+except ImportError:
+    try:
+        from torchmetrics.classification import Dice
+    except ImportError:
+        # Fallback for environments without Dice metric
+        print("Warning: Dice metric not available in torchmetrics. Using JaccardIndex as substitute.")
+        Dice = JaccardIndex  # Use Jaccard/IoU as a substitute
 from torchmetrics.detection import MeanAveragePrecision
 from transformers import AutoConfig, AutoModelForUniversalSegmentation
 

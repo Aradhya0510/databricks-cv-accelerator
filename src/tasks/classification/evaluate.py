@@ -12,11 +12,10 @@ import matplotlib.pyplot as plt
 import seaborn as sns
 from typing import Dict, List, Tuple, Optional
 
-from ..base.evaluator import BaseEvaluator
 from .model import ClassificationModel
 from .data import ClassificationDataModule
 
-class ClassificationEvaluator(BaseEvaluator):
+class ClassificationEvaluator:
     """Evaluator for classification models."""
     
     def __init__(self, config: Dict):
@@ -25,7 +24,7 @@ class ClassificationEvaluator(BaseEvaluator):
         Args:
             config: Configuration dictionary
         """
-        super().__init__(config)
+        self.config = config
         self.model = None
         self.data_module = None
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")

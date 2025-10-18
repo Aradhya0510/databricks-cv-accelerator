@@ -1,45 +1,39 @@
-# Model Configuration
 model:
-  model_name: "facebook/detr-resnet-50"
-  task_type: "detection"
-  num_classes: 80  # COCO dataset has 80 classes
+  model_name: facebook/detr-resnet-50
+  task_type: detection
+  num_classes: 80
   pretrained: true
-  
-  # Detection-specific settings
   confidence_threshold: 0.7
   iou_threshold: 0.5
   max_detections: 100
-  image_size: 800  # DETR's default image size
-  
-  # Training hyperparameters
+  image_size: 800
   learning_rate: 1e-4
   weight_decay: 1e-4
-  scheduler: "cosine"
+  scheduler: cosine
   scheduler_params:
     T_max: 300
     eta_min: 1e-6
-
-# Data Configuration
 data:
-  # Dataset paths
-  train_data_path: "/Volumes/<catalog>/<schema>/<volume>/<path>/data/train2017/"
-  train_annotation_file: "/Volumes/<catalog>/<schema>/<volume>/<path>/data/instances_train2017.json"
-  val_data_path: "/Volumes/<catalog>/<schema>/<volume>/<path>/data/val2017/"
-  val_annotation_file: "/Volumes/<catalog>/<schema>/<volume>/<path>/data/instances_val2017.json"
-  test_data_path: "/Volumes/<catalog>/<schema>/<volume>/<path>/data/test2017/"
-  test_annotation_file: "/Volumes/<catalog>/<schema>/<volume>/<path>/data/instances_test2017.json"
-  
-  # Data loading parameters
+  train_data_path: /Volumes/<catalog>/<schema>/<volume>/<path>/data/train2017/
+  train_annotation_file: /Volumes/<catalog>/<schema>/<volume>/<path>/data/instances_train2017.json
+  val_data_path: /Volumes/<catalog>/<schema>/<volume>/<path>/data/val2017/
+  val_annotation_file: /Volumes/<catalog>/<schema>/<volume>/<path>/data/instances_val2017.json
+  test_data_path: /Volumes/<catalog>/<schema>/<volume>/<path>/data/test2017/
+  test_annotation_file: /Volumes/<catalog>/<schema>/<volume>/<path>/data/instances_test2017.json
   batch_size: 16
   num_workers: 4
-  model_name: "facebook/detr-resnet-50"  # For adapter initialization
-  
-  # Image processing
-  image_size: [800, 800]
-  normalize_mean: [0.485, 0.456, 0.406]
-  normalize_std: [0.229, 0.224, 0.225]
-  
-  # Augmentation
+  model_name: facebook/detr-resnet-50
+  image_size:
+  - 800
+  - 800
+  normalize_mean:
+  - 0.485
+  - 0.456
+  - 0.406
+  normalize_std:
+  - 0.229
+  - 0.224
+  - 0.225
   augment: true
   augmentations:
     horizontal_flip: true
@@ -47,52 +41,38 @@ data:
     rotation: 10
     brightness_contrast: 0.2
     hue_saturation: 0.1
-
-# Training Configuration
 training:
-  # Basic training parameters
   max_epochs: 50
-  
-  # Learning rate and optimization
   learning_rate: 1e-4
   weight_decay: 1e-4
-  scheduler: "cosine"
+  scheduler: cosine
   scheduler_params:
     T_max: 300
     eta_min: 1e-6
-  
-  # Early stopping
   early_stopping_patience: 20
-  monitor_metric: "val_map"
-  monitor_mode: "max"
-  
-  # Checkpointing
-  checkpoint_dir: "/Volumes/<catalog>/<schema>/<volume>/<path>/checkpoints/detection"
-  volume_checkpoint_dir: "/Volumes/<catalog>/<schema>/<volume>/<path>/volume_checkpoints/detection"
+  monitor_metric: val_map
+  monitor_mode: max
+  checkpoint_dir: /Volumes/<catalog>/<schema>/<volume>/<path>/checkpoints/detection
+  volume_checkpoint_dir: /Volumes/<catalog>/<schema>/<volume>/<path>/volume_checkpoints/detection
   save_top_k: 3
-  
-  # Logging
   log_every_n_steps: 50
-  
-  # Distributed training
   distributed: true
-  use_ray: false  # Set to true for multi-node training with Ray
-  use_serverless_gpu: true  # Set to true for Serverless GPU compute
+  use_ray: false
+  use_serverless_gpu: true
   use_gpu: true
   num_workers: 1
   resources_per_worker:
     CPU: 4
     GPU: 1
-  
-  # Serverless GPU specific settings (only used when use_serverless_gpu: true)
-  serverless_gpu_type: "A10"  # A10 or H100
-  serverless_gpu_count: 4  # Number of GPUs to use
-
-# Output Configuration
+  serverless_gpu_type: A10
+  serverless_gpu_count: 4
+  master_port: null
+  preferred_strategy: null
+  preferred_devices: null
 output:
-  results_dir: "/Volumes/<catalog>/<schema>/<volume>/<path>/results/detection"
+  results_dir: /Volumes/<catalog>/<schema>/<volume>/<path>/results/detection
   save_predictions: true
   visualization:
     save_images: true
     confidence_threshold: 0.5
-    max_boxes: 20 
+    max_boxes: 20

@@ -40,12 +40,26 @@ def validate_config_for_simplified_mlflow(config: Dict[str, Any]) -> Dict[str, A
         'monitor_mode': 'training.monitor_mode',
         'early_stopping_patience': 'training.early_stopping_patience',
         'checkpoint_dir': 'training.checkpoint_dir',
-        'distributed': 'training.distributed'
+        'save_top_k': 'training.save_top_k',
+        'distributed': 'training.distributed',
+        'use_ray': 'training.use_ray',
+        'num_workers': 'training.num_workers',
+        'use_gpu': 'training.use_gpu',
+        'resources_per_worker': 'training.resources_per_worker'
+    }
+    
+    # Optional fields with defaults
+    optional_fields = {
+        'volume_checkpoint_dir': 'training.volume_checkpoint_dir',
+        'master_port': 'training.master_port',
+        'preferred_strategy': 'training.preferred_strategy',
+        'preferred_devices': 'training.preferred_devices'
     }
     
     missing_fields = []
     field_mappings = {}
     
+    # Map required fields
     for required_field, config_path in required_fields.items():
         if required_field not in validated_config:
             # Try to extract from nested config
@@ -65,21 +79,39 @@ def validate_config_for_simplified_mlflow(config: Dict[str, Any]) -> Dict[str, A
                 missing_fields.append(required_field)
                 print(f"❌ Missing required field: {required_field} (expected at {config_path})")
     
-    # 2. Add missing fields with defaults if possible
-    if 'save_top_k' not in validated_config:
-        validated_config['save_top_k'] = 3
-        print("✅ Added default save_top_k: 3")
+    # Map optional fields
+    for optional_field, config_path in optional_fields.items():
+        if optional_field not in validated_config:
+            keys = config_path.split('.')
+            value = validated_config
+            for key in keys:
+                if key in value:
+                    value = value[key]
+                else:
+                    value = None
+                    break
+            
+            if value is not None:
+                field_mappings[optional_field] = value
+                print(f"✅ Mapped optional {config_path} -> {optional_field}: {value}")
     
-    if 'volume_checkpoint_dir' not in validated_config:
+    # 2. Add missing fields with defaults if possible
+    # Add defaults for optional fields if not found
+    if 'volume_checkpoint_dir' not in field_mappings:
         # Try to infer from checkpoint_dir
-        if 'checkpoint_dir' in field_mappings:
-            checkpoint_dir = field_mappings['checkpoint_dir']
-            volume_dir = checkpoint_dir.replace('/checkpoints/', '/volume_checkpoints/')
-            validated_config['volume_checkpoint_dir'] = volume_dir
+        checkpoint_dir = field_mappings.get('checkpoint_dir')
+        if checkpoint_dir:
+            volume_dir = checkpoint_dir.replace('/checkpoints', '/volume_checkpoints')
+            field_mappings['volume_checkpoint_dir'] = volume_dir
             print(f"✅ Inferred volume_checkpoint_dir: {volume_dir}")
         else:
-            validated_config['volume_checkpoint_dir'] = None
+            field_mappings['volume_checkpoint_dir'] = None
             print("⚠️  No volume_checkpoint_dir specified (will be None)")
+    
+    # Add defaults for other optional fields
+    field_mappings.setdefault('master_port', None)
+    field_mappings.setdefault('preferred_strategy', None)
+    field_mappings.setdefault('preferred_devices', None)
     
     # 3. Add the mapped fields to the top level
     for field, value in field_mappings.items():
