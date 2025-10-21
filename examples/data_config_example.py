@@ -8,9 +8,9 @@ validation, and test datasets, which is required for proper dataset splitting.
 
 import yaml
 from pathlib import Path
-from src.tasks.detection.data import DetectionDataModule, DetectionDataConfig
-from src.tasks.classification.data import ClassificationDataModule, ClassificationDataConfig
-from src.tasks.semantic_segmentation.data import SemanticSegmentationDataModule, SemanticSegmentationDataConfig
+from databricks_cv_accelerator.tasks.detection.data import DetectionDataModule, DetectionDataConfig
+from databricks_cv_accelerator.tasks.classification.data import ClassificationDataModule, ClassificationDataConfig
+from databricks_cv_accelerator.tasks.semantic_segmentation.data import SemanticSegmentationDataModule, SemanticSegmentationDataConfig
 
 def example_detection_config():
     """Example configuration for object detection with separate train/val/test paths."""

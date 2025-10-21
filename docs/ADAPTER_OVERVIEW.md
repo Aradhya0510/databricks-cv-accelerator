@@ -167,8 +167,8 @@ output_adapter = get_output_adapter("facebook/mask2former-swin-base-coco-panopti
 ### Basic Usage
 
 ```python
-from src.tasks.classification.adapters import get_input_adapter, get_output_adapter
-from src.tasks.detection.adapters import get_input_adapter as get_detection_input_adapter, get_output_adapter as get_detection_output_adapter
+from databricks_cv_accelerator.tasks.classification.adapters import get_input_adapter, get_output_adapter
+from databricks_cv_accelerator.tasks.detection.adapters import get_input_adapter as get_detection_input_adapter, get_output_adapter as get_detection_output_adapter
 
 # Classification
 classifier_input_adapter = get_input_adapter("google/vit-base-patch16-224")

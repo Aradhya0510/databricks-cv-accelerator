@@ -54,19 +54,29 @@ training:
   monitor_metric: val_map
   monitor_mode: max
   checkpoint_dir: /Volumes/<catalog>/<schema>/<volume>/<path>/checkpoints/detection
+  volume_checkpoint_dir: /Volumes/<catalog>/<schema>/<volume>/<path>/volume_checkpoints/detection
   save_top_k: 3
   log_every_n_steps: 50
-  distributed: false
-  use_ray: false
+  # Distributed training settings (used by UnifiedTrainer)
+  distributed: false  # Set to true for distributed training
+  use_ray: false      # Set to true for Ray multi-node training
   use_gpu: true
+  num_workers: 1
   resources_per_worker:
     CPU: 4
     GPU: 1
-  volume_checkpoint_dir: /Volumes/<catalog>/<schema>/<volume>/<path>/volume_checkpoints/detection
-  num_workers: 1
   master_port: null
-  preferred_strategy: null
-  preferred_devices: null
+  preferred_strategy: null  # Options: "ddp", "auto", "ddp_notebook"
+  preferred_devices: null   # Options: "auto", 1, 2, 4, etc.
+
+# Serverless GPU configuration (notebook-level orchestration only, not used by UnifiedTrainer)
+# These parameters are used by the @distributed decorator in serverless notebooks
+serverless:
+  enabled: false        # Set to true to enable serverless GPU training
+  gpu_type: A10         # Options: A10, H100
+  gpu_count: 4          # Number of GPUs for distributed training
+  # Note: H100 only supports single-node (gpu_count should be 1 for H100)
+
 mlflow:
   experiment_name: /Users/<your.email@databricks.com>/cv_detection_yolos
   run_name: yolos_base

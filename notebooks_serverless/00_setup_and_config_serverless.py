@@ -207,7 +207,7 @@ from pathlib import Path
 sys.path.append('/Workspace/Repos/your-repo/Databricks_CV_ref/src')
 
 # Import framework components
-from config_serverless import load_config, get_default_config
+from databricks_cv_accelerator.config import load_config, get_default_config
 from tasks.detection.model import DetectionModel
 from tasks.detection.data import DetectionDataModule
 from training.trainer_serverless import UnifiedTrainerServerless
