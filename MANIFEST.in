@@ -1,0 +1,20 @@
+# Include documentation
+include README.md
+include LICENSE
+recursive-include docs *.md
+
+# Include configuration examples
+recursive-include configs *.yaml
+recursive-include configs_serverless *.yaml
+
+# Include requirements files
+include requirements.txt
+include requirements_pyfunc.txt
+
+# Exclude unwanted files
+global-exclude __pycache__
+global-exclude *.py[co]
+global-exclude .DS_Store
+global-exclude *.so
+global-exclude .git*
+
