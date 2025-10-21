@@ -42,7 +42,7 @@ Each segmentation module contains the following components:
 ### Semantic Segmentation
 
 ```python
-from src.tasks.semantic_segmentation import (
+from databricks_cv_accelerator.tasks.semantic_segmentation import (
     SemanticSegmentationModel,
     SemanticSegmentationDataModule,
     SemanticSegmentationModelConfig,
@@ -74,7 +74,7 @@ trainer.fit(model, data_module)
 ### Instance Segmentation
 
 ```python
-from src.tasks.instance_segmentation import (
+from databricks_cv_accelerator.tasks.instance_segmentation import (
     InstanceSegmentationModel,
     InstanceSegmentationDataModule,
     InstanceSegmentationModelConfig,
@@ -106,7 +106,7 @@ trainer.fit(model, data_module)
 ### Universal Segmentation
 
 ```python
-from src.tasks.universal_segmentation import (
+from databricks_cv_accelerator.tasks.universal_segmentation import (
     UniversalSegmentationModel,
     UniversalSegmentationDataModule,
     UniversalSegmentationModelConfig,
@@ -140,7 +140,7 @@ trainer.fit(model, data_module)
 Each module provides evaluation capabilities:
 
 ```python
-from src.tasks.semantic_segmentation import SemanticSegmentationEvaluator
+from databricks_cv_accelerator.tasks.semantic_segmentation import SemanticSegmentationEvaluator
 
 # Evaluate model
 evaluator = SemanticSegmentationEvaluator(
@@ -157,7 +157,7 @@ evaluator.plot_metrics(metrics, output_dir="evaluation_results")
 Each module provides inference capabilities:
 
 ```python
-from src.tasks.semantic_segmentation import SemanticSegmentationInference
+from databricks_cv_accelerator.tasks.semantic_segmentation import SemanticSegmentationInference
 import cv2
 
 # Initialize inference
@@ -193,15 +193,15 @@ The original unified segmentation module has been removed. Use the specific modu
 ### New Code
 ```python
 # For semantic segmentation
-from src.tasks.semantic_segmentation import SemanticSegmentationModel
+from databricks_cv_accelerator.tasks.semantic_segmentation import SemanticSegmentationModel
 model = SemanticSegmentationModel(config)
 
 # For instance segmentation  
-from src.tasks.instance_segmentation import InstanceSegmentationModel
+from databricks_cv_accelerator.tasks.instance_segmentation import InstanceSegmentationModel
 model = InstanceSegmentationModel(config)
 
 # For panoptic segmentation
-from src.tasks.panoptic_segmentation import PanopticSegmentationModel
+from databricks_cv_accelerator.tasks.panoptic_segmentation import PanopticSegmentationModel
 model = PanopticSegmentationModel(config)
 ```
 

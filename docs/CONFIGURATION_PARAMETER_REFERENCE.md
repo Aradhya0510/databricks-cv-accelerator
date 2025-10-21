@@ -665,8 +665,8 @@ python configs/validate_configs.py
 Or in Python:
 
 ```python
-from src.config import load_config
-from src.utils.config_validator import validate_config_for_simplified_mlflow
+from databricks_cv_accelerator.config import load_config
+from databricks_cv_accelerator.utils.config_validator import validate_config_for_simplified_mlflow
 
 config = load_config("configs/detection_detr_config.yaml")
 validated_config = validate_config_for_simplified_mlflow(config)

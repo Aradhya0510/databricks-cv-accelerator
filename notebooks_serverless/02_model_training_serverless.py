@@ -49,7 +49,7 @@
 # MAGIC    - Enter: `/Workspace/Users/your_username/Computer Vision/databricks-cv-accelerator`
 # MAGIC 4. **Apply Changes**: Click **Apply** and then **Confirm**
 # MAGIC 
-# MAGIC This makes the `src/` directory available in the serverless GPU environment, allowing the distributed training to import your custom modules.
+# MAGIC This makes the `databricks_cv_accelerator/` package available in the serverless GPU environment, allowing the distributed training to import your custom modules.
 
 # COMMAND ----------
 
@@ -68,7 +68,7 @@ import matplotlib.pyplot as plt
 from pathlib import Path
 
 # Add the workspace to Python path for serverless GPU environment
-# This ensures the src/ directory is available for imports
+# This ensures the databricks_cv_accelerator package is available for imports
 workspace_path = "/Workspace/Users/<your_username>/Computer Vision/databricks-cv-accelerator"
 if workspace_path not in sys.path:
     sys.path.append(workspace_path)
@@ -76,11 +76,11 @@ if workspace_path not in sys.path:
 else:
     print(f"✅ Workspace already in Python path: {workspace_path}")
 
-from src.config_serverless import load_config
-from src.tasks.detection.model import DetectionModel
-from src.tasks.detection.data import DetectionDataModule
-from src.tasks.detection.adapters import get_input_adapter
-from src.training.trainer import UnifiedTrainer
+from databricks_cv_accelerator.config_serverless import load_config
+from databricks_cv_accelerator.tasks.detection.model import DetectionModel
+from databricks_cv_accelerator.tasks.detection.data import DetectionDataModule
+from databricks_cv_accelerator.tasks.detection.adapters import get_input_adapter
+from databricks_cv_accelerator.training.trainer import UnifiedTrainer
 from lightning.pytorch.loggers import MLFlowLogger
 
 # Load configuration from previous notebooks
@@ -201,7 +201,7 @@ def setup_data_module():
     """Initialize the data module with proper configuration."""
     
     # Setup adapter first
-    from tasks.detection.adapters import get_input_adapter
+    from databricks_cv_accelerator.tasks.detection.adapters import get_input_adapter
     adapter = get_input_adapter(
         config["model"]["model_name"], 
         image_size=config["data"].get("image_size", 800)
@@ -272,7 +272,7 @@ def setup_serverless_trainer():
     run_name = f"{config['model']['model_name']}-{config['model']['task_type']}-serverless-training"
     
     # Set up logging
-    from utils.logging import create_databricks_logger
+    from databricks_cv_accelerator.utils.logging import create_databricks_logger
     logger = create_databricks_logger(
         experiment_name=experiment_name,
         run_name=run_name,

@@ -18,7 +18,7 @@ import torch
 from albumentations.pytorch import ToTensorV2
 from PIL import Image
 
-from src.utils.config import load_config
+from databricks_cv_accelerator.utils.config import load_config
 
 class BatchInference:
     def __init__(self, model_uri: str, config: Dict[str, Any]):
