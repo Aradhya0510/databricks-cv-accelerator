@@ -154,7 +154,10 @@ class OutputConfig:
     })
 
 def load_config(config_path: str) -> Dict[str, Any]:
-    """Load configuration from YAML file with proper type conversion."""
+    """Load configuration from YAML file with proper type conversion.
+    
+    Supports both standard and serverless GPU configurations.
+    """
     with open(config_path, 'r') as f:
         config = yaml.safe_load(f)
     
@@ -203,6 +206,25 @@ def load_config(config_path: str) -> Dict[str, Any]:
         config['training'].setdefault('master_port', None)
         config['training'].setdefault('preferred_strategy', None)
         config['training'].setdefault('preferred_devices', None)
+    
+    # Handle serverless section (if present)
+    if 'serverless' in config:
+        # Integer fields
+        for key in ['gpu_count']:
+            if key in config['serverless'] and config['serverless'][key] is not None:
+                config['serverless'][key] = int(config['serverless'][key])
+        
+        # Boolean fields
+        for key in ['enabled']:
+            if key in config['serverless']:
+                config['serverless'][key] = bool(config['serverless'][key])
+    else:
+        # Add default serverless section if missing
+        config['serverless'] = {
+            'enabled': False,
+            'gpu_type': 'A10',
+            'gpu_count': 4
+        }
     
     return config
 
@@ -354,4 +376,47 @@ def get_default_config(task: str) -> Dict[str, Any]:
             'results_dir': "/Volumes/<catalog>/<schema>/<volume>/<path>/results/universal_segmentation"
         })
     
-    return config 
+    return config
+
+def validate_config(config: Dict[str, Any]) -> bool:
+    """
+    Validate configuration for compatibility (including serverless GPU).
+    
+    Args:
+        config: Configuration dictionary
+        
+    Returns:
+        True if configuration is valid, False otherwise
+    """
+    # Check required sections
+    required_sections = ['model', 'data', 'training']
+    for section in required_sections:
+        if section not in config:
+            print(f"❌ Missing required section: {section}")
+            return False
+    
+    # Check serverless GPU configuration
+    if config.get('serverless', {}).get('enabled', False):
+        serverless_config = config['serverless']
+        gpu_type = serverless_config.get('gpu_type', 'A10')
+        gpu_count = serverless_config.get('gpu_count', 4)
+        
+        if gpu_type not in ['A10', 'H100']:
+            print(f"❌ Invalid serverless gpu_type: {gpu_type}. Must be 'A10' or 'H100'")
+            return False
+        
+        if gpu_type == 'H100' and gpu_count > 1:
+            print("⚠️  H100 GPUs only support single-node workflows")
+            print("   Automatically setting gpu_count to 1")
+            config['serverless']['gpu_count'] = 1
+        
+        if not config['training'].get('distributed', False):
+            print("⚠️  Serverless GPU requires distributed training. Setting distributed=True")
+            config['training']['distributed'] = True
+        
+        if config['training'].get('use_ray', False):
+            print("⚠️  Cannot use both Ray and Serverless GPU. Setting use_ray=False")
+            config['training']['use_ray'] = False
+    
+    print("✅ Configuration validation passed")
+    return True 

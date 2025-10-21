@@ -76,7 +76,7 @@ if workspace_path not in sys.path:
 else:
     print(f"✅ Workspace already in Python path: {workspace_path}")
 
-from databricks_cv_accelerator.config_serverless import load_config
+from databricks_cv_accelerator.config import load_config
 from databricks_cv_accelerator.tasks.detection.model import DetectionModel
 from databricks_cv_accelerator.tasks.detection.data import DetectionDataModule
 from databricks_cv_accelerator.tasks.detection.adapters import get_input_adapter
@@ -90,7 +90,8 @@ VOLUME = "your_volume"
 PROJECT_PATH = "cv_serverless_training"
 
 BASE_VOLUME_PATH = f"/Volumes/{CATALOG}/{SCHEMA}/{VOLUME}/{PROJECT_PATH}"
-CONFIG_PATH = f"{BASE_VOLUME_PATH}/configs_serverless/detection_detr_config.yaml"
+# Use consolidated config from configs/ directory
+CONFIG_PATH = f"{BASE_VOLUME_PATH}/configs/detection_detr_config.yaml"
 
 # Set up volume directories
 CHECKPOINT_DIR = f"{BASE_VOLUME_PATH}/checkpoints"
@@ -144,13 +145,15 @@ else:
             'weight_decay': 1e-4,
             'checkpoint_dir': CHECKPOINT_DIR,
             'distributed': True,
-            'use_serverless_gpu': True,
-            'serverless_gpu_type': 'A10',
-            'serverless_gpu_count': 4,
             'monitor_metric': 'val_map',
             'monitor_mode': 'max',
             'early_stopping_patience': 20,
             'log_every_n_steps': 50
+        },
+        'serverless': {
+            'enabled': True,
+            'gpu_type': 'A10',
+            'gpu_count': 4
         },
         'output': {
             'results_dir': RESULTS_DIR
@@ -244,7 +247,7 @@ data_module = setup_data_module()
 def setup_serverless_trainer():
     """Initialize the serverless trainer with proper configuration."""
     
-    # Create trainer config for the serverless approach
+    # Create clean trainer config (only UnifiedTrainer params, no serverless orchestration params)
     trainer_config = {
         'task': config['model']['task_type'],
         'model_name': config['model']['model_name'],
@@ -257,9 +260,6 @@ def setup_serverless_trainer():
         'volume_checkpoint_dir': f"{BASE_VOLUME_PATH}/volume_checkpoints",
         'save_top_k': 3,
         'distributed': config['training']['distributed'],
-        'use_serverless_gpu': config['training']['use_serverless_gpu'],
-        'serverless_gpu_type': config['training']['serverless_gpu_type'],
-        'serverless_gpu_count': config['training']['serverless_gpu_count'],
         'data_config': config['data'],
         'model_config': config['model']
     }
@@ -273,6 +273,12 @@ def setup_serverless_trainer():
     
     # Set up logging
     from databricks_cv_accelerator.utils.logging import create_databricks_logger
+    
+    # Get serverless config (with defaults if not present)
+    serverless_config = config.get('serverless', {})
+    gpu_type = serverless_config.get('gpu_type', 'A10')
+    gpu_count = serverless_config.get('gpu_count', 4)
+    
     logger = create_databricks_logger(
         experiment_name=experiment_name,
         run_name=run_name,
@@ -280,8 +286,8 @@ def setup_serverless_trainer():
             "task": config['model']['task_type'], 
             "model": config['model']['model_name'],
             "compute": "serverless_gpu",
-            "gpu_type": config['training']['serverless_gpu_type'],
-            "gpu_count": str(config['training']['serverless_gpu_count'])
+            "gpu_type": gpu_type,
+            "gpu_count": str(gpu_count)
         }
     )
     
@@ -291,9 +297,9 @@ def setup_serverless_trainer():
     print(f"   Max epochs: {config['training']['max_epochs']}")
     print(f"   Monitor metric: {config['training']['monitor_metric']}")
     print(f"   Distributed: {config['training']['distributed']}")
-    print(f"   Serverless GPU: {config['training']['use_serverless_gpu']}")
-    print(f"   GPU Type: {config['training']['serverless_gpu_type']}")
-    print(f"   GPU Count: {config['training']['serverless_gpu_count']}")
+    print(f"   Serverless GPU Enabled: {serverless_config.get('enabled', False)}")
+    print(f"   GPU Type: {gpu_type}")
+    print(f"   GPU Count: {gpu_count}")
     
     return model, data_module, logger, trainer_config
 
@@ -330,11 +336,13 @@ def verify_serverless_environment():
         print("❌ CUDA not available")
         serverless_available = False
     
-    # Check configuration
-    gpu_type = config['training']['serverless_gpu_type']
-    gpu_count = config['training']['serverless_gpu_count']
+    # Check configuration from serverless section
+    serverless_config = config.get('serverless', {})
+    gpu_type = serverless_config.get('gpu_type', 'A10')
+    gpu_count = serverless_config.get('gpu_count', 4)
     
     print(f"\nServerless GPU Configuration:")
+    print(f"   Enabled: {serverless_config.get('enabled', False)}")
     print(f"   GPU Type: {gpu_type}")
     print(f"   GPU Count: {gpu_count}")
     
@@ -344,8 +352,8 @@ def verify_serverless_environment():
     
     if gpu_type == 'H100' and gpu_count > 1:
         print("⚠️  H100 GPUs only support single-node workflows")
-        print("   Setting serverless_gpu_count to 1")
-        config['training']['serverless_gpu_count'] = 1
+        print("   Setting gpu_count to 1")
+        config['serverless']['gpu_count'] = 1
     
     return serverless_available
 
@@ -390,12 +398,17 @@ clear_gpu_memory()
 
 from serverless_gpu import distributed
 
+# Get serverless config for @distributed decorator
+serverless_config = config.get('serverless', {})
+SERVERLESS_GPU_COUNT = serverless_config.get('gpu_count', 4)
+SERVERLESS_GPU_TYPE = serverless_config.get('gpu_type', 'A10')
+
 @distributed(
-    gpus=config['training']['serverless_gpu_count'], 
-    gpu_type=config['training']['serverless_gpu_type'], 
+    gpus=SERVERLESS_GPU_COUNT, 
+    gpu_type=SERVERLESS_GPU_TYPE, 
     remote=True
 )
-def distributed_train(config_dict, DetectionModel, DetectionDataModule, UnifiedTrainer, MLFlowLogger, get_input_adapter):
+def distributed_train(config_dict, DetectionModel, DetectionDataModule, UnifiedTrainer, logger, get_input_adapter):
     """Distributed training function for Serverless GPU using UnifiedTrainer."""
     import lightning as pl
     
@@ -405,33 +418,44 @@ def distributed_train(config_dict, DetectionModel, DetectionDataModule, UnifiedT
     model = DetectionModel(model_config)
     
     # Setup data module with adapter (like setup_data_module function)
-    adapter = get_input_adapter(
-        config_dict['model_config']["model_name"], 
-        image_size=config_dict['data_config'].get("image_size", 800)
-    )
+    # Fix image size handling - handle both list and scalar formats
+    image_size = config_dict['data_config'].get("image_size", 800)
+    if isinstance(image_size, list):
+        image_size = image_size[0]  # Use first value if it's a list
+    elif isinstance(image_size, dict):
+        image_size = image_size.get("height", 800)  # Use height if it's a dict
     
+    adapter = get_input_adapter(config_dict['model_config']["model_name"], image_size=image_size)
     if adapter is None:
-        raise ValueError(f"Could not create adapter for model: {config_dict['model_config']['model_name']}")
+        print("❌ Failed to create adapter")
+        return False
     
     # Create data module with data config only
     data_module = DetectionDataModule(config_dict['data_config'])
     
-    # Assign adapter to data module (CRITICAL!)
+    # Assign adapter to data module
     data_module.adapter = adapter
     
-    # Setup the data module to create datasets (CRITICAL!)
+    # Setup the data module to create datasets
     data_module.setup()
     
-    # Create logger
-    logger = MLFlowLogger(
-        experiment_name=config_dict.get('mlflow_experiment_name', 'serverless-gpu-training'),
-        run_name=config_dict.get('mlflow_run_name', 'distributed-training'),
-        tags=config_dict.get('mlflow_tags', {})
-    )
+    trainer_dict = {
+        'task': config_dict['model_config']['task_type'],
+        'model_name': config_dict['model_config']['model_name'],
+        'max_epochs': config_dict['max_epochs'],
+        'log_every_n_steps': config_dict['log_every_n_steps'],
+        'monitor_metric': config_dict['monitor_metric'],
+        'monitor_mode': config_dict['monitor_mode'],
+        'early_stopping_patience': config_dict['early_stopping_patience'],
+        'checkpoint_dir': config_dict['checkpoint_dir'],
+        'volume_checkpoint_dir': config_dict['volume_checkpoint_dir'],
+        'save_top_k': config_dict.get('save_top_k', 3),
+        'distributed': config_dict['distributed']
+    }
     
     # Create UnifiedTrainer and run training
     trainer = UnifiedTrainer(
-        config=config_dict,
+        config=trainer_dict,
         model=model,
         data_module=data_module,
         logger=logger
@@ -460,7 +484,7 @@ try:
         DetectionModel,
         DetectionDataModule, 
         UnifiedTrainer,
-        MLFlowLogger,
+        logger,
         get_input_adapter
     )
     

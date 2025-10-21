@@ -70,7 +70,7 @@ from PIL import Image, ImageDraw, ImageFont
 # Add the src directory to Python path
 sys.path.append('/Workspace/Repos/your-repo/Databricks_CV_ref/src')
 
-from config_serverless import load_config
+from databricks_cv_accelerator.config import load_config
 from tasks.detection.model import DetectionModel
 from tasks.detection.data import DetectionDataModule
 from training.trainer_serverless import UnifiedTrainerServerless

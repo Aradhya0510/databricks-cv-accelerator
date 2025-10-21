@@ -11,7 +11,7 @@ Databricks_CV_ref/
 ├── databricks_cv_accelerator/    # 📦 INSTALLABLE PACKAGE
 │   ├── __init__.py
 │   ├── config.py
-│   ├── config_serverless.py
+│   ├── config.py
 │   ├── inference/
 │   ├── tasks/
 │   │   ├── classification/

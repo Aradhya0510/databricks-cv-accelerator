@@ -44,6 +44,11 @@ class DETRInputAdapter(BaseAdapter):
     - Handles image resizing according to DETR guidelines
     """
     def __init__(self, model_name: str, image_size: int = 800):
+        # Handle case where image_size might be a list [height, width] or dict
+        if isinstance(image_size, (list, tuple)):
+            image_size = image_size[0] if len(image_size) > 0 else 800
+        elif isinstance(image_size, dict):
+            image_size = image_size.get("height", 800)
         self.image_size = image_size
         self.processor = AutoImageProcessor.from_pretrained(
             model_name,
@@ -107,6 +112,11 @@ class YOLOSInputAdapter(BaseAdapter):
     - Handles image resizing according to YOLOS guidelines
     """
     def __init__(self, model_name: str, image_size: int = 800):
+        # Handle case where image_size might be a list [height, width] or dict
+        if isinstance(image_size, (list, tuple)):
+            image_size = image_size[0] if len(image_size) > 0 else 800
+        elif isinstance(image_size, dict):
+            image_size = image_size.get("height", 800)
         self.image_size = image_size
         self.processor = AutoImageProcessor.from_pretrained(
             model_name,
@@ -166,6 +176,11 @@ class DETROutputAdapter:
     """Adapter for DETR model outputs."""
     
     def __init__(self, model_name: str, image_size: int = 800):
+        # Handle case where image_size might be a list [height, width] or dict
+        if isinstance(image_size, (list, tuple)):
+            image_size = image_size[0] if len(image_size) > 0 else 800
+        elif isinstance(image_size, dict):
+            image_size = image_size.get("height", 800)
         self.image_size = image_size
         self.processor = AutoImageProcessor.from_pretrained(
             model_name,
@@ -278,6 +293,11 @@ class YOLOSOutputAdapter:
     """Adapter for YOLOS model outputs."""
     
     def __init__(self, model_name: str, image_size: int = 800):
+        # Handle case where image_size might be a list [height, width] or dict
+        if isinstance(image_size, (list, tuple)):
+            image_size = image_size[0] if len(image_size) > 0 else 800
+        elif isinstance(image_size, dict):
+            image_size = image_size.get("height", 800)
         self.image_size = image_size
         self.processor = AutoImageProcessor.from_pretrained(
             model_name,

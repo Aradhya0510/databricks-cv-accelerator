@@ -69,6 +69,14 @@ training:
   master_port: null
   preferred_strategy: null
   preferred_devices: null
+# Serverless GPU configuration (notebook-level orchestration only, not used by UnifiedTrainer)
+# These parameters are used by the @distributed decorator in serverless notebooks
+serverless:
+  enabled: false        # Set to true to enable serverless GPU training
+  gpu_type: A10         # Options: A10, H100
+  gpu_count: 4          # Number of GPUs for distributed training
+  # Note: H100 only supports single-node (gpu_count should be 1 for H100)
+
 mlflow:
   experiment_name: /Users/<your.email@databricks.com>/cv_classification_resnet
   run_name: resnet50

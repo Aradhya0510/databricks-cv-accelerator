@@ -30,7 +30,7 @@ mlflow.pytorch.autolog()
 # Add the src directory to Python path
 sys.path.append('/Workspace/Repos/your-repo/Databricks_CV_ref/src')
 
-from config_serverless import load_config
+from databricks_cv_accelerator.config import load_config
 from tasks.detection.model import DetectionModel
 from tasks.detection.data import DetectionDataModule
 from tasks.detection.adapters import get_input_adapter

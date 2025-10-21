@@ -244,7 +244,7 @@ Use the serverless GPU notebooks and configurations for optimized deep learning 
 
 **Notebooks:** `notebooks_serverless/` directory
 **Configs:** `configs_serverless/` directory
-**Import:** `from config_serverless import load_config` and `from training.trainer import UnifiedTrainer`
+**Import:** `from databricks_cv_accelerator.config import load_config` and `from training.trainer import UnifiedTrainer`
 
 **Serverless GPU Benefits:**
 - 🚀 **Automatic environment management** with pre-configured ML frameworks
@@ -266,7 +266,7 @@ Follow the provided reference notebooks in sequence. Choose the appropriate path
 6. **`notebooks/05_model_registration_deployment.py`** - Model deployment and serving setup
 
 **Serverless GPU Notebook Sequence:**
-1. **`notebooks_serverless/00_setup_and_config_serverless.py`** - Serverless GPU environment setup
+1. **`notebooks_serverless/00_setup_and_config.py`** - Serverless GPU environment setup
 2. **`notebooks_serverless/01_data_preparation.py`** - Dataset analysis and preprocessing validation
 3. **`notebooks_serverless/02_model_training_serverless.py`** - Serverless GPU training with MLflow tracking
 4. **`notebooks_serverless/03_hparam_tuning.py`** - Hyperparameter optimization with serverless GPU
@@ -455,9 +455,9 @@ from training.trainer import UnifiedTrainer
 ### Serverless GPU Compute (Recommended)
 ```bash
 # Use serverless notebooks and configs
-notebooks_serverless/00_setup_and_config_serverless.py
+notebooks_serverless/00_setup_and_config.py
 configs_serverless/detection_detr_config.yaml
-from config_serverless import load_config
+from databricks_cv_accelerator.config import load_config
 from training.trainer import UnifiedTrainer
 ```
 
@@ -468,7 +468,7 @@ from training.trainer import UnifiedTrainer
 | **Notebooks** | `notebooks/` | `notebooks_serverless/` |
 | **Configs** | `configs/` | `configs_serverless/` |
 | **Trainer** | `UnifiedTrainer` | `UnifiedTrainer` (with `@distributed`) |
-| **Config Module** | `config` | `config_serverless` |
+| **Config Module** | `config` | `config` |
 | **Distributed Training** | Ray or DDP | @distributed decorator |
 | **Cost Model** | Per-hour cluster | Pay-per-use GPU time |
 | **Environment Setup** | Manual | Automatic |
