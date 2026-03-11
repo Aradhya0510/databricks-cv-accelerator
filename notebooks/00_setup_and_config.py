@@ -193,7 +193,7 @@ sys.path.append('/Workspace/Repos/your-repo/Databricks_CV_ref/src')
 from config import load_config, get_default_config
 from tasks.detection.model import DetectionModel
 from tasks.detection.data import DetectionDataModule
-from training.trainer import UnifiedTrainer
+from training.trainer import Trainer
 from utils.logging import create_databricks_logger
 
 print("✅ Framework components imported successfully!")
@@ -234,8 +234,7 @@ def load_and_validate_config():
     print(f"Number of Classes: {config['model']['num_classes']}")
     print(f"Batch Size: {config['data']['batch_size']}")
     print(f"Max Epochs: {config['training']['max_epochs']}")
-    print(f"Learning Rate: {config['training']['learning_rate']}")
-    print(f"Distributed Training: {config['training']['distributed']}")
+    print(f"Learning Rate: {config['model']['learning_rate']}")
     
     return config
 
@@ -366,17 +365,17 @@ def check_framework_compatibility():
             'checkpoint_dir': f"{BASE_VOLUME_PATH}/checkpoints",
             'volume_checkpoint_dir': f"{BASE_VOLUME_PATH}/volume_checkpoints",
             'save_top_k': 3,
-            'distributed': config['training']['distributed']
+            'use_gpu': True
         }
 
         # Test trainer creation
-        unified_trainer = UnifiedTrainer(
+        trainer_instance = Trainer(
             config=trainer_config,
             model=model,
             data_module=data_module,
             logger=logger
         )
-        print("✅ UnifiedTrainer created successfully")
+        print("✅ Trainer created successfully")
         
         return True
         
@@ -420,7 +419,7 @@ print(f"   Task: {config['model']['task_type']}")
 print(f"   Classes: {config['model']['num_classes']}")
 print(f"   Batch Size: {config['data']['batch_size']}")
 print(f"   Max Epochs: {config['training']['max_epochs']}")
-print(f"   Learning Rate: {config['training']['learning_rate']}")
+print(f"   Learning Rate: {config['model']['learning_rate']}")
 
 if gpu_ready and data_available and framework_ready:
     print("\n🎉 SETUP COMPLETE! Ready to proceed to data preparation.")

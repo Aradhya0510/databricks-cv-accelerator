@@ -2,13 +2,13 @@
 
 ## Overview
 
-This guide explains the configuration requirements and compatibility for the simplified MLflow integration approach. The new approach requires specific fields in your configuration files to work properly with the `UnifiedTrainer`.
+This guide explains the configuration requirements and compatibility for the simplified MLflow integration approach. The new approach requires specific fields in your configuration files to work properly with the `Trainer`.
 
 ## ✅ **Updated Configuration Structure**
 
-### Required Fields for UnifiedTrainerConfig
+### Required Fields for TrainerConfig
 
-The `UnifiedTrainerConfig` dataclass requires these fields:
+The `TrainerConfig` dataclass requires these fields:
 
 ```yaml
 # These fields are required at the top level or can be mapped from nested sections
@@ -81,7 +81,7 @@ output:
 
 The configuration validator automatically maps these fields:
 
-| UnifiedTrainerConfig Field | Config Path | Description |
+| TrainerConfig Field | Config Path | Description |
 |----------------------------|-------------|-------------|
 | `task` | `model.task_type` | Task type (detection, classification, etc.) |
 | `model_name` | `model.model_name` | Model identifier |

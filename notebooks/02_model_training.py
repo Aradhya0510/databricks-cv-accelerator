@@ -57,7 +57,7 @@ sys.path.append('/Workspace/Repos/your-repo/Databricks_CV_ref/src')
 from config import load_config
 from tasks.detection.model import DetectionModel
 from tasks.detection.data import DetectionDataModule
-from training.trainer import UnifiedTrainer
+from training.trainer import Trainer
 from lightning.pytorch.loggers import MLFlowLogger
 
 # Load configuration from previous notebooks
@@ -106,20 +106,6 @@ else:
 print("✅ Configuration loaded successfully!")
 print(f"📁 Checkpoint directory: {config['training']['checkpoint_dir']}")
 
-# Validate configuration for simplified MLflow integration
-from utils.config_validator import validate_config_for_simplified_mlflow, print_config_compatibility_report
-
-# Print compatibility report
-print_config_compatibility_report(config)
-
-# Validate and update config for simplified MLflow integration
-try:
-    validated_config = validate_config_for_simplified_mlflow(config)
-    print("✅ Configuration validated for simplified MLflow integration!")
-except Exception as e:
-    print(f"❌ Configuration validation failed: {e}")
-    print("Please check your configuration file and ensure all required fields are present.")
-    raise
 
 # COMMAND ----------
 
@@ -400,15 +386,11 @@ def setup_trainer_config():
             'checkpoint_dir': f"{BASE_VOLUME_PATH}/checkpoints",
             'volume_checkpoint_dir': f"{BASE_VOLUME_PATH}/volume_checkpoints",
             'save_top_k': 3,
-            'distributed': config['training']['distributed'],
-            'use_ray': config['training'].get('use_ray', False)  # Default to False if not specified
+            'use_gpu': True
         }
         
         print(f"✅ Trainer configuration setup complete!")
         print(f"   Max epochs: {config['training']['max_epochs']}")
-        print(f"   Learning rate: {config['training']['learning_rate']}")
-        print(f"   Weight decay: {config['training']['weight_decay']}")
-        print(f"   Scheduler: {config['training']['scheduler']}")
         print(f"   Early stopping patience: {config['training']['early_stopping_patience']}")
         print(f"   Monitor metric: {config['training']['monitor_metric']}")
         print(f"   Monitor mode: {config['training']['monitor_mode']}")
@@ -417,12 +399,6 @@ def setup_trainer_config():
         if torch.cuda.is_available():
             num_gpus = torch.cuda.device_count()
             print(f"   GPUs available: {num_gpus}")
-            print(f"   Distributed training: {config['training']['distributed']}")
-            
-            if config['training']['distributed']:
-                strategy = "Ray (multi-node)" if config['training'].get('use_ray', False) else "Databricks DDP (single-node)"
-                print(f"   Strategy: {strategy}")
-                print(f"   Sync batch norm: Enabled")
         
         return trainer_config
         
@@ -531,22 +507,22 @@ def start_training(model, data_module, trainer_config, logger):
     
     try:
         # Initialize trainer with model, data module, and logger
-        # The new UnifiedTrainer expects these as constructor parameters
-        unified_trainer = UnifiedTrainer(
+        # The new Trainer expects these as constructor parameters
+        trainer_instance = Trainer(
             config=trainer_config,
             model=model,
             data_module=data_module,
             logger=logger
         )
         
-        print(f"✅ UnifiedTrainer initialized with:")
+        print(f"✅ Trainer initialized with:")
         print(f"   Model: {type(model).__name__}")
         print(f"   Data module: {type(data_module).__name__}")
         print(f"   Logger: {type(logger).__name__}")
         
         # Start training using the simplified approach
         print("🚀 Starting training...")
-        result = unified_trainer.train()
+        result = trainer_instance.train()
         
         print("✅ Training completed successfully!")
         
@@ -557,7 +533,7 @@ def start_training(model, data_module, trainer_config, logger):
             final_reserved = torch.cuda.memory_reserved() / 1e9
             print(f"🧹 Final GPU memory - Allocated: {final_allocated:.2f} GB, Reserved: {final_reserved:.2f} GB")
         
-        return True, unified_trainer
+        return True, trainer_instance
         
     except Exception as e:
         print(f"❌ Training failed: {e}")
@@ -566,7 +542,7 @@ def start_training(model, data_module, trainer_config, logger):
         return False, None
 
 # Start training
-training_success, unified_trainer = start_training(model, data_module, trainer_config, logger)
+training_success, trainer_instance = start_training(model, data_module, trainer_config, logger)
 
 # COMMAND ----------
 
@@ -604,18 +580,18 @@ check_training_status()
 
 # COMMAND ----------
 
-def evaluate_model(model, data_module, unified_trainer):
+def evaluate_model(model, data_module, trainer_instance):
     """Evaluate the trained model on validation set."""
     
-    if not all([model, data_module, unified_trainer]):
+    if not all([model, data_module, trainer_instance]):
         print("❌ Cannot evaluate - missing components")
         return None
     
     print("\n🔍 Evaluating trained model...")
     
     try:
-        # Use the UnifiedTrainer's test method
-        results = unified_trainer.test(model, data_module)
+        # Use the Trainer's test method
+        results = trainer_instance.test(model, data_module)
         
         print("✅ Evaluation completed!")
         print("📊 Test Results:")
@@ -633,8 +609,8 @@ def evaluate_model(model, data_module, unified_trainer):
         return None
 
 # Evaluate model
-if training_success and unified_trainer is not None:
-    evaluation_results = evaluate_model(model, data_module, unified_trainer)
+if training_success and trainer_instance is not None:
+    evaluation_results = evaluate_model(model, data_module, trainer_instance)
 else:
     evaluation_results = None
 
@@ -645,10 +621,10 @@ else:
 
 # COMMAND ----------
 
-def save_and_register_model(model, unified_trainer, evaluation_results):
+def save_and_register_model(model, trainer_instance, evaluation_results):
     """Save the trained model and register it in MLflow."""
     
-    if not model or not unified_trainer:
+    if not model or not trainer_instance:
         print("❌ Cannot save model - missing components")
         return False
     
@@ -657,8 +633,8 @@ def save_and_register_model(model, unified_trainer, evaluation_results):
     try:
         # Get best model checkpoint from the underlying PyTorch Lightning trainer
         checkpoint_callback = None
-        if hasattr(unified_trainer, 'trainer') and unified_trainer.trainer is not None:
-            for callback in unified_trainer.trainer.callbacks:
+        if hasattr(trainer_instance, 'trainer') and trainer_instance.trainer is not None:
+            for callback in trainer_instance.trainer.callbacks:
                 if hasattr(callback, 'best_model_path'):
                     checkpoint_callback = callback
                     break
@@ -730,8 +706,8 @@ def save_and_register_model(model, unified_trainer, evaluation_results):
         return False
 
 # Save and register model
-if training_success and unified_trainer is not None:
-    model_saved = save_and_register_model(model, unified_trainer, evaluation_results)
+if training_success and trainer_instance is not None:
+    model_saved = save_and_register_model(model, trainer_instance, evaluation_results)
 else:
     model_saved = False
 
@@ -758,7 +734,7 @@ print(f"   Classes: {config['model']['num_classes']}")
 
 print(f"\n✅ Training Configuration:")
 print(f"   Max epochs: {config['training']['max_epochs']}")
-print(f"   Learning rate: {config['training']['learning_rate']}")
+print(f"   Learning rate: {config['model']['learning_rate']}")
 print(f"   Batch size: {config['data']['batch_size']}")
 print(f"   GPUs: {torch.cuda.device_count() if torch.cuda.is_available() else 0}")
 

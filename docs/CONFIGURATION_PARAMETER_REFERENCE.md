@@ -34,7 +34,7 @@ Controls model architecture, task type, and training hyperparameters.
   - `"facebook/detr-resnet-50"` - Detection
   - `"microsoft/resnet-50"` - Classification
   - `"nvidia/mit-b0"` - Segmentation
-- **Used by:** ModelClass, DataModule, Adapters, UnifiedTrainer
+- **Used by:** ModelClass, DataModule, Adapters, Trainer
 - **Notes:** Must be valid HF model name for the task
 
 #### `task_type` (string, **required**)
@@ -45,7 +45,7 @@ Controls model architecture, task type, and training hyperparameters.
   - `"semantic_segmentation"`
   - `"instance_segmentation"`
   - `"universal_segmentation"`
-- **Used by:** UnifiedTrainer, task modules
+- **Used by:** Trainer, task modules
 - **Notes:** Determines which task pipeline to use
 
 #### `num_classes` (integer, **required**)
@@ -250,7 +250,7 @@ Controls training execution, checkpointing, and distributed training.
 
 #### `max_epochs` (integer, default: `100`)
 - **Description:** Maximum number of training epochs
-- **Used by:** UnifiedTrainer
+- **Used by:** Trainer
 - **Notes:** Replaces deprecated `model.epochs`
 
 #### `learning_rate` (float, default: `1e-4`)
@@ -265,7 +265,7 @@ Controls training execution, checkpointing, and distributed training.
 
 #### `early_stopping_patience` (integer, default: `10`)
 - **Description:** Epochs to wait before early stopping
-- **Used by:** UnifiedTrainer (EarlyStopping callback)
+- **Used by:** Trainer (EarlyStopping callback)
 
 #### `monitor_metric` (string, default: `"val_loss"`)
 - **Description:** Metric to monitor for early stopping
@@ -274,42 +274,42 @@ Controls training execution, checkpointing, and distributed training.
   - `"val_map"` - Mean Average Precision (detection)
   - `"val_miou"` - Mean IOU (segmentation)
   - `"val_acc"` - Accuracy (classification)
-- **Used by:** UnifiedTrainer
+- **Used by:** Trainer
 
 #### `monitor_mode` (string, default: `"min"`)
 - **Description:** Whether to minimize or maximize metric
 - **Valid values:** `"min"`, `"max"`
-- **Used by:** UnifiedTrainer
+- **Used by:** Trainer
 
 ### Checkpointing
 
 #### `checkpoint_dir` (string, **required**)
 - **Description:** Directory for local checkpoints
 - **Format:** Volume path like `/Volumes/<catalog>/<schema>/<volume>/checkpoints`
-- **Used by:** UnifiedTrainer
+- **Used by:** Trainer
 - **Notes:** Used during training
 
 #### `volume_checkpoint_dir` (string, optional)
 - **Description:** Directory for persistent volume checkpoints
 - **Format:** Volume path like `/Volumes/<catalog>/<schema>/<volume>/volume_checkpoints`
-- **Used by:** UnifiedTrainer (VolumeCheckpoint callback)
+- **Used by:** Trainer (VolumeCheckpoint callback)
 - **Notes:** For long-term storage, survives cluster termination
 
 #### `save_top_k` (integer, default: `3`)
 - **Description:** Number of best checkpoints to keep
-- **Used by:** UnifiedTrainer (ModelCheckpoint callback)
+- **Used by:** Trainer (ModelCheckpoint callback)
 
 ### Logging
 
 #### `log_every_n_steps` (integer, default: `50`)
 - **Description:** Frequency of metric logging
-- **Used by:** UnifiedTrainer
+- **Used by:** Trainer
 
 ### Distributed Training
 
 #### `distributed` (boolean, default: `false`)
 - **Description:** Enable distributed training
-- **Used by:** UnifiedTrainer
+- **Used by:** Trainer
 - **Notes:** Automatically enabled in multi-GPU jobs
 
 #### `use_ray` (boolean, default: `false`)
@@ -317,16 +317,16 @@ Controls training execution, checkpointing, and distributed training.
 - **Valid values:**
   - `false` - Use Databricks DDP (single-node multi-GPU)
   - `true` - Use Ray (multi-node)
-- **Used by:** UnifiedTrainer
+- **Used by:** Trainer
 
 #### `num_workers` (integer, default: `1`)
 - **Description:** Number of distributed training workers (GPUs/nodes)
-- **Used by:** UnifiedTrainer (for Ray training)
+- **Used by:** Trainer (for Ray training)
 - **Notes:** **DIFFERENT** from `data.num_workers` (DataLoader processes)!
 
 #### `use_gpu` (boolean, default: `true`)
 - **Description:** Whether to use GPUs
-- **Used by:** UnifiedTrainer
+- **Used by:** Trainer
 
 #### `resources_per_worker` (dict, default: `{CPU: 4, GPU: 1}`)
 - **Description:** Resources to allocate per Ray worker
@@ -336,11 +336,11 @@ Controls training execution, checkpointing, and distributed training.
     CPU: 4
     GPU: 1
   ```
-- **Used by:** UnifiedTrainer (Ray configuration)
+- **Used by:** Trainer (Ray configuration)
 
 #### `master_port` (integer, optional)
 - **Description:** Port for DDP communication
-- **Used by:** UnifiedTrainer (DDP setup)
+- **Used by:** Trainer (DDP setup)
 - **Notes:** Auto-selected if not specified
 
 ### Strategy Overrides
@@ -351,7 +351,7 @@ Controls training execution, checkpointing, and distributed training.
   - `"ddp"` - Distributed Data Parallel
   - `"auto"` - Auto-select based on environment
   - `"ddp_notebook"` - DDP in notebook (experimental)
-- **Used by:** UnifiedTrainer (strategy selection)
+- **Used by:** Trainer (strategy selection)
 - **Notes:** Typically set by job scripts, not YAML configs
 
 #### `preferred_devices` (string or integer, optional)
@@ -360,7 +360,7 @@ Controls training execution, checkpointing, and distributed training.
   - `"auto"` - Auto-detect GPUs
   - `1` - Use 1 GPU
   - `4` - Use 4 GPUs
-- **Used by:** UnifiedTrainer (device selection)
+- **Used by:** Trainer (device selection)
 - **Notes:** Typically set by job scripts, not YAML configs
 
 ---

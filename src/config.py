@@ -26,28 +26,28 @@ class ModelConfig:
     model_name: str
     num_classes: int
     pretrained: bool = True
-    
+
     # Training hyperparameters
     learning_rate: float = 1e-4
     weight_decay: float = 1e-4
     scheduler: str = "cosine"
     scheduler_params: Optional[Dict[str, Any]] = None
     epochs: int = 100
-    
+
     # Task-specific settings
     task_type: str = "detection"
     class_names: Optional[List[str]] = None
     segmentation_type: Optional[str] = None
-    
+
     # Detection-specific settings
     confidence_threshold: float = 0.5
     iou_threshold: float = 0.5
     max_detections: int = 100
-    
+
     # Classification-specific settings
     dropout: float = 0.2
     mixup_alpha: float = 0.2
-    
+
     # Segmentation-specific settings
     aux_loss_weight: float = 0.4
     mask_threshold: float = 0.5
@@ -62,17 +62,17 @@ class DataConfig:
     val_annotation_file: Optional[str] = None
     test_data_path: Optional[str] = None
     test_annotation_file: Optional[str] = None
-    
+
     # Data loading parameters
     batch_size: int = 16
     num_workers: int = 4
     model_name: str = ""  # For adapter initialization
-    
+
     # Image processing
     image_size: Union[List[int], Tuple[int, int]] = (512, 512)
     normalize_mean: Tuple[float, float, float] = (0.485, 0.456, 0.406)
     normalize_std: Tuple[float, float, float] = (0.229, 0.224, 0.225)
-    
+
     # Augmentation
     augment: bool = True
     augmentations: Optional[Dict[str, Any]] = field(default_factory=lambda: {
@@ -92,42 +92,15 @@ class DataConfig:
 @dataclass
 class TrainingConfig:
     """Training configuration."""
-    # Basic training parameters
     max_epochs: int = 100
-    
-    # Learning rate and optimization
-    learning_rate: float = 1e-4
-    weight_decay: float = 1e-4
-    scheduler: str = "cosine"
-    scheduler_params: Optional[Dict[str, Any]] = None
-    
-    # Early stopping
     early_stopping_patience: int = 10
     monitor_metric: str = "val_loss"
     monitor_mode: str = "min"
-    
-    # Checkpointing
     checkpoint_dir: str = "/Volumes/<catalog>/<schema>/<volume>/<path>/checkpoints"
-    volume_checkpoint_dir: Optional[str] = None  # Persistent storage for checkpoints
+    volume_checkpoint_dir: Optional[str] = None
     save_top_k: int = 3
-    
-    # Logging
     log_every_n_steps: int = 50
-    
-    # Distributed training
-    distributed: bool = False
-    use_ray: bool = False  # Whether to use Ray (multi-node) or Databricks DDP (single-node)
-    num_workers: int = 1  # Number of distributed training workers (not DataLoader workers)
     use_gpu: bool = True
-    resources_per_worker: Dict[str, int] = field(default_factory=lambda: {
-        "CPU": 4,
-        "GPU": 1
-    })
-    master_port: Optional[int] = None  # Port for DDP communication
-    
-    # Strategy overrides (typically set by job scripts)
-    preferred_strategy: Optional[str] = None  # e.g., "ddp", "auto", "ddp_notebook"
-    preferred_devices: Optional[Union[str, int]] = None  # e.g., "auto", 4, 1
 
 @dataclass
 class MLflowConfig:
@@ -157,53 +130,50 @@ def load_config(config_path: str) -> Dict[str, Any]:
     """Load configuration from YAML file with proper type conversion."""
     with open(config_path, 'r') as f:
         config = yaml.safe_load(f)
-    
+
     # Convert types at the source
     if 'model' in config:
         # Integer fields
         for key in ['epochs', 'num_classes', 'max_detections']:
             if key in config['model']:
                 config['model'][key] = int(config['model'][key])
-        
+
         # Float fields
         for key in ['learning_rate', 'weight_decay', 'confidence_threshold', 'iou_threshold']:
             if key in config['model']:
                 config['model'][key] = float(config['model'][key])
-        
+
         # Boolean fields
         for key in ['pretrained']:
             if key in config['model']:
                 config['model'][key] = bool(config['model'][key])
-    
+
     if 'data' in config:
         # Integer fields
         for key in ['batch_size', 'num_workers']:
             if key in config['data']:
                 config['data'][key] = int(config['data'][key])
-    
+
     if 'training' in config:
         # Integer fields
-        for key in ['max_epochs', 'early_stopping_patience', 'save_top_k', 'log_every_n_steps', 'num_workers', 'master_port', 'preferred_devices']:
+        for key in ['max_epochs', 'early_stopping_patience', 'save_top_k', 'log_every_n_steps']:
             if key in config['training'] and config['training'][key] is not None:
                 config['training'][key] = int(config['training'][key])
-        
-        # Float fields
-        for key in ['learning_rate', 'weight_decay']:
-            if key in config['training']:
-                config['training'][key] = float(config['training'][key])
-        
+
         # Boolean fields
-        for key in ['distributed', 'use_ray', 'use_gpu']:
+        for key in ['use_gpu']:
             if key in config['training']:
                 config['training'][key] = bool(config['training'][key])
-        
-        # Add defaults for new optional fields if missing
+
+        # Add defaults for optional fields if missing
         config['training'].setdefault('volume_checkpoint_dir', None)
-        config['training'].setdefault('num_workers', 1)
-        config['training'].setdefault('master_port', None)
-        config['training'].setdefault('preferred_strategy', None)
-        config['training'].setdefault('preferred_devices', None)
-    
+
+        # Clean up removed fields (backwards compatibility during migration)
+        for removed_key in ['distributed', 'use_ray', 'num_workers', 'resources_per_worker',
+                           'master_port', 'preferred_strategy', 'preferred_devices',
+                           'learning_rate', 'weight_decay', 'scheduler', 'scheduler_params']:
+            config['training'].pop(removed_key, None)
+
     return config
 
 def save_config(config: Dict[str, Any], config_path: str):
@@ -229,7 +199,7 @@ def get_default_config(task: str) -> Dict[str, Any]:
         'mlflow': asdict(MLflowConfig()),
         'output': asdict(OutputConfig())
     }
-    
+
     # Task-specific configurations
     if task == "detection":
         config['model'].update({
@@ -261,7 +231,7 @@ def get_default_config(task: str) -> Dict[str, Any]:
         config['output'].update({
             'results_dir': "/Volumes/<catalog>/<schema>/<volume>/<path>/results/detection"
         })
-        
+
     elif task == "classification":
         config['model'].update({
             'model_name': "microsoft/resnet-50",
@@ -291,7 +261,7 @@ def get_default_config(task: str) -> Dict[str, Any]:
         config['output'].update({
             'results_dir': "/Volumes/<catalog>/<schema>/<volume>/<path>/results/classification"
         })
-        
+
     elif task == "semantic_segmentation":
         config['model'].update({
             'model_name': "nvidia/mit-b0",
@@ -322,7 +292,7 @@ def get_default_config(task: str) -> Dict[str, Any]:
         config['output'].update({
             'results_dir': "/Volumes/<catalog>/<schema>/<volume>/<path>/results/semantic_segmentation"
         })
-        
+
     elif task == "universal_segmentation":
         config['model'].update({
             'model_name': "facebook/mask2former-swin-base-coco-panoptic",
@@ -353,5 +323,5 @@ def get_default_config(task: str) -> Dict[str, Any]:
         config['output'].update({
             'results_dir': "/Volumes/<catalog>/<schema>/<volume>/<path>/results/universal_segmentation"
         })
-    
-    return config 
+
+    return config

@@ -12,7 +12,7 @@ Computer vision projects are often burdened by the overwhelming number of decisi
 * **Complete Training Loop Abstraction**: Built on PyTorch Lightning, the framework **eliminates the need for training code**. No training loops, optimizers, or schedulers to write - Lightning handles everything automatically.
 * **Seamless MLflow Integration**: **Zero-configuration experiment tracking** through Lightning's native MLflow integration. All metrics, parameters, and artifacts are logged automatically.
 * **Reducing cognitive and setup overhead:** The framework expects datasets in the MS COCO format—an image folder and a single `annotations.json`. For users bringing in new model architectures, only a small adapter class is needed to plug the model into the framework.
-* **Promoting best practices:** Built on PyTorch Lightning, Ray, MLflow, Hugging Face Transformers, and Albumentations, the framework incorporates community-standard tools to ensure reproducibility, traceability, and scalability.
+* **Promoting best practices:** Built on PyTorch Lightning, MLflow, Hugging Face Transformers, and Albumentations, the framework incorporates community-standard tools to ensure reproducibility, traceability, and scalability.
 * **Enabling rapid experimentation:** Configuration files define models, datasets, and training settings, allowing users to switch tasks or models without rewriting core logic.
 
 Users can walk through the provided example notebooks to:
@@ -30,8 +30,8 @@ Once training is running, checkpoints are automatically saved to configured volu
 
 * **Lightning**: **Completely abstracts the training loop** - no training code needed. Provides automatic distributed training, checkpointing, early stopping, and MLflow integration.
 * **Hugging Face Transformers**: **Completely abstracts model management** through Auto-classes. Provides high-quality pre-trained vision models such as DETR, YOLO, ViT, SegFormer, and Mask2Former with zero setup - just specify the model name.
-* **Ray**: Powers distributed training and large-scale hyperparameter tuning. Enables multi-GPU/multi-node workloads on Databricks.
 * **MLflow**: **Seamlessly integrated through Lightning** for automatic experiment tracking, model registry, and serving. Tracks parameters, metrics, models, and artifacts without any manual setup.
+* **Optuna**: Powers hyperparameter tuning with efficient Bayesian optimization (TPE sampler) and pruning strategies.
 * **Albumentations**: Standardizes and simplifies image augmentations to improve model robustness across datasets.
 * **PyCOCOTools**: Provides reliable annotation parsing, evaluation, and visualization tools using the COCO format.
 
@@ -93,7 +93,7 @@ Framework:  # Lightning automatically logs everything to MLflow
 
 ## 🧩 Modularity and Extensibility
 
-* **UnifiedTrainer**: Handles all training logic, seamlessly switching between local and distributed modes.
+* **Trainer**: Handles all training logic, with automatic DDP on multi-GPU Jobs clusters and single-GPU in notebooks.
 * **DetectionModel & DetectionDataModule**: Encapsulate task-specific logic, keeping model code separate from dataset management.
 * **Adapter System**: **Complete abstraction of model-specific data processing** - input and output adapters handle all format conversions automatically. Minimizes the work needed to plug in new models—define input and output adapters (e.g., MyModelInputAdapter, MyModelOutputAdapter), register them with get_input_adapter() and get_output_adapter(), and start training.
 
@@ -205,7 +205,7 @@ Organize your Unity Catalog volume with the following structure:
    - Data paths to point to your Unity Catalog volume
    - Model parameters (batch size, learning rate, epochs)
    - Training settings (checkpoint directory, monitoring metrics)
-   - Compute-specific parameters (GPU settings, distributed training options)
+   - GPU settings
 
 Example configuration:
 ```yaml
@@ -224,82 +224,27 @@ data:
 
 training:
   max_epochs: 300
-  learning_rate: 1e-4
   checkpoint_dir: "/Volumes/your_catalog/your_schema/your_volume/checkpoints"
+  use_gpu: true
 ```
 
-### Step 4: Choose Your Compute Environment
+### Step 4: Notebook Workflow
 
-The framework supports two compute environments for maximum flexibility:
+Follow the provided reference notebooks in sequence:
 
-#### Option A: Standard Databricks Compute
-Use the standard notebooks and configurations for traditional Databricks compute:
-
-**Notebooks:** `notebooks/` directory
-**Configs:** `configs/` directory
-**Import:** `from config import load_config` and `from training.trainer import UnifiedTrainer`
-
-#### Option B: Serverless GPU Compute (Recommended)
-Use the serverless GPU notebooks and configurations for optimized deep learning workloads:
-
-**Notebooks:** `notebooks_serverless/` directory
-**Configs:** `configs_serverless/` directory
-**Import:** `from config_serverless import load_config` and `from training.trainer import UnifiedTrainer`
-
-**Serverless GPU Benefits:**
-- 🚀 **Automatic environment management** with pre-configured ML frameworks
-- 💰 **Cost optimization** with pay-per-use pricing
-- ⚡ **Optimized GPU utilization** and automatic scaling
-- 🔧 **Interactive development** support for both interactive and batch workloads
-- 🎯 **A10 and H100 GPU support** with automatic distributed training setup
-
-### Step 5: Notebook Workflow
-
-Follow the provided reference notebooks in sequence. Choose the appropriate path based on your compute environment:
-
-**Standard Compute Notebook Sequence:**
 1. **`notebooks/00_setup_and_config.py`** - Environment validation and configuration setup
 2. **`notebooks/01_data_preparation.py`** - Dataset analysis and preprocessing validation
 3. **`notebooks/02_model_training.py`** - Model training with MLflow tracking
-4. **`notebooks/03_hparam_tuning.py`** - Hyperparameter optimization (optional)
+4. **`notebooks/03_hparam_tuning.py`** - Hyperparameter optimization with Optuna (optional)
 5. **`notebooks/04_model_evaluation.py`** - Comprehensive model evaluation
 6. **`notebooks/05_model_registration_deployment.py`** - Model deployment and serving setup
+7. **`notebooks/06_model_monitoring.py`** - Model monitoring and drift detection
 
-**Serverless GPU Notebook Sequence:**
-1. **`notebooks_serverless/00_setup_and_config_serverless.py`** - Serverless GPU environment setup
-2. **`notebooks_serverless/01_data_preparation.py`** - Dataset analysis and preprocessing validation
-3. **`notebooks_serverless/02_model_training_serverless.py`** - Serverless GPU training with MLflow tracking
-4. **`notebooks_serverless/03_hparam_tuning.py`** - Hyperparameter optimization with serverless GPU
-5. **`notebooks_serverless/04_model_evaluation_serverless.py`** - Comprehensive model evaluation
-6. **`notebooks_serverless/05_model_registration_deployment.py`** - Model deployment and serving setup
-
-**Configuration Setup:**
-- **Standard:** Copy and customize configs from `configs/` directory
-- **Serverless GPU:** Copy and customize configs from `configs_serverless/` directory
+**Notebooks** run on single GPU interactively. For multi-GPU training, use **Databricks Jobs** (see below).
 
 **Important:** Ensure your configuration parameters align with your available compute resources, particularly GPU memory, batch size, and training duration.
 
-### Step 6: Serverless GPU Configuration (Optional)
-
-If using Serverless GPU compute, configure the following parameters in your `configs_serverless/` config files:
-
-```yaml
-training:
-  # Enable serverless GPU
-  use_serverless_gpu: true
-  distributed: true
-  use_ray: false  # Disabled when using serverless GPU
-  
-  # Serverless GPU specific settings
-  serverless_gpu_type: "A10"  # A10 or H100
-  serverless_gpu_count: 4     # Number of GPUs to use
-```
-
-**GPU Type Options:**
-- **A10**: Multi-node support, cost-effective for most workloads
-- **H100**: Single-node only, high-performance for large models
-
-### Step 7: MLflow Integration
+### Step 5: MLflow Integration
 
 **Zero-Configuration MLflow Integration:** The framework uses Lightning's native MLflow integration for automatic experiment tracking, model registry, and serving.
 
@@ -313,7 +258,7 @@ training:
 **Usage Example:**
 ```python
 from utils.logging import create_databricks_logger
-from training.trainer import UnifiedTrainer
+from training.trainer import Trainer
 
 # Create logger with automatic integration
 mlf_logger = create_databricks_logger(
@@ -323,7 +268,7 @@ mlf_logger = create_databricks_logger(
 )
 
 # Initialize trainer with logger
-unified_trainer = UnifiedTrainer(
+trainer = Trainer(
     config=config,
     model=model,
     data_module=data_module,
@@ -331,7 +276,7 @@ unified_trainer = UnifiedTrainer(
 )
 
 # Start training - all logging handled automatically
-result = unified_trainer.train()
+result = trainer.train()
 ```
 
 **Everything is automatic:**
@@ -398,7 +343,7 @@ model:
 * **Instance Segmentation**: Specialized module for Mask2Former and other instance segmentation models
 * **Panoptic Segmentation**: Complete module for unified scene understanding with Mask2Former and similar models
 * **Full COCO dataset compatibility** across all tasks
-* **Distributed training** using Ray on Databricks
+* **Automatic multi-GPU DDP** on Databricks Jobs clusters
 * **MLflow-based experiment tracking** and logging
 * **Lightning-based checkpointing** and early stopping
 * **Adapter interface** for integrating new models
@@ -443,35 +388,21 @@ For detailed information about each task module, see:
 
 ## 🚀 Quick Start Guide
 
-### Standard Databricks Compute
 ```bash
-# Use standard notebooks and configs
+# Use notebooks for interactive development
 notebooks/00_setup_and_config.py
 configs/detection_detr_config.yaml
+```
+
+```python
 from config import load_config
-from training.trainer import UnifiedTrainer
-```
+from training.trainer import Trainer
 
-### Serverless GPU Compute (Recommended)
-```bash
-# Use serverless notebooks and configs
-notebooks_serverless/00_setup_and_config_serverless.py
-configs_serverless/detection_detr_config.yaml
-from config_serverless import load_config
-from training.trainer import UnifiedTrainer
+config = load_config("configs/detection_detr_config.yaml")
+# ... initialize model and data ...
+trainer = Trainer(config=trainer_config, model=model, data_module=data_module, logger=logger)
+trainer.train()
 ```
-
-### Key Differences
-| Feature | Standard Compute | Serverless GPU |
-|---------|------------------|----------------|
-| **Environment** | Traditional Databricks | Serverless GPU |
-| **Notebooks** | `notebooks/` | `notebooks_serverless/` |
-| **Configs** | `configs/` | `configs_serverless/` |
-| **Trainer** | `UnifiedTrainer` | `UnifiedTrainer` (with `@distributed`) |
-| **Config Module** | `config` | `config_serverless` |
-| **Distributed Training** | Ray or DDP | @distributed decorator |
-| **Cost Model** | Per-hour cluster | Pay-per-use GPU time |
-| **Environment Setup** | Manual | Automatic |
 
 ---
 

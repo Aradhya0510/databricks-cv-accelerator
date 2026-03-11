@@ -43,12 +43,6 @@ data:
     hue_saturation: 0.1
 training:
   max_epochs: 50
-  learning_rate: 1e-4
-  weight_decay: 1e-4
-  scheduler: cosine
-  scheduler_params:
-    T_max: 300
-    eta_min: 1e-6
   early_stopping_patience: 20
   monitor_metric: val_map
   monitor_mode: max
@@ -56,16 +50,7 @@ training:
   volume_checkpoint_dir: /Volumes/<catalog>/<schema>/<volume>/<path>/volume_checkpoints/detection
   save_top_k: 3
   log_every_n_steps: 50
-  distributed: false
-  use_ray: false
   use_gpu: true
-  num_workers: 1
-  resources_per_worker:
-    CPU: 4
-    GPU: 1
-  master_port: null
-  preferred_strategy: null
-  preferred_devices: null
 mlflow:
   experiment_name: /Users/<your.email@databricks.com>/cv_detection_detr
   run_name: detr_resnet50

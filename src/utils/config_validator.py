@@ -1,39 +1,39 @@
 """
-Configuration validator for the simplified MLflow integration approach.
+Configuration validator for the training pipeline.
 
-This utility helps ensure config files are compatible with the new UnifiedTrainer
-and provides validation for the simplified MLflow integration approach.
+This utility helps ensure config files are compatible with the Trainer
+and provides validation for the training configuration.
 """
 
 import os
 from dataclasses import fields
 from typing import Any, Dict, List, Optional
 
-from training.trainer import UnifiedTrainerConfig
+from training.trainer import TrainerConfig
 
 
 def validate_config_for_simplified_mlflow(config: Dict[str, Any]) -> Dict[str, Any]:
     """
-    Validate and update configuration for compatibility with simplified MLflow integration.
-    
+    Validate and update configuration for compatibility with Trainer.
+
     Args:
         config: The configuration dictionary to validate
-        
+
     Returns:
         Updated configuration with any necessary fixes applied
-        
+
     Raises:
         ValueError: If required fields are missing and cannot be inferred
     """
-    print("🔍 Validating configuration for simplified MLflow integration...")
-    
+    print("Validating configuration...")
+
     # Create a copy to avoid modifying the original
     validated_config = config.copy()
-    
-    # 1. Check for required UnifiedTrainerConfig fields
+
+    # 1. Check for required TrainerConfig fields
     required_fields = {
         'task': 'model.task_type',
-        'model_name': 'model.model_name', 
+        'model_name': 'model.model_name',
         'max_epochs': 'training.max_epochs',
         'log_every_n_steps': 'training.log_every_n_steps',
         'monitor_metric': 'training.monitor_metric',
@@ -41,24 +41,17 @@ def validate_config_for_simplified_mlflow(config: Dict[str, Any]) -> Dict[str, A
         'early_stopping_patience': 'training.early_stopping_patience',
         'checkpoint_dir': 'training.checkpoint_dir',
         'save_top_k': 'training.save_top_k',
-        'distributed': 'training.distributed',
-        'use_ray': 'training.use_ray',
-        'num_workers': 'training.num_workers',
         'use_gpu': 'training.use_gpu',
-        'resources_per_worker': 'training.resources_per_worker'
     }
-    
+
     # Optional fields with defaults
     optional_fields = {
         'volume_checkpoint_dir': 'training.volume_checkpoint_dir',
-        'master_port': 'training.master_port',
-        'preferred_strategy': 'training.preferred_strategy',
-        'preferred_devices': 'training.preferred_devices'
     }
-    
+
     missing_fields = []
     field_mappings = {}
-    
+
     # Map required fields
     for required_field, config_path in required_fields.items():
         if required_field not in validated_config:
@@ -71,14 +64,13 @@ def validate_config_for_simplified_mlflow(config: Dict[str, Any]) -> Dict[str, A
                 else:
                     value = None
                     break
-            
+
             if value is not None:
                 field_mappings[required_field] = value
-                print(f"✅ Mapped {config_path} -> {required_field}: {value}")
             else:
                 missing_fields.append(required_field)
-                print(f"❌ Missing required field: {required_field} (expected at {config_path})")
-    
+                print(f"Missing required field: {required_field} (expected at {config_path})")
+
     # Map optional fields
     for optional_field, config_path in optional_fields.items():
         if optional_field not in validated_config:
@@ -90,61 +82,47 @@ def validate_config_for_simplified_mlflow(config: Dict[str, Any]) -> Dict[str, A
                 else:
                     value = None
                     break
-            
+
             if value is not None:
                 field_mappings[optional_field] = value
-                print(f"✅ Mapped optional {config_path} -> {optional_field}: {value}")
-    
-    # 2. Add missing fields with defaults if possible
+
     # Add defaults for optional fields if not found
     if 'volume_checkpoint_dir' not in field_mappings:
-        # Try to infer from checkpoint_dir
         checkpoint_dir = field_mappings.get('checkpoint_dir')
         if checkpoint_dir:
             volume_dir = checkpoint_dir.replace('/checkpoints', '/volume_checkpoints')
             field_mappings['volume_checkpoint_dir'] = volume_dir
-            print(f"✅ Inferred volume_checkpoint_dir: {volume_dir}")
         else:
             field_mappings['volume_checkpoint_dir'] = None
-            print("⚠️  No volume_checkpoint_dir specified (will be None)")
-    
-    # Add defaults for other optional fields
-    field_mappings.setdefault('master_port', None)
-    field_mappings.setdefault('preferred_strategy', None)
-    field_mappings.setdefault('preferred_devices', None)
-    
-    # 3. Add the mapped fields to the top level
+
+    # Add the mapped fields to the top level
     for field, value in field_mappings.items():
         validated_config[field] = value
-    
-    # 4. Check for deprecated MLflow configuration
+
+    # Check for deprecated MLflow configuration
     if 'mlflow' in validated_config:
-        print("⚠️  Found deprecated 'mlflow' section - this is no longer needed")
-        print("   The simplified approach uses create_databricks_logger() directly")
-        print("   You can remove the mlflow section from your config")
-        # Don't remove it automatically to avoid breaking existing code
-    
-    # 5. Validate field types
+        print("Found 'mlflow' section - this is used for experiment naming only")
+
+    # Validate field types
     try:
-        # Test if the config can be used to create UnifiedTrainerConfig
-        test_config = {k: v for k, v in validated_config.items() 
-                      if k in [f.name for f in fields(UnifiedTrainerConfig)]}
-        UnifiedTrainerConfig(**test_config)
-        print("✅ Configuration validation passed!")
+        test_config = {k: v for k, v in validated_config.items()
+                      if k in [f.name for f in fields(TrainerConfig)]}
+        TrainerConfig(**test_config)
+        print("Configuration validation passed!")
     except Exception as e:
-        print(f"❌ Configuration validation failed: {e}")
+        print(f"Configuration validation failed: {e}")
         raise ValueError(f"Configuration validation failed: {e}")
-    
+
     return validated_config
 
 
 def get_config_compatibility_report(config: Dict[str, Any]) -> Dict[str, Any]:
     """
     Generate a compatibility report for the configuration.
-    
+
     Args:
         config: The configuration dictionary to analyze
-        
+
     Returns:
         Dictionary containing compatibility information
     """
@@ -154,14 +132,14 @@ def get_config_compatibility_report(config: Dict[str, Any]) -> Dict[str, Any]:
         'warnings': [],
         'recommendations': []
     }
-    
+
     # Check for required sections
     required_sections = ['model', 'data', 'training']
     for section in required_sections:
         if section not in config:
             report['issues'].append(f"Missing required section: {section}")
             report['compatible'] = False
-    
+
     # Check for required model fields
     if 'model' in config:
         model_required = ['model_name', 'task_type', 'num_classes']
@@ -169,68 +147,63 @@ def get_config_compatibility_report(config: Dict[str, Any]) -> Dict[str, Any]:
             if field not in config['model']:
                 report['issues'].append(f"Missing model.{field}")
                 report['compatible'] = False
-    
+
     # Check for required training fields
     if 'training' in config:
-        training_required = ['max_epochs', 'learning_rate', 'monitor_metric', 'monitor_mode']
+        training_required = ['max_epochs', 'monitor_metric', 'monitor_mode']
         for field in training_required:
             if field not in config['training']:
                 report['issues'].append(f"Missing training.{field}")
                 report['compatible'] = False
-    
-    # Check for deprecated MLflow configuration
-    if 'mlflow' in config:
-        report['warnings'].append("Deprecated 'mlflow' section found - no longer needed")
-        report['recommendations'].append("Remove the mlflow section and use create_databricks_logger() directly")
-    
+
     # Check for missing volume checkpoint directory
     if 'training' in config and 'checkpoint_dir' in config['training']:
         if 'volume_checkpoint_dir' not in config['training']:
             report['warnings'].append("No volume_checkpoint_dir specified")
             report['recommendations'].append("Add volume_checkpoint_dir for persistent storage")
-    
+
     return report
 
 
 def print_config_compatibility_report(config: Dict[str, Any]) -> None:
     """
     Print a formatted compatibility report for the configuration.
-    
+
     Args:
         config: The configuration dictionary to analyze
     """
     report = get_config_compatibility_report(config)
-    
-    print("\n📋 Configuration Compatibility Report")
+
+    print("\nConfiguration Compatibility Report")
     print("=" * 50)
-    
+
     if report['compatible']:
-        print("✅ Configuration is compatible with simplified MLflow integration")
+        print("Configuration is compatible")
     else:
-        print("❌ Configuration has compatibility issues")
-    
+        print("Configuration has compatibility issues")
+
     if report['issues']:
-        print("\n🚨 Issues:")
+        print("\nIssues:")
         for issue in report['issues']:
-            print(f"   • {issue}")
-    
+            print(f"   - {issue}")
+
     if report['warnings']:
-        print("\n⚠️  Warnings:")
+        print("\nWarnings:")
         for warning in report['warnings']:
-            print(f"   • {warning}")
-    
+            print(f"   - {warning}")
+
     if report['recommendations']:
-        print("\n💡 Recommendations:")
+        print("\nRecommendations:")
         for rec in report['recommendations']:
-            print(f"   • {rec}")
-    
+            print(f"   - {rec}")
+
     print("=" * 50)
 
 
 def create_simplified_config_template() -> Dict[str, Any]:
     """
-    Create a template configuration for the simplified MLflow integration.
-    
+    Create a template configuration for the training pipeline.
+
     Returns:
         Template configuration dictionary
     """
@@ -254,8 +227,6 @@ def create_simplified_config_template() -> Dict[str, Any]:
         },
         "training": {
             "max_epochs": 50,
-            "learning_rate": 1e-4,
-            "weight_decay": 1e-4,
             "early_stopping_patience": 20,
             "monitor_metric": "val_map",
             "monitor_mode": "max",
@@ -263,12 +234,12 @@ def create_simplified_config_template() -> Dict[str, Any]:
             "volume_checkpoint_dir": "/Volumes/<catalog>/<schema>/<volume>/volume_checkpoints",
             "save_top_k": 3,
             "log_every_n_steps": 50,
-            "distributed": False
+            "use_gpu": True
         },
         "output": {
             "results_dir": "/Volumes/<catalog>/<schema>/<volume>/results",
             "save_predictions": True
         }
     }
-    
-    return template 
+
+    return template

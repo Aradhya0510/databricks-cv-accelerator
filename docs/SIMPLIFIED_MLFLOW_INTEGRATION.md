@@ -37,7 +37,7 @@ The code has been significantly simplified and made more robust by:
 ### Basic Usage
 
 ```python
-from training.trainer import UnifiedTrainer, UnifiedTrainerConfig
+from training.trainer import Trainer, TrainerConfig
 from utils.logging import create_databricks_logger_for_task
 from tasks.detection.model import DETRModel
 from tasks.detection.data import DETRDataModule
@@ -56,7 +56,7 @@ config = {
     "save_top_k": 3,
     "distributed": False,
 }
-trainer_config = UnifiedTrainerConfig(**config)
+trainer_config = TrainerConfig(**config)
 
 # 2. ✨ Create the MLFlowLogger First ✨
 mlf_logger = create_databricks_logger_for_task(
@@ -70,8 +70,8 @@ mlf_logger = create_databricks_logger_for_task(
 model = DETRModel(num_classes=91, learning_rate=0.0001)
 data_module = DETRDataModule(data_dir="/path/to/data", batch_size=4)
 
-# 4. Initialize the UnifiedTrainer
-unified_trainer = UnifiedTrainer(
+# 4. Initialize the Trainer
+unified_trainer = Trainer(
     config=trainer_config,
     model=model,
     data_module=data_module,
@@ -114,7 +114,7 @@ mlf_logger = create_databricks_logger_for_task(
 
 ### 2. `training/trainer.py`
 
-**Updated UnifiedTrainer:**
+**Updated Trainer:**
 - Logger is now optional in constructor (auto-created if not provided)
 - Simplified callback initialization
 - Automatic integration with MLFlowLogger
@@ -144,7 +144,7 @@ class DETRModel(pl.LightningModule):
 
 ### 2. Checkpoint Configuration
 
-The ModelCheckpoint callback is automatically configured by UnifiedTrainer:
+The ModelCheckpoint callback is automatically configured by Trainer:
 
 ```python
 checkpoint_callback = ModelCheckpoint(
@@ -234,6 +234,6 @@ mlf_logger = create_databricks_logger_for_task(
 - `examples/simplified_training_example.py` - Complete working example
 - `notebooks/02_model_training.py` - Updated training notebook
 - `src/utils/logging.py` - Simplified logging utilities
-- `src/training/trainer.py` - Updated UnifiedTrainer
+- `src/training/trainer.py` - Updated Trainer
 
 This simplified approach provides a more robust, maintainable, and reliable MLflow integration for the Databricks Computer Vision Accelerator. 

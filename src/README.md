@@ -345,7 +345,7 @@ Traditional approaches embed model-specific logic directly in data loaders or mo
 
 ### 5. **Unified Trainer: Complete Training Abstraction**
 
-The `UnifiedTrainer` class orchestrates the entire training process, providing **complete abstraction of training complexity** through PyTorch Lightning and seamless integration with MLflow.
+The `Trainer` class orchestrates the entire training process, providing **complete abstraction of training complexity** through PyTorch Lightning and seamless integration with MLflow.
 
 #### Technical Components:
 
@@ -373,19 +373,20 @@ class DetectionModel(pl.LightningModule):
         return {"optimizer": optimizer, "lr_scheduler": scheduler}
 ```
 
-**UnifiedTrainer Class**: Main orchestrator with key methods:
+**Trainer Class**: Main orchestrator with key methods:
 - `_init_callbacks()`: Sets up `ModelCheckpoint`, `EarlyStopping`, and MLflow logging
-- `_init_trainer()`: Configures PyTorch Lightning trainer for local or distributed training
+- `_init_trainer()`: Configures PyTorch Lightning trainer with environment-aware strategy selection
+- `_choose_strategy_and_devices()`: Auto-detects Jobs vs Notebook environment for DDP
 - `train()`: Executes training process with data module setup
-- `tune(search_space, num_trials)`: Runs hyperparameter optimization using Ray Tune
+- `test()`: Runs evaluation on test data
 
 **Training Modes**:
-- **Local Training**: Standard PyTorch Lightning training on single/multi-GPU
-- **Distributed Training**: Ray-based distributed training across cluster nodes
-- **Hyperparameter Tuning**: Automated optimization using Ray Tune with ASHAScheduler
+- **Notebook**: Single GPU with auto strategy (interactive development)
+- **Jobs + 1 GPU**: Single device training
+- **Jobs + Multi-GPU**: Automatic DDP with NCCL backend
 
 #### Design Rationale:
-The trainer automatically detects available resources and chooses appropriate training strategy. Ray integration provides excellent distributed computing capabilities, while MLflow ensures comprehensive experiment tracking and model versioning.
+The trainer automatically detects the environment (Jobs vs Notebook) and available GPUs to choose the appropriate training strategy. Uses explicit DDPStrategy objects to bypass Lightning's interactive environment detection issues on Databricks. MLflow ensures comprehensive experiment tracking and model versioning.
 
 ### 6. **MLflow Integration: Complete Observability Abstraction**
 
@@ -432,7 +433,7 @@ The data flows through our system in a carefully orchestrated pipeline:
 1. **Configuration Injection**: All components receive configuration at initialization via their respective config classes
 2. **Data Processing Pipeline**: Raw data flows through `Dataset` → `DataAdapter` → `DataModule` → `Model`
 3. **Model Processing Pipeline**: Model outputs flow through `OutputAdapter` → `Metrics` → `Logging`
-4. **Training Orchestration**: `UnifiedTrainer` coordinates all components while maintaining their independence
+4. **Training Orchestration**: `Trainer` coordinates all components while maintaining their independence
 
 ### Cross-Module Communication
 

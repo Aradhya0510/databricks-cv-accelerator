@@ -4,9 +4,9 @@ Training Module
 This module provides training functionality for computer vision models.
 """
 
-from .trainer import UnifiedTrainer, UnifiedTrainerConfig
+from .trainer import Trainer, TrainerConfig
 
 __all__ = [
-    'UnifiedTrainer',
-    'UnifiedTrainerConfig'
+    'Trainer',
+    'TrainerConfig'
 ]

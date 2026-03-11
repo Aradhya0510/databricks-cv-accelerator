@@ -218,13 +218,6 @@ class ConfigGenerator:
         training_dict = {
             "max_epochs": training_config.get("epochs", 100),
             "experiment_name": mlflow_config.get("experiment_name", f"/Users/default/cv_{task}"),
-            "learning_rate": training_config.get("learning_rate", 1e-4),
-            "weight_decay": training_config.get("weight_decay", 1e-4),
-            "scheduler": training_config.get("scheduler", "cosine"),
-            "scheduler_params": {
-                "T_max": training_config.get("epochs", 100),
-                "eta_min": 1e-6
-            },
             "early_stopping_patience": training_config.get("early_stopping_patience", 20),
             "monitor_metric": monitor_metric,
             "monitor_mode": monitor_mode,
@@ -232,14 +225,7 @@ class ConfigGenerator:
             "volume_checkpoint_dir": training_config.get("volume_checkpoint_dir", f"/Volumes/<catalog>/<schema>/<volume>/volume_checkpoints/{task}"),
             "save_top_k": training_config.get("save_top_k", 3),
             "log_every_n_steps": training_config.get("log_every_n_steps", 50),
-            "distributed": training_config.get("distributed", False),
-            "use_ray": training_config.get("use_ray", False),
             "use_gpu": training_config.get("use_gpu", True),
-            "num_workers": training_config.get("num_workers", 1),
-            "resources_per_worker": {
-                "CPU": training_config.get("cpu_per_worker", 4),
-                "GPU": training_config.get("gpu_per_worker", 1),
-            }
         }
         
         # Output configuration
@@ -338,7 +324,7 @@ class ConfigGenerator:
         
         # Validate training section
         if "training" in config:
-            required_training_fields = ["max_epochs", "learning_rate", "checkpoint_dir"]
+            required_training_fields = ["max_epochs", "checkpoint_dir"]
             for field in required_training_fields:
                 if field not in config["training"]:
                     errors.append(f"Missing required field: training.{field}")

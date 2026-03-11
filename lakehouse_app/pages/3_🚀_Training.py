@@ -85,37 +85,30 @@ with tab1:
     # Cluster configuration
     st.markdown("#### Compute Configuration")
     
-    use_serverless = st.checkbox(
-        "Use Serverless Compute",
-        value=False,
-        help="Use Databricks serverless compute (recommended for simpler setup)"
-    )
-    
-    if not use_serverless:
-        col1, col2 = st.columns(2)
-        
-        with col1:
-            node_type = st.selectbox(
-                "Node Type",
-                options=[
-                    "g5.4xlarge (1 GPU, 16 vCPU, 64GB)",
-                    "g5.8xlarge (1 GPU, 32 vCPU, 128GB)",
-                    "g5.12xlarge (4 GPU, 48 vCPU, 192GB)",
-                    "g5.24xlarge (4 GPU, 96 vCPU, 384GB)",
-                ],
-                index=0,
-                help="Select GPU instance type"
-            )
-            node_type_id = node_type.split(" ")[0]
-        
-        with col2:
-            num_workers = st.number_input(
-                "Number of Workers",
-                min_value=0,
-                max_value=10,
-                value=0,
-                help="0 for single-node, >0 for distributed training"
-            )
+    col1, col2 = st.columns(2)
+
+    with col1:
+        node_type = st.selectbox(
+            "Node Type",
+            options=[
+                "g5.4xlarge (1 GPU, 16 vCPU, 64GB)",
+                "g5.8xlarge (1 GPU, 32 vCPU, 128GB)",
+                "g5.12xlarge (4 GPU, 48 vCPU, 192GB)",
+                "g5.24xlarge (4 GPU, 96 vCPU, 384GB)",
+            ],
+            index=0,
+            help="Select GPU instance type"
+        )
+        node_type_id = node_type.split(" ")[0]
+
+    with col2:
+        num_workers = st.number_input(
+            "Number of Workers",
+            min_value=0,
+            max_value=10,
+            value=0,
+            help="0 for single-node, >0 for distributed training"
+        )
     
     # Email notifications
     with st.expander("📧 Email Notifications (Optional)"):
@@ -148,7 +141,7 @@ with tab1:
                         client = DatabricksJobClient()
                         
                         # Create cluster config
-                        cluster_config = None if use_serverless else {
+                        cluster_config = {
                             "spark_version": "14.3.x-gpu-ml-scala2.12",
                             "node_type_id": node_type_id,
                             "num_workers": num_workers,

@@ -350,47 +350,8 @@ class ConfigFormBuilder:
         )
         
         # Distributed training
-        with st.expander("🚀 Advanced: Distributed Training"):
-            config["distributed"] = st.checkbox(
-                "Enable Distributed Training",
-                value=default_values.get("distributed", False),
-                help="Use multiple GPUs if available"
-            )
-            
-            if config["distributed"]:
-                config["use_ray"] = st.checkbox(
-                    "Use Ray (Multi-node)",
-                    value=default_values.get("use_ray", False),
-                    help="Use Ray for multi-node training (otherwise uses DDP for single-node)"
-                )
-                
-                config["num_workers"] = st.number_input(
-                    "Number of Workers",
-                    min_value=1,
-                    max_value=16,
-                    value=default_values.get("num_workers", 1),
-                    help="Number of training workers"
-                )
-                
-                col1, col2 = st.columns(2)
-                with col1:
-                    config["cpu_per_worker"] = st.number_input(
-                        "CPUs per Worker",
-                        min_value=1,
-                        max_value=64,
-                        value=default_values.get("cpu_per_worker", 4)
-                    )
-                with col2:
-                    config["gpu_per_worker"] = st.number_input(
-                        "GPUs per Worker",
-                        min_value=0,
-                        max_value=8,
-                        value=default_values.get("gpu_per_worker", 1)
-                    )
-            else:
-                config["use_ray"] = False
-                config["num_workers"] = 1
-        
+        st.info("Multi-GPU DDP is automatic when running on a multi-GPU Jobs cluster")
+
         config["use_gpu"] = st.checkbox(
             "Use GPU",
             value=default_values.get("use_gpu", True),

@@ -41,7 +41,7 @@ def validate_config_structure(config: Dict[str, Any], config_path: str) -> bool:
     
     # Check training section
     training = config['training']
-    required_training_fields = ['max_epochs', 'learning_rate', 'checkpoint_dir']
+    required_training_fields = ['max_epochs', 'checkpoint_dir']
     for field in required_training_fields:
         if field not in training:
             print(f"❌ {config_path}: Missing required training field '{field}'")
