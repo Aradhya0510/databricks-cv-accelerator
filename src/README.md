@@ -297,7 +297,7 @@ def _init_model(self) -> None:
 - **Gradient Clipping**: Prevents gradient explosion in transformer models
 - **Learning Rate Scheduling**: Cosine annealing with warmup for stable training
 - **Parameter Grouping**: Different learning rates for backbone vs. task-specific layers
-- **Automatic Distributed Training**: DDP, Ray, and single-node training handled automatically
+- **Automatic Distributed Training**: DDP and single-node training handled automatically
 - **Memory Management**: Automatic GPU memory cleanup and optimization
 
 #### Design Rationale:
@@ -472,7 +472,7 @@ To add support for a new computer vision task, follow these steps:
 4. **Integration**: The new task automatically integrates with:
    - The unified trainer for distributed training
    - MLflow for experiment tracking
-   - Ray for hyperparameter optimization
+   - Optuna for hyperparameter optimization
    - The existing configuration system
 
 ### Benefits of This Approach
