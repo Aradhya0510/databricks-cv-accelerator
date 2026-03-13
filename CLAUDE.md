@@ -2,9 +2,9 @@
 
 ## Project Overview
 
-A modular computer vision fine-tuning framework for Databricks. Supports object detection (DETR, YOLOS) with HF Trainer backend. Other tasks (classification, segmentation) still use PyTorch Lightning during transition.
+A modular computer vision fine-tuning framework for Databricks. Currently supports object detection (DETR, YOLOS) with HF Trainer backend. Extensible to new tasks via the TaskRegistry.
 
-**Key architecture:** Config YAML → `PipelineConfig` (Pydantic) → `TrainingEngine` → HF `Trainer` with native DDP for multi-GPU.
+**Key architecture:** Config YAML → `PipelineConfig` (Pydantic) → `TrainingEngine` → `CVTrainer` (HF Trainer) with native DDP for multi-GPU.
 
 ## Repository Layout
 
@@ -17,21 +17,14 @@ src/
 │   ├── trainer.py            # CVTrainer — generic HF Trainer with task-provided hooks
 │   └── callbacks.py          # VolumeCheckpointCallback, EarlyStoppingCallback
 ├── tasks/detection/
-│   ├── __init__.py           # DetectionTask registered with TaskRegistry
+│   ├── __init__.py           # DetectionTask: model, datasets, loss, eval hooks
 │   ├── adapters.py           # DETR/YOLOS input/output adapters
 │   ├── collate.py            # Standalone collate function
-│   ├── data.py               # COCODetectionDataset (plain torch Dataset)
-│   ├── model.py              # Lightning module (legacy, used by old paths)
-│   └── evaluate.py           # Standalone evaluation pipeline
-├── training/trainer.py       # Lightning trainer (legacy, other tasks)
+│   └── data.py               # COCODetectionDataset (plain torch Dataset)
 └── utils/
-    ├── environment.py        # is_databricks_job(), get_gpu_count(), stage_data_to_local()
-    ├── logging.py            # Lightning MLflow integration (legacy)
-    └── coco_handler.py       # COCO dataset utilities
+    └── environment.py        # is_databricks_job(), get_gpu_count(), stage_data_to_local()
 jobs/
-├── train.py                  # NEW entry point: HF Trainer + native DDP
-├── model_training.py         # DEPRECATED: Lightning + fork-based DDP
-└── simple_train.py           # DEPRECATED: Lightning + ddp_notebook
+└── train.py                  # Entry point: HF Trainer + native DDP
 configs/
 ├── detection_detr_config.yaml
 ├── detection_yolos_config.yaml
