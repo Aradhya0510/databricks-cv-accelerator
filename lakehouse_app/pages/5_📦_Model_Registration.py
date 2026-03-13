@@ -91,7 +91,7 @@ with tab1:
     with col1:
         tags_input = st.text_input(
             "Tags (comma-separated)",
-            value="cv,pytorch,lightning",
+            value="cv,pytorch,hf_trainer",
             help="Add tags for easy searching"
         )
         tags = [tag.strip() for tag in tags_input.split(",") if tag.strip()]
@@ -115,45 +115,64 @@ with tab1:
         st.markdown(f"**Tags:** {', '.join(tags)}")
         st.markdown(f"**Stage:** {stage}")
     
+    # MLflow Run ID for HF Trainer models
+    run_id = st.text_input(
+        "MLflow Run ID",
+        value="",
+        help="Run ID from training (HF Trainer logs model to MLflow automatically)"
+    )
+
     col1, col2 = st.columns([2, 1])
-    
+
     with col1:
         if st.button("📦 Register Model", type="primary", use_container_width=True):
-            if not checkpoint_path or "<" in checkpoint_path:
-                st.error("❌ Please provide a valid checkpoint path")
-            elif not config_path or "<" in config_path:
-                st.error("❌ Please provide a valid configuration path")
+            if not run_id:
+                st.error("❌ Please provide an MLflow Run ID (from training)")
+            elif not full_model_name or "<" in full_model_name:
+                st.error("❌ Please provide a valid model name")
             else:
-                with st.spinner("Registering model..."):
-                    st.info("""
-                    🔄 Registration process would:
-                    1. Load model from checkpoint
-                    2. Create PyFunc wrapper
-                    3. Register to Unity Catalog
-                    4. Add metadata and tags
-                    5. Set initial stage
-                    """)
-                    
-                    # Mock registration
-                    import time
-                    time.sleep(2)
-                    
-                    # Update state
-                    StateManager.add_registered_model({
-                        "name": full_model_name,
-                        "version": "1",
-                        "checkpoint_path": checkpoint_path,
-                        "config_path": config_path,
-                        "description": description,
-                        "tags": tags,
-                        "stage": stage,
-                        "creation_timestamp": datetime.now().isoformat()
-                    })
-                    
-                    st.success("✅ Model registered successfully!")
-                    st.balloons()
-                    st.info(f"**Model:** {full_model_name} (version 1)")
-                    st.info("💡 You can now deploy this model from the Deployment page")
+                with st.spinner("Registering model via jobs/deploy.py ..."):
+                    try:
+                        result = client.submit_job(
+                            job_name="cv-model-registration",
+                            python_file="/Workspace/Users/{user}/Databricks_CV_ref/jobs/deploy.py",
+                            parameters=[
+                                "--config_path", config_path,
+                                "--run_id", run_id,
+                                "--model_name", full_model_name,
+                                "--skip_test",
+                            ],
+                        )
+
+                        # Update state
+                        StateManager.add_registered_model({
+                            "name": full_model_name,
+                            "version": "1",
+                            "run_id": run_id,
+                            "config_path": config_path,
+                            "description": description,
+                            "tags": tags,
+                            "stage": stage,
+                            "creation_timestamp": datetime.now().isoformat()
+                        })
+
+                        st.success("✅ Registration job submitted!")
+                        st.info(f"**Model:** {full_model_name}")
+                        st.info("💡 You can now deploy this model from the Deployment page")
+                    except Exception as e:
+                        st.error(f"❌ Error submitting registration job: {e}")
+                        st.info("Falling back to local state tracking")
+                        StateManager.add_registered_model({
+                            "name": full_model_name,
+                            "version": "1",
+                            "run_id": run_id,
+                            "config_path": config_path,
+                            "description": description,
+                            "tags": tags,
+                            "stage": stage,
+                            "creation_timestamp": datetime.now().isoformat()
+                        })
+                        st.success("✅ Model tracked locally")
     
     with col2:
         if st.button("💾 Save as Draft", use_container_width=True):

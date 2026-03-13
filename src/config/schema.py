@@ -155,6 +155,25 @@ class OutputConfig(BaseModel):
 
 
 # ---------------------------------------------------------------------------
+# Serving & monitoring configs
+# ---------------------------------------------------------------------------
+
+class ServingConfig(BaseModel):
+    model_config = {"extra": "allow"}
+    registered_model_name: Optional[str] = None  # catalog.schema.model_name
+    endpoint_name: Optional[str] = None
+    workload_size: str = "Small"
+    scale_to_zero: bool = True
+
+
+class MonitoringConfig(BaseModel):
+    model_config = {"extra": "allow"}
+    drift_threshold: float = 0.1
+    error_rate_threshold: float = 0.05
+    latency_p95_threshold_ms: float = 500
+
+
+# ---------------------------------------------------------------------------
 # Top-level pipeline config
 # ---------------------------------------------------------------------------
 
@@ -166,6 +185,8 @@ class PipelineConfig(BaseModel):
     training: TrainingConfig = TrainingConfig()
     mlflow: MLflowConfig = MLflowConfig()
     output: OutputConfig = OutputConfig()
+    serving: ServingConfig = ServingConfig()
+    monitoring: MonitoringConfig = MonitoringConfig()
 
     @model_validator(mode="before")
     @classmethod

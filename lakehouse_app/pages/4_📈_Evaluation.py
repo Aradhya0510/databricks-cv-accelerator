@@ -134,108 +134,84 @@ with tab1:
         st.info("👆 Enter an experiment name and click 'Load Runs' to view metrics")
 
 with tab2:
-    st.markdown("### Model Predictions")
-    
-    st.info("🖼️ Visualize model predictions on validation/test data")
-    
-    # Get current config to determine task
+    st.markdown("### Evaluation Results (from `jobs/evaluate.py`)")
+
+    st.info("Run `jobs/evaluate.py` to generate evaluation results, then view them here.")
+
     current_config = StateManager.get_current_config()
-    
-    if not current_config:
-        st.warning("⚠️ No active configuration. Please load a configuration first.")
-    else:
-        task = current_config.get("model", {}).get("task_type", "detection")
-        
-        st.markdown(f"**Task:** {task.replace('_', ' ').title()}")
-        
-        # Mock prediction visualization
-        st.markdown("#### Sample Predictions")
-        
-        num_samples = st.slider("Number of samples", 1, 12, 6)
-        
-        if st.button("🎲 Load Random Predictions", type="primary"):
-            st.info("💡 In a real implementation, this would load predictions from the model output")
-            
-            st.markdown("#### Prediction Samples")
-            
-            if task == "detection":
-                st.info("For detection tasks, predictions would show:")
-                st.markdown("- Bounding boxes with class labels")
-                st.markdown("- Confidence scores")
-                st.markdown("- Ground truth vs. predictions comparison")
-            
-            elif task == "classification":
-                st.info("For classification tasks, predictions would show:")
-                st.markdown("- Predicted class with confidence")
-                st.markdown("- Top-k predictions")
-                st.markdown("- Comparison with ground truth")
-            
-            else:
-                st.info("For segmentation tasks, predictions would show:")
-                st.markdown("- Predicted segmentation masks")
-                st.markdown("- Overlay on original images")
-                st.markdown("- IoU scores per instance/class")
-            
-            st.code("""
-# Example prediction loading code:
-from PIL import Image
-import torch
+    results_dir = current_config.get("output", {}).get("results_dir", "/tmp/results") if current_config else "/tmp/results"
 
-# Load model checkpoint
-model = load_model_from_checkpoint(checkpoint_path)
-model.eval()
+    results_dir_input = st.text_input("Results Directory", value=results_dir)
 
-# Load test images
-test_dataset = load_dataset(test_data_path)
-samples = random.sample(test_dataset, num_samples)
+    if st.button("📂 Load Evaluation Results", type="primary"):
+        import json, os
 
-# Generate predictions
-predictions = []
-for image, label in samples:
-    with torch.no_grad():
-        pred = model(image)
-    predictions.append((image, label, pred))
+        # Load metrics
+        metrics_path = os.path.join(results_dir_input, "evaluation_metrics.json")
+        error_path = os.path.join(results_dir_input, "error_analysis.json")
+        bench_path = os.path.join(results_dir_input, "benchmark.json")
 
-# Visualize
-for img, gt, pred in predictions:
-    if task == "detection":
-        annotated = ImageViewer.draw_bounding_boxes(
-            img, pred['boxes'], pred['labels'], pred['scores']
-        )
-    elif task == "classification":
-        annotated = ImageViewer.annotate_classification(
-            img, pred['class'], pred['confidence'], gt
-        )
-    else:  # segmentation
-        annotated = ImageViewer.draw_segmentation_mask(
-            img, pred['mask']
-        )
-    
-    ImageViewer.display_image(annotated)
-            """, language="python")
-        
-        # Error analysis
-        st.markdown("---")
-        st.markdown("#### Error Analysis")
-        
-        if st.button("🔍 Analyze Errors"):
-            st.info("Error analysis would include:")
-            
-            col1, col2 = st.columns(2)
-            
+        if os.path.exists(metrics_path):
+            with open(metrics_path) as f:
+                eval_metrics = json.load(f)
+
+            st.markdown("#### mAP Metrics")
+            metric_cols = st.columns(4)
+            key_metrics = ["eval_map", "eval_map_50", "eval_map_75", "eval_loss"]
+            for i, key in enumerate(key_metrics):
+                if key in eval_metrics:
+                    with metric_cols[i]:
+                        st.metric(key, f"{eval_metrics[key]:.4f}")
+
+            # Per-class AP
+            per_class = {k: v for k, v in eval_metrics.items() if "map_class_" in k}
+            if per_class:
+                st.markdown("#### Per-Class AP")
+                fig = VisualizationHelper.class_distribution_chart(
+                    {k.split("_")[-1]: v for k, v in sorted(per_class.items())},
+                    "Per-Class Average Precision"
+                )
+                st.plotly_chart(fig, use_container_width=True)
+        else:
+            st.warning(f"No evaluation_metrics.json found in {results_dir_input}")
+
+        if os.path.exists(error_path):
+            with open(error_path) as f:
+                error_data = json.load(f)
+
+            st.markdown("---")
+            st.markdown("#### Error Analysis")
+            summary = error_data.get("summary", {})
+
+            col1, col2, col3 = st.columns(3)
             with col1:
-                st.markdown("**Common Error Types:**")
-                st.markdown("- False positives")
-                st.markdown("- False negatives")
-                st.markdown("- Misclassifications")
-                st.markdown("- Localization errors")
-            
+                st.metric("True Positives", summary.get("true_positives", 0))
             with col2:
-                st.markdown("**Error Patterns:**")
-                st.markdown("- Confused classes")
-                st.markdown("- Confidence distribution")
-                st.markdown("- Performance by object size")
-                st.markdown("- Performance by scene complexity")
+                fp = (summary.get("false_positives_background", 0)
+                      + summary.get("false_positives_confusion", 0)
+                      + summary.get("false_positives_localisation", 0))
+                st.metric("False Positives", fp)
+            with col3:
+                st.metric("False Negatives", summary.get("false_negatives", 0))
+
+        if os.path.exists(bench_path):
+            with open(bench_path) as f:
+                bench_data = json.load(f)
+
+            st.markdown("---")
+            st.markdown("#### Benchmark")
+            col1, col2, col3 = st.columns(3)
+            with col1:
+                st.metric("FPS", f"{bench_data.get('fps', 0):.1f}")
+            with col2:
+                lat = bench_data.get("latency_per_batch_ms", {})
+                st.metric("P50 Latency (ms)", f"{lat.get('p50', 0):.0f}")
+            with col3:
+                st.metric("P95 Latency (ms)", f"{lat.get('p95', 0):.0f}")
+
+    st.markdown("---")
+    st.markdown("#### Run Evaluation")
+    st.code("python jobs/evaluate.py --config_path <config> --checkpoint_path <model>", language="bash")
 
 with tab3:
     st.markdown("### Compare Multiple Models")

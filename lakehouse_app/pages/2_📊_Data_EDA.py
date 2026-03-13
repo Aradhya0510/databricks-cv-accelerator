@@ -73,26 +73,35 @@ with tab1:
     
     if st.button("🔍 Analyze Dataset", type="primary"):
         with st.spinner("Analyzing dataset..."):
-            # In real implementation, would:
-            # 1. Count images in directories
-            # 2. Load annotations (if applicable)
-            # 3. Compute statistics
-            
-            # Mock data for demonstration
-            mock_stats = {
-                "train": {
-                    "num_images": 5000,
-                    "num_annotations": 5000 if task != "detection" else 25000,
-                },
-                "val": {
-                    "num_images": 1000,
-                    "num_annotations": 1000 if task != "detection" else 5000,
-                },
-                "test": {
-                    "num_images": 500,
-                    "num_annotations": 500 if task != "detection" else 2500,
-                } if test_path else None
-            }
+            # Try to load pre-computed stats from Volume
+            results_dir = current_config.get("output", {}).get("results_dir", "")
+            stats_file = os.path.join(results_dir, "dataset_stats.json") if results_dir else ""
+            pre_computed = None
+            if stats_file and os.path.exists(stats_file):
+                try:
+                    with open(stats_file) as f:
+                        pre_computed = json.load(f)
+                except Exception:
+                    pass
+
+            if pre_computed:
+                mock_stats = pre_computed
+            else:
+                # Fallback: mock data for demonstration
+                mock_stats = {
+                    "train": {
+                        "num_images": 5000,
+                        "num_annotations": 5000 if task != "detection" else 25000,
+                    },
+                    "val": {
+                        "num_images": 1000,
+                        "num_annotations": 1000 if task != "detection" else 5000,
+                    },
+                    "test": {
+                        "num_images": 500,
+                        "num_annotations": 500 if task != "detection" else 2500,
+                    } if test_path else None
+                }
             
             st.success("✅ Analysis complete!")
             

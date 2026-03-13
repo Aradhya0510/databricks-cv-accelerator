@@ -2,7 +2,7 @@
 
 ## Project Overview
 
-A modular computer vision fine-tuning framework for Databricks. Currently supports object detection (DETR, YOLOS) with HF Trainer backend. Extensible to new tasks via the TaskRegistry.
+A modular computer vision fine-tuning framework for Databricks. Supports object detection (DETR, YOLOS) and image classification (ViT, any HF `AutoModelForImageClassification` model) with HF Trainer backend. Extensible to new tasks via the TaskRegistry.
 
 **Key architecture:** Config YAML → `PipelineConfig` (Pydantic) → `TrainingEngine` → `CVTrainer` (HF Trainer) with native DDP for multi-GPU.
 
@@ -16,26 +16,51 @@ src/
 │   ├── engine.py             # TrainingEngine: config → train → metrics
 │   ├── trainer.py            # CVTrainer — generic HF Trainer with task-provided hooks
 │   └── callbacks.py          # VolumeCheckpointCallback, EarlyStoppingCallback
-├── tasks/detection/
-│   ├── __init__.py           # DetectionTask: model, datasets, loss, eval hooks
-│   ├── adapters.py           # DETR/YOLOS input/output adapters
-│   ├── collate.py            # Standalone collate function
-│   └── data.py               # COCODetectionDataset (plain torch Dataset)
+├── tasks/
+│   ├── detection/
+│   │   ├── __init__.py       # DetectionTask: model, datasets, loss, eval hooks
+│   │   ├── adapters.py       # DETR/YOLOS input/output adapters
+│   │   ├── collate.py        # Standalone collate function
+│   │   └── data.py           # COCODetectionDataset (plain torch Dataset)
+│   └── classification/
+│       ├── __init__.py       # ClassificationTask: model, datasets, loss, eval hooks
+│       ├── collate.py        # Standalone collate function
+│       └── data.py           # ImageFolderClassificationDataset (ImageFolder-style)
+├── evaluation/
+│   ├── __init__.py           # Exports EvaluationEngine
+│   └── engine.py             # EvaluationEngine: evaluate, error_analysis, benchmark
+├── serving/
+│   ├── __init__.py           # Exports PyFunc wrappers + deploy/register functions
+│   ├── pyfunc.py             # DetectionPyFuncModel, ClassificationPyFuncModel
+│   ├── registration.py       # register_model() — task-aware UC registration
+│   └── deployment.py         # deploy_endpoint(), wait_for_ready(), test_endpoint()
+├── monitoring/
+│   ├── __init__.py           # Exports EndpointMonitor
+│   └── endpoint_monitor.py   # Health checks, request metrics, drift scoring
 └── utils/
     └── environment.py        # is_databricks_job(), get_gpu_count(), stage_data_to_local()
 jobs/
-└── train.py                  # Entry point: HF Trainer + native DDP
+├── train.py                  # Training entry point: HF Trainer + native DDP
+├── evaluate.py               # Evaluation entry point: metrics, error analysis, benchmark
+├── deploy.py                 # Registration + deployment entry point
+└── monitor.py                # Monitoring report entry point
 configs/
 ├── detection_detr_config.yaml
 ├── detection_yolos_config.yaml
+├── classification_vit_config.yaml
 └── test_detection_yolos_sanity.yaml
 ```
 
 ## Running Training Locally
 
 ```bash
+# Detection
 python jobs/train.py --config_path configs/test_detection_yolos_sanity.yaml
 python jobs/train.py --config_path configs/detection_yolos_config.yaml --num_gpus 4
+
+# Classification
+python jobs/train.py --config_path configs/classification_vit_config.yaml
+python jobs/train.py --config_path configs/classification_vit_config.yaml --num_gpus 4
 ```
 
 ## Multi-GPU Strategy
@@ -88,6 +113,45 @@ mlflow:
     dataset: coco
 output:
   results_dir: /tmp/results
+serving:                                      # Optional — for deployment
+  registered_model_name: catalog.schema.model
+  endpoint_name: my-endpoint
+  workload_size: Small
+  scale_to_zero: true
+monitoring:                                   # Optional — for observability
+  drift_threshold: 0.1
+  error_rate_threshold: 0.05
+  latency_p95_threshold_ms: 500
+```
+
+### Classification Config
+
+Classification uses `task_type: classification` and ImageFolder-style data layout
+(`root_dir/class_name/image.jpg`). No annotation files needed.
+
+```yaml
+model:
+  model_name: google/vit-base-patch16-224
+  task_type: classification
+  num_classes: 10
+  image_size: 224
+  learning_rate: 5e-5
+  weight_decay: 1e-2
+  scheduler: cosine
+  epochs: 20
+  dropout: 0.1
+data:
+  train_data_path: /Volumes/catalog/schema/volume/data/classification/train/
+  val_data_path: /Volumes/catalog/schema/volume/data/classification/val/
+  batch_size: 32
+  num_workers: 4
+  model_name: google/vit-base-patch16-224
+  image_size: [224, 224]
+training:
+  max_epochs: 20
+  early_stopping_patience: 5
+  monitor_metric: val_accuracy
+  monitor_mode: max
 ```
 
 ---
@@ -304,7 +368,9 @@ mcp__databricks__create_or_update_app(
 
 ## Development Notes
 
-- **Detection task only** uses HF Trainer. Other tasks (classification, segmentation) still use Lightning via `src/training/trainer.py`.
-- `COCODetectionDataset`, `adapters.py`, `evaluate.py`, `inference.py` have no Lightning dependency — they're shared between old and new paths.
-- The `model.py` Lightning module is kept for backward compatibility during transition.
-- Config YAML format is unchanged — `PipelineConfig` (Pydantic) accepts the same structure as the old `load_config()` dict-based loader.
+- **Detection and classification** both use HF Trainer. Other tasks (segmentation) can be added via `TaskRegistry`.
+- Classification uses `ImageFolderClassificationDataset` (ImageFolder-style directory layout, no annotation files).
+- Detection uses `COCODetectionDataset` (COCO JSON annotations).
+- `EvaluationEngine`, `register_model()`, and `deploy_endpoint()` are all task-aware — dispatch based on `config.model.task_type`.
+- `ClassificationPyFuncModel` and `DetectionPyFuncModel` are separate PyFunc wrappers (different output schemas).
+- Config YAML format is unchanged — `PipelineConfig` (Pydantic) accepts the same structure as the old `load_config()` dict-based loader. New `serving` and `monitoring` sections are optional with defaults.

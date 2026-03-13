@@ -72,6 +72,7 @@ class TrainingEngine:
 
         # --- task registry ---
         import src.tasks.detection  # noqa: F401  (triggers @register)
+        import src.tasks.classification  # noqa: F401
 
         task = TaskRegistry.get(config.model.task_type)
 

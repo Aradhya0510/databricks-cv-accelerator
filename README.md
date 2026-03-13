@@ -1,192 +1,161 @@
-# Databricks Computer Vision Accelerator
+# Databricks CV Accelerator
 
-A config-driven framework for fine-tuning object detection models on Databricks. Specify a model name + dataset path in YAML, and the framework handles data loading, training, multi-GPU DDP, and experiment tracking.
+A production-ready framework for fine-tuning computer vision models on Databricks. Drop in a config, point it at your data, and get a trained, evaluated, and deployed model — with full MLflow tracking, multi-GPU support, and a Streamlit UI.
 
-**Supported models:** Any Hugging Face `AutoModelForObjectDetection` — DETR, YOLOS, Table Transformer, etc.
+## Why This Framework
 
-**Built on:** HF Trainer, Hugging Face Transformers, MLflow, torchmetrics
+Fine-tuning CV models on Databricks involves gluing together data loading, HuggingFace models, distributed training, experiment tracking, model packaging, and serving. This framework does it for you:
 
----
+- **Config-driven.** One YAML file controls the entire pipeline — model, data, training, serving. No boilerplate code to write.
+- **Task-agnostic.** Detection and classification work today. Add new tasks by implementing a single class. The engine, evaluation, serving, and monitoring layers all adapt automatically.
+- **Databricks-native.** Unity Catalog Volumes for data, MLflow for tracking, Model Serving for deployment, system tables for monitoring. Everything wired together.
+- **Multi-GPU out of the box.** HF Trainer handles DDP natively. Pass `--num_gpus 4` and it works. No Spark orchestration overhead for single-node.
+- **Full lifecycle.** Train, evaluate (mAP/accuracy + error analysis + latency benchmarks), register to Unity Catalog, deploy to Model Serving, and monitor — all from the same framework.
 
-## Quick Start
+## What You Can Do
 
-```python
-from src.config.schema import load_config
-from src.engine import TrainingEngine
+| Task | Models | Data Format |
+|---|---|---|
+| Object Detection | DETR, YOLOS, any `AutoModelForObjectDetection` | COCO JSON (images + annotations.json) |
+| Image Classification | ViT, ResNet, any `AutoModelForImageClassification` | ImageFolder (class_name/image.jpg) |
 
-config = load_config("configs/detection_detr_config.yaml")
-engine = TrainingEngine(config)
-metrics = engine.train()
-```
+To switch models, change one line:
 
-To switch models, change one line in your config:
 ```yaml
 model:
-  model_name: "hustvl/yolos-tiny"  # was "facebook/detr-resnet-50"
+  model_name: "google/vit-base-patch16-224"  # or "facebook/detr-resnet-50", "hustvl/yolos-base", etc.
+  task_type: classification                   # or "detection"
 ```
 
----
-
-## Getting Started
-
-### Prerequisites
-
-- Databricks workspace with **Unity Catalog** enabled
-- Dataset in **COCO format** (image folder + `annotations.json`) uploaded to a UC Volume
-- GPU compute (single or multi-GPU cluster)
-- **Databricks Runtime ML 16.4+**
-
-### 1. Clone the repo
-
-```bash
-git clone https://github.com/Aradhya0510/databricks-cv-accelerator.git
-```
-
-### 2. Organize your data in Unity Catalog
+## Architecture
 
 ```
-/Volumes/your_catalog/your_schema/your_volume/
-├── data/
-│   ├── train/
-│   │   ├── images/
-│   │   └── annotations.json
-│   ├── val/
-│   │   ├── images/
-│   │   └── annotations.json
-│   └── test/  (optional)
-├── checkpoints/
-└── results/
+Config YAML ─→ PipelineConfig (Pydantic) ─→ TrainingEngine ─→ CVTrainer (HF Trainer)
+                                                │
+                                   TaskRegistry │ dispatches to:
+                                                ├── DetectionTask
+                                                └── ClassificationTask
 ```
 
-### 3. Pick a config and customize it
+The framework separates **what** (task-specific logic) from **how** (training loop, evaluation, serving):
 
-| Config file | Model |
-|---|---|
-| `detection_detr_config.yaml` | DETR ResNet-50 |
-| `detection_yolos_config.yaml` | YOLOS Base |
-| `test_detection_yolos_sanity.yaml` | YOLOS Tiny (quick sanity check) |
-
-Update the data paths, checkpoint directory, and MLflow experiment name to match your environment.
-
-### 4. Train
-
-**Option A — Notebook (interactive)**
-
-Open `notebooks/02_model_training.py` in Databricks and run the cells.
-
-**Option B — Databricks Job (production, multi-GPU)**
-
-```bash
-python jobs/train.py --config_path configs/detection_detr_config.yaml
-python jobs/train.py --config_path configs/detection_detr_config.yaml --num_gpus 4
-```
-
-Set up as a Databricks Job:
-1. Go to **Workflows > Create Job**
-2. Set task type to **Python script**, path to `jobs/train.py`
-3. Add parameters: `--config_path /Volumes/.../configs/your_config.yaml`
-4. Select a multi-GPU cluster (e.g. `g5.12xlarge` with 4x A10G)
-5. Run — all GPUs are used automatically via native DDP
-
----
-
-## Multi-GPU Strategy
-
-- **Single-node multi-GPU (default):** HF Trainer handles DDP natively. No Spark overhead. Pass `--num_gpus N` or let it auto-detect.
-- **Multi-node (opt-in):** Pass `--distributed torchd` to use TorchDistributor across Spark workers. Only for scaling beyond a single machine.
-
----
+- **Tasks** (`src/tasks/`) provide model loading, data handling, loss, and eval metrics
+- **Engine** (`src/engine/`) runs the training loop and DDP — task-agnostic
+- **Evaluation** (`src/evaluation/`) runs standalone eval, error analysis, benchmarks — task-aware
+- **Serving** (`src/serving/`) wraps models as PyFunc for Model Serving — task-aware
+- **Monitoring** (`src/monitoring/`) queries system tables for endpoint observability
 
 ## Project Structure
 
 ```
 src/
-├── config/
-│   └── schema.py              # Pydantic v2 config models + YAML loader
-├── registry.py                # TaskRegistry with @register decorator
+├── config/schema.py              # Pydantic v2 config + YAML loader
+├── registry.py                   # TaskRegistry (@register decorator)
 ├── engine/
-│   ├── engine.py              # TrainingEngine: config → train → metrics
-│   ├── trainer.py             # CVTrainer — generic HF Trainer with task hooks
-│   └── callbacks.py           # VolumeCheckpointCallback, EarlyStoppingCallback
+│   ├── engine.py                 # TrainingEngine: config → train → metrics
+│   ├── trainer.py                # CVTrainer (HF Trainer + task hooks)
+│   └── callbacks.py              # Checkpoint + early stopping callbacks
 ├── tasks/
-│   └── detection/
-│       ├── __init__.py        # DetectionTask (model, data, loss, eval hooks)
-│       ├── adapters.py        # DETR/YOLOS input/output adapters
-│       ├── collate.py         # Detection collate function
-│       └── data.py            # COCODetectionDataset
-└── utils/
-    └── environment.py         # GPU detection, NCCL setup, data staging
-configs/                       # YAML configs per model
-notebooks/                     # Interactive Databricks notebooks
+│   ├── detection/                # DetectionTask, COCO dataset, DETR/YOLOS adapters
+│   └── classification/           # ClassificationTask, ImageFolder dataset
+├── evaluation/
+│   └── engine.py                 # EvaluationEngine: metrics, error analysis, benchmarks
+├── serving/
+│   ├── pyfunc.py                 # DetectionPyFuncModel, ClassificationPyFuncModel
+│   ├── registration.py           # register_model() → Unity Catalog
+│   └── deployment.py             # deploy_endpoint() → Model Serving
+└── monitoring/
+    └── endpoint_monitor.py       # Health, request metrics, prediction distribution
+
 jobs/
-└── train.py                   # CLI entry point for Jobs
-lakehouse_app/                 # Streamlit UI for launching training
+├── train.py                      # Training CLI
+├── evaluate.py                   # Evaluation CLI
+├── deploy.py                     # Registration + deployment CLI
+└── monitor.py                    # Monitoring report CLI
+
+notebooks/
+├── 01_data_exploration.py        # EDA: stats, class distribution, quality checks
+├── 02_model_training.py          # Interactive training
+├── 03_model_evaluation.py        # Evaluation + error analysis
+├── 04_model_deployment.py        # PyFunc test → register → deploy → smoke test
+└── 05_model_monitoring.py        # Endpoint health + metrics + alerts
+
+configs/                          # YAML configs per model
+lakehouse_app/                    # Streamlit UI (9 pages, full lifecycle)
 ```
 
----
+## Quick Start
 
-## Configuration
+See **[GETTING_STARTED.md](GETTING_STARTED.md)** for the full setup guide. The short version:
 
-Configs have four sections. Learning rate, optimizer, and scheduler live in `model` (model-specific). The `training` section controls the training loop.
+```bash
+# 1. Clone
+git clone <repo-url> && cd Databricks_CV_ref
 
-```yaml
-model:
-  model_name: "facebook/detr-resnet-50"
-  task_type: detection
-  num_classes: 80
-  learning_rate: 1e-4
-  weight_decay: 1e-4
-  scheduler: cosine
+# 2. Pick a config, update paths
+cp configs/classification_vit_config.yaml configs/my_config.yaml
+# Edit data paths, MLflow experiment, checkpoint dirs
 
-data:
-  train_data_path: "/Volumes/.../train/"
-  train_annotation_file: "/Volumes/.../annotations_train.json"
-  val_data_path: "/Volumes/.../val/"
-  val_annotation_file: "/Volumes/.../annotations_val.json"
-  batch_size: 16
-  num_workers: 4
+# 3. Train
+python jobs/train.py --config_path configs/my_config.yaml
 
-training:
-  max_epochs: 50
-  early_stopping_patience: 20
-  monitor_metric: val_map
-  monitor_mode: max
-  checkpoint_dir: "/Volumes/.../checkpoints"
+# 4. Evaluate
+python jobs/evaluate.py --config_path configs/my_config.yaml --checkpoint_path /path/to/model
 
-mlflow:
-  experiment_name: "/Users/you@company.com/cv_detection"
+# 5. Deploy
+python jobs/deploy.py --config_path configs/my_config.yaml --run_id <mlflow_run_id> \
+    --model_name catalog.schema.my_model --endpoint_name my-endpoint
 ```
 
----
+## Extending the Framework
 
-## Adding New Detection Models
+### Add a New Model (Same Task)
 
-To add a new Hugging Face detection model, create an adapter in `src/tasks/detection/adapters.py`:
+For detection, just use a different HuggingFace model name in your config — if it works with `AutoModelForObjectDetection`, it works here. Same for classification with `AutoModelForImageClassification`.
+
+For detection models with non-standard input/output formats, add an adapter in `src/tasks/detection/adapters.py`.
+
+### Add a New Task
+
+Create a new directory under `src/tasks/` and implement the task interface:
 
 ```python
-class YourModelInputAdapter(BaseAdapter):
-    def __init__(self, model_name, image_size=800):
-        self.processor = AutoImageProcessor.from_pretrained(model_name, size={"height": image_size, "width": image_size})
+from src.registry import TaskRegistry
 
-    def __call__(self, image, target):
-        processed = self.processor(image, return_tensors="pt")
-        return processed.pixel_values.squeeze(0), adapted_target
+@TaskRegistry.register("segmentation")
+class SegmentationTask:
+    def get_model(self, model_cfg): ...
+    def get_train_dataset(self, config): ...
+    def get_val_dataset(self, config): ...
+    def get_collate_fn(self): ...
+    def create_optimizer_and_scheduler(self, model, config, num_training_steps): ...
+    def compute_loss(model, inputs, return_outputs=False): ...
+    def get_eval_fn(self, model_cfg): ...
 ```
 
-Register it in `get_input_adapter()`, then use it in your config:
-```yaml
-model:
-  model_name: "your-org/your-model"
-```
+Then add `import src.tasks.segmentation` to `src/engine/engine.py` and `src/evaluation/engine.py`. The training engine, evaluation pipeline, and job scripts all work automatically.
 
----
+## Multi-GPU
+
+- **Single-node (default):** HF Trainer handles DDP natively. Pass `--num_gpus N` or auto-detect.
+- **Multi-node (opt-in):** Pass `--distributed torchd` to use TorchDistributor across Spark workers.
+
+```bash
+# 4x A10G on a single node
+python jobs/train.py --config_path configs/my_config.yaml --num_gpus 4
+
+# Multi-node via TorchDistributor (only when needed)
+python jobs/train.py --config_path configs/my_config.yaml --distributed torchd
+```
 
 ## Lakehouse App
 
-The `lakehouse_app/` directory contains a Streamlit UI for configuring training, launching Jobs, and monitoring runs. Deploy it as a Databricks App — see [`lakehouse_app/README.md`](lakehouse_app/README.md).
+The `lakehouse_app/` directory contains a Streamlit UI covering the full lifecycle: config setup, data EDA, training, evaluation, model registration, deployment, inference testing, run history, and endpoint monitoring. Deploy as a Databricks App — see [`lakehouse_app/README.md`](lakehouse_app/README.md).
 
----
+## Built With
+
+[HuggingFace Transformers](https://huggingface.co/docs/transformers) | [MLflow](https://mlflow.org) | [Databricks](https://databricks.com) | [PyTorch](https://pytorch.org) | [torchmetrics](https://torchmetrics.readthedocs.io)
 
 ## License
 
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+MIT License — see [LICENSE](LICENSE).

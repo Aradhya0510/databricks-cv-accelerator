@@ -1,0 +1,60 @@
+model:
+  model_name: google/vit-base-patch16-224
+  task_type: classification
+  num_classes: 10
+  pretrained: true
+  image_size: 224
+  learning_rate: 5e-5
+  weight_decay: 1e-2
+  scheduler: cosine
+  epochs: 20
+  dropout: 0.1
+  mixup_alpha: 0.0
+  # Detection fields (unused, kept for schema compat)
+  confidence_threshold: 0.5
+  iou_threshold: 0.5
+  max_detections: 100
+data:
+  train_data_path: /Volumes/<catalog>/<schema>/<volume>/<path>/data/classification/train/
+  val_data_path: /Volumes/<catalog>/<schema>/<volume>/<path>/data/classification/val/
+  batch_size: 32
+  num_workers: 4
+  model_name: google/vit-base-patch16-224
+  image_size:
+  - 224
+  - 224
+  augment: true
+  augmentations:
+    horizontal_flip: true
+    random_crop: true
+    color_jitter: 0.2
+training:
+  max_epochs: 20
+  early_stopping_patience: 5
+  monitor_metric: val_accuracy
+  monitor_mode: max
+  checkpoint_dir: /Volumes/<catalog>/<schema>/<volume>/<path>/checkpoints/classification
+  volume_checkpoint_dir: /Volumes/<catalog>/<schema>/<volume>/<path>/volume_checkpoints/classification
+  save_top_k: 3
+  log_every_n_steps: 50
+  use_gpu: true
+mlflow:
+  experiment_name: /Users/<your.email@databricks.com>/cv_classification_vit
+  run_name: vit_base_run1
+  log_model: true
+  tags:
+    framework: hf_trainer
+    model: vit
+    task: classification
+output:
+  results_dir: /Volumes/<catalog>/<schema>/<volume>/<path>/results/classification
+  save_predictions: true
+serving:
+  registered_model_name: <catalog>.<schema>.vit_classification
+  endpoint_name: vit-classification-endpoint
+  workload_size: Small
+  scale_to_zero: true
+monitoring:
+  drift_threshold: 0.1
+  error_rate_threshold: 0.05
+  latency_p95_threshold_ms: 500

@@ -66,3 +66,12 @@ output:
     save_images: true
     confidence_threshold: 0.5
     max_boxes: 20
+serving:
+  registered_model_name: <catalog>.<schema>.detr_detection
+  endpoint_name: detr-detection-endpoint
+  workload_size: Small
+  scale_to_zero: true
+monitoring:
+  drift_threshold: 0.1
+  error_rate_threshold: 0.05
+  latency_p95_threshold_ms: 500
