@@ -106,7 +106,7 @@ print("Check MLflow UI for detailed metrics, curves, and model artifacts.")
 # MAGIC
 # MAGIC **HF Trainer backend:**
 # MAGIC - Handles gradient accumulation, mixed precision, and logging automatically
-# MAGIC - Custom `DetectionTrainer` overrides the evaluation loop for mAP computation
+# MAGIC - Each task provides its own loss and eval hooks to the generic `CVTrainer`
 # MAGIC - `report_to="mlflow"` logs all metrics to MLflow automatically
 # MAGIC
 # MAGIC **Multi-GPU via TorchDistributor:**

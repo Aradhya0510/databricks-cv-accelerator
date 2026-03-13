@@ -17,7 +17,7 @@ from ..config.schema import PipelineConfig
 from ..registry import TaskRegistry
 from ..utils.environment import get_gpu_count, setup_nccl_env, stage_data_to_local
 from .callbacks import EarlyStoppingCallback, VolumeCheckpointCallback
-from .detection_trainer import DetectionTrainer
+from .trainer import CVTrainer
 
 
 class TrainingEngine:
@@ -81,7 +81,6 @@ class TrainingEngine:
         # --- datasets ---
         train_ds = task.get_train_dataset(config)
         val_ds = task.get_val_dataset(config)
-        output_adapter = task.get_output_adapter(config.model)
 
         # --- optimizer + scheduler ---
         steps_per_epoch = math.ceil(len(train_ds) / config.data.batch_size)
@@ -138,7 +137,7 @@ class TrainingEngine:
         )
 
         # --- trainer ---
-        trainer = DetectionTrainer(
+        trainer = CVTrainer(
             model=model,
             args=training_args,
             train_dataset=train_ds,
@@ -147,7 +146,11 @@ class TrainingEngine:
             optimizers=(optimizer, scheduler),
             callbacks=callbacks,
         )
-        trainer.output_adapter = output_adapter
+        # Wire task-specific hooks into the generic trainer
+        if hasattr(task, "compute_loss"):
+            trainer.loss_fn = task.compute_loss
+        if hasattr(task, "get_eval_fn"):
+            trainer.eval_fn = task.get_eval_fn(config.model)
 
         # --- train ---
         trainer.train()

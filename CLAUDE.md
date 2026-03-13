@@ -14,7 +14,7 @@ src/
 ├── registry.py               # TaskRegistry with @register decorator
 ├── engine/
 │   ├── engine.py             # TrainingEngine: config → train → metrics
-│   ├── detection_trainer.py  # HF Trainer subclass with mAP eval loop
+│   ├── trainer.py            # CVTrainer — generic HF Trainer with task-provided hooks
 │   └── callbacks.py          # VolumeCheckpointCallback, EarlyStoppingCallback
 ├── tasks/detection/
 │   ├── __init__.py           # DetectionTask registered with TaskRegistry
