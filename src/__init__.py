@@ -1,12 +1,3 @@
-"""
-Databricks Computer Vision Pipeline
+"""Databricks Computer Vision Pipeline — object detection fine-tuning on Databricks."""
 
-A modular computer vision pipeline for Databricks with support for:
-- Image Classification
-- Object Detection  
-- Instance Segmentation
-- Semantic Segmentation
-- Panoptic Segmentation
-"""
-
-__version__ = "0.1.0" 
+__version__ = "0.2.0"
