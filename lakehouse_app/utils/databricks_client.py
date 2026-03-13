@@ -25,52 +25,62 @@ class DatabricksJobClient:
         self,
         job_name: str,
         config_path: str,
-        src_path: str,
+        project_path: str,
+        num_gpus: Optional[int] = None,
         cluster_config: Optional[Dict[str, Any]] = None,
+        existing_cluster_id: Optional[str] = None,
         email_notifications: Optional[List[str]] = None,
     ) -> str:
         """
-        Create a training job.
-        
+        Create a training job using the HF Trainer entry point.
+
         Args:
             job_name: Name for the job
-            config_path: Path to configuration YAML
-            src_path: Path to src directory
-            cluster_config: Optional cluster configuration
+            config_path: Path to configuration YAML (workspace or volume path)
+            project_path: Workspace path to the project root
+                (e.g. /Workspace/Users/user@databricks.com/Databricks_CV_ref)
+            num_gpus: Number of GPUs (auto-detected on cluster if omitted)
+            cluster_config: New cluster config dict (ignored if existing_cluster_id set)
+            existing_cluster_id: Use an already-running GPU cluster
             email_notifications: Optional list of emails for notifications
-            
+
         Returns:
             Job ID
         """
-        # Default cluster configuration (GPU)
-        if cluster_config is None:
-            cluster_config = {
-                "spark_version": "14.3.x-gpu-ml-scala2.12",
-                "node_type_id": "g5.4xlarge",
-                "num_workers": 0,  # Single node
-                "runtime_engine": "STANDARD",
-                "data_security_mode": "SINGLE_USER",
-            }
-        
+        # Build CLI parameters
+        python_params = ["--config_path", config_path]
+        if num_gpus is not None:
+            python_params.extend(["--num_gpus", str(num_gpus)])
+
+        # Cluster setup — prefer existing, fall back to new
+        cluster_kwargs = {}
+        if existing_cluster_id:
+            cluster_kwargs["existing_cluster_id"] = existing_cluster_id
+        else:
+            if cluster_config is None:
+                cluster_config = {
+                    "spark_version": "16.4.x-gpu-ml-scala2.12",
+                    "node_type_id": "g5.4xlarge",
+                    "num_workers": 0,  # Single node multi-GPU
+                    "runtime_engine": "STANDARD",
+                    "data_security_mode": "SINGLE_USER",
+                }
+            cluster_kwargs["new_cluster"] = compute.ClusterSpec(**cluster_config)
+
         # Job task configuration
         task = jobs.Task(
             task_key="train_model",
-            description="Train CV model",
-            new_cluster=compute.ClusterSpec(**cluster_config),
+            description="Fine-tune CV model with HF Trainer",
+            **cluster_kwargs,
             python_wheel_task=None,
             spark_python_task=jobs.SparkPythonTask(
-                python_file=f"{src_path}/../jobs/model_training.py",
-                parameters=[
-                    "--config_path", config_path,
-                    "--src_path", src_path
-                ]
+                python_file=f"{project_path}/jobs/train.py",
+                parameters=python_params,
             ),
             libraries=[
-                compute.Library(pypi=compute.PythonPyPiLibrary(package="torch>=2.0.0")),
-                compute.Library(pypi=compute.PythonPyPiLibrary(package="torchvision>=0.15.0")),
-                compute.Library(pypi=compute.PythonPyPiLibrary(package="transformers>=4.36.0")),
-                compute.Library(pypi=compute.PythonPyPiLibrary(package="lightning>=2.1.0")),
-                compute.Library(pypi=compute.PythonPyPiLibrary(package="mlflow>=2.10.0")),
+                compute.Library(pypi=compute.PythonPyPiLibrary(package="torchmetrics>=1.0.0")),
+                compute.Library(pypi=compute.PythonPyPiLibrary(package="pydantic>=2.0.0")),
+                compute.Library(pypi=compute.PythonPyPiLibrary(package="pycocotools>=2.0.6")),
             ],
             timeout_seconds=0,  # No timeout
         )

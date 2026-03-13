@@ -57,7 +57,7 @@ mlflow:
   run_name: yolos_base
   log_model: true
   tags:
-    framework: lightning
+    framework: hf_trainer
     model: yolos
     dataset: coco
 output:

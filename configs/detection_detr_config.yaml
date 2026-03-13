@@ -56,7 +56,7 @@ mlflow:
   run_name: detr_resnet50
   log_model: true
   tags:
-    framework: lightning
+    framework: hf_trainer
     model: detr
     dataset: coco
 output:

@@ -25,9 +25,12 @@ venv/
 env/
 ENV/
 
-# IDE
+# IDE / AI tools
 .idea/
 .vscode/
+.cursor/
+.claude/
+.ai-dev-kit/
 *.swp
 *.swo
 .DS_Store
@@ -38,6 +41,8 @@ ENV/
 
 # Databricks
 .databricks/
+.databricks-resources.json
+.mcp.json
 databricks-connect.json
 databricks-cli.json
 

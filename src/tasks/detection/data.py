@@ -5,9 +5,7 @@ from pathlib import Path
 
 import torch
 from torch.utils.data import DataLoader
-import lightning as pl
 from pycocotools.coco import COCO
-import cv2
 import numpy as np
 from PIL import Image
 from .adapters import get_input_adapter
@@ -103,7 +101,14 @@ class COCODetectionDataset(torch.utils.data.Dataset):
         
         return image, target
 
-class DetectionDataModule(pl.LightningDataModule):
+try:
+    import lightning as pl
+    _LDM_BASE = pl.LightningDataModule
+except ImportError:
+    _LDM_BASE = object  # allow import without lightning installed
+
+
+class DetectionDataModule(_LDM_BASE):
     def __init__(self, config: Union[Dict[str, Any], DetectionDataConfig]):
         super().__init__()
         if isinstance(config, dict):
@@ -112,7 +117,11 @@ class DetectionDataModule(pl.LightningDataModule):
         self.adapter = None  # Will be set after initialization
     
     def setup(self, stage: Optional[str] = None):
+        # Idempotent: skip if already set up (needed for ddp_notebook where
+        # forked workers re-call setup but can't access Databricks Volumes).
         if stage == 'fit' or stage is None:
+            if hasattr(self, 'train_dataset') and self.train_dataset is not None:
+                return
             self.train_dataset = COCODetectionDataset(
                 root_dir=self.config.train_data_path,
                 annotation_file=self.config.train_annotation_file,
