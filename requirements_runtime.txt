@@ -1,0 +1,6 @@
+# Databricks Runtime Extras
+# Packages required at runtime that are NOT provided by DBR ML 16.x GPU runtime.
+# Referenced by jobs/*.py entry points for automatic installation.
+# Keep this minimal — only add packages that cause ImportError on the cluster.
+
+pycocotools>=2.0.6  # COCO dataset handling (detection task)

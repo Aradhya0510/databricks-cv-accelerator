@@ -1,554 +1,161 @@
-# Databricks Computer Vision Accelerator
+# Databricks CV Accelerator
 
-An advanced, modular, and extensible computer vision accelerator designed to significantly reduce the complexity involved in building, training, and deploying computer vision models on Databricks. This project aims to serve as a reference implementation for best practices, abstracting away many of the difficult decisions related to model architecture, dataset format, training orchestration, distributed computing, and experiment tracking. By using this accelerator, practitioners can more easily transition from problem formulation to model deployment using well-defined and reusable components that promote clarity, scalability, and productivity.
+A production-ready framework for fine-tuning computer vision models on Databricks. Drop in a config, point it at your data, and get a trained, evaluated, and deployed model — with full MLflow tracking, multi-GPU support, and a Streamlit UI.
 
----
+## Why This Framework
 
-## 🎯 Vision and Approach
+Fine-tuning CV models on Databricks involves gluing together data loading, HuggingFace models, distributed training, experiment tracking, model packaging, and serving. This framework does it for you:
 
-Computer vision projects are often burdened by the overwhelming number of decisions that practitioners must make before getting to meaningful experimentation. From choosing the right model architecture and preprocessing pipeline to configuring training infrastructure and tracking results, these decisions can stall progress and increase costs. This architecture solves that problem through:
+- **Config-driven.** One YAML file controls the entire pipeline — model, data, training, serving. No boilerplate code to write.
+- **Task-agnostic.** Detection and classification work today. Add new tasks by implementing a single class. The engine, evaluation, serving, and monitoring layers all adapt automatically.
+- **Databricks-native.** Unity Catalog Volumes for data, MLflow for tracking, Model Serving for deployment, system tables for monitoring. Everything wired together.
+- **Multi-GPU out of the box.** HF Trainer handles DDP natively. Pass `--num_gpus 4` and it works. No Spark orchestration overhead for single-node.
+- **Full lifecycle.** Train, evaluate (mAP/accuracy + error analysis + latency benchmarks), register to Unity Catalog, deploy to Model Serving, and monitor — all from the same framework.
 
-* **Complete Model Abstraction**: The framework provides **zero-knowledge model management** through Hugging Face's Auto-classes (`AutoModel`, `AutoConfig`, `AutoImageProcessor`). Users can work with any Hugging Face model without understanding its internals - just specify the model name in configuration.
-* **Complete Training Loop Abstraction**: Built on PyTorch Lightning, the framework **eliminates the need for training code**. No training loops, optimizers, or schedulers to write - Lightning handles everything automatically.
-* **Seamless MLflow Integration**: **Zero-configuration experiment tracking** through Lightning's native MLflow integration. All metrics, parameters, and artifacts are logged automatically.
-* **Reducing cognitive and setup overhead:** The framework expects datasets in the MS COCO format—an image folder and a single `annotations.json`. For users bringing in new model architectures, only a small adapter class is needed to plug the model into the framework.
-* **Promoting best practices:** Built on PyTorch Lightning, Ray, MLflow, Hugging Face Transformers, and Albumentations, the framework incorporates community-standard tools to ensure reproducibility, traceability, and scalability.
-* **Enabling rapid experimentation:** Configuration files define models, datasets, and training settings, allowing users to switch tasks or models without rewriting core logic.
+## What You Can Do
 
-Users can walk through the provided example notebooks to:
+| Task | Models | Data Format |
+|---|---|---|
+| Object Detection | DETR, YOLOS, any `AutoModelForObjectDetection` | COCO JSON (images + annotations.json) |
+| Image Classification | ViT, ResNet, any `AutoModelForImageClassification` | ImageFolder (class_name/image.jpg) |
 
-* Set up their Databricks environment and Unity Catalog schema
-* Upload and register datasets under Unity Catalog Volumes
-* Initialize model and dataloader objects with a few lines of code
-* Launch a full training loop and monitor experiments via the MLflow UI
-
-Once training is running, checkpoints are automatically saved to configured volume paths via Lightning's `ModelCheckpoint` callback. Metrics, hyperparameters, and model artifacts are tracked in MLflow for easy reproducibility and comparison.
-
----
-
-## 🚀 Technology Stack and Its Significance
-
-* **Lightning**: **Completely abstracts the training loop** - no training code needed. Provides automatic distributed training, checkpointing, early stopping, and MLflow integration.
-* **Hugging Face Transformers**: **Completely abstracts model management** through Auto-classes. Provides high-quality pre-trained vision models such as DETR, YOLO, ViT, SegFormer, and Mask2Former with zero setup - just specify the model name.
-* **Ray**: Powers distributed training and large-scale hyperparameter tuning. Enables multi-GPU/multi-node workloads on Databricks.
-* **MLflow**: **Seamlessly integrated through Lightning** for automatic experiment tracking, model registry, and serving. Tracks parameters, metrics, models, and artifacts without any manual setup.
-* **Albumentations**: Standardizes and simplifies image augmentations to improve model robustness across datasets.
-* **PyCOCOTools**: Provides reliable annotation parsing, evaluation, and visualization tools using the COCO format.
-
----
-
-## 🏗️ Architectural Abstraction Layers
-
-Our framework provides **complete abstraction at every level** of the computer vision pipeline:
-
-```
-┌─────────────────────────────────────────────────────────────────┐
-│                    USER INTERFACE LAYER                        │
-│  ┌─────────────────┐  ┌─────────────────┐  ┌─────────────────┐ │
-│  │   YAML Config   │  │   Python API    │  │   Notebooks     │ │
-│  │   (Zero Code)   │  │   (Minimal)     │  │   (Interactive) │ │
-│  └─────────────────┘  └─────────────────┘  └─────────────────┘ │
-└─────────────────────────────────────────────────────────────────┘
-                                │
-┌─────────────────────────────────────────────────────────────────┐
-│                 FRAMEWORK ABSTRACTION LAYERS                   │
-│  ┌─────────────────┐  ┌─────────────────┐  ┌─────────────────┐ │
-│  │  Model Layer    │  │ Training Layer  │  │  Data Layer     │ │
-│  │  (AutoModel)    │  │  (Lightning)    │  │  (Adapters)     │ │
-│  │  Zero Knowledge │  │  Zero Code      │  │  Zero Format    │ │
-│  └─────────────────┘  └─────────────────┘  └─────────────────┘ │
-└─────────────────────────────────────────────────────────────────┘
-                                │
-┌─────────────────────────────────────────────────────────────────┐
-│                  INFRASTRUCTURE LAYER                          │
-│  ┌─────────────────┐  ┌─────────────────┐  ┌─────────────────┐ │
-│  │   Hugging Face  │  │ PyTorch Lightning│  │     MLflow      │ │
-│  │   Transformers  │  │                 │  │                 │ │
-│  │   (Auto-Classes)│  │ (Training Loop) │  │ (Observability) │ │
-│  └─────────────────┘  └─────────────────┘  └─────────────────┘ │
-└─────────────────────────────────────────────────────────────────┘
-```
-
-### Key Abstraction Benefits:
-
-**🔧 Model Management (Zero Knowledge)**
-```
-Traditional: model = MyCustomModel(backbone='resnet50', heads='detection', ...)
-Framework:  model = AutoModel.from_pretrained("facebook/detr-resnet-50")
-```
-
-**⚡ Training Loop (Zero Code)**
-```
-Traditional: for epoch in epochs: for batch in dataloader: loss = model(batch)...
-Framework:  trainer.fit(model, datamodule)  # Lightning handles everything
-```
-
-**📊 Observability (Zero Configuration)**
-```
-Traditional: mlflow.log_metric("loss", loss); mlflow.log_param("lr", lr)...
-Framework:  # Lightning automatically logs everything to MLflow
-```
-
----
-
-## 🧩 Modularity and Extensibility
-
-* **UnifiedTrainer**: Handles all training logic, seamlessly switching between local and distributed modes.
-* **DetectionModel & DetectionDataModule**: Encapsulate task-specific logic, keeping model code separate from dataset management.
-* **Adapter System**: **Complete abstraction of model-specific data processing** - input and output adapters handle all format conversions automatically. Minimizes the work needed to plug in new models—define input and output adapters (e.g., MyModelInputAdapter, MyModelOutputAdapter), register them with get_input_adapter() and get_output_adapter(), and start training.
-
----
-
-## 🔧 How to Introduce New Models via Adapters
-
-### Step 1: Create Input and Output Adapters
-
-```python
-class YourModelInputAdapter(BaseAdapter):
-    def __init__(self, model_name: str, image_size: int = 800):
-        # Use AutoImageProcessor for automatic preprocessing
-        self.processor = AutoImageProcessor.from_pretrained(
-            model_name,
-            size={"height": image_size, "width": image_size},
-            do_resize=True, do_rescale=True, do_normalize=True
-        )
-    
-    def __call__(self, image: Image.Image, target: Dict) -> Tuple[torch.Tensor, Dict]:
-        # Automatic preprocessing through AutoImageProcessor
-        processed = self.processor(image, return_tensors="pt")
-        return processed.pixel_values.squeeze(0), adapted_target
-```
-
-```python
-class YourModelOutputAdapter:
-    def adapt_output(self, outputs: Dict[str, Any]) -> Dict[str, Any]:
-        return {
-            "loss": outputs.get("loss"),
-            "pred_boxes": outputs.pred_boxes,
-            "pred_logits": outputs.logits,
-            "loss_dict": outputs.get("loss_dict", {})
-        }
-```
-
-### Step 2: Register Your Adapters
-
-```python
-def get_input_adapter(model_name: str, image_size: int = 800) -> BaseAdapter:
-    if "your_model" in model_name.lower():
-        return YourModelInputAdapter(model_name=model_name, image_size=image_size)
-    ...
-
-def get_output_adapter(model_name: str) -> BaseAdapter:
-    if "your_model" in model_name.lower():
-        return YourModelOutputAdapter(model_name=model_name)
-    ...
-```
-
-### Step 3: YAML Configuration
+To switch models, change one line:
 
 ```yaml
 model:
-  task_type: detection
-  model_name: your_model_identifier  # Just change this line
-  ...
+  model_name: "google/vit-base-patch16-224"  # or "facebook/detr-resnet-50", "hustvl/yolos-base", etc.
+  task_type: classification                   # or "detection"
 ```
 
-**That's it!** The framework handles everything else automatically through Hugging Face Auto-classes and PyTorch Lightning.
+## Architecture
 
----
+```
+Config YAML ─→ PipelineConfig (Pydantic) ─→ TrainingEngine ─→ CVTrainer (HF Trainer)
+                                                │
+                                   TaskRegistry │ dispatches to:
+                                                ├── DetectionTask
+                                                └── ClassificationTask
+```
 
-## 🚀 Getting Started
+The framework separates **what** (task-specific logic) from **how** (training loop, evaluation, serving):
 
-### Prerequisites
+- **Tasks** (`src/tasks/`) provide model loading, data handling, loss, and eval metrics
+- **Engine** (`src/engine/`) runs the training loop and DDP — task-agnostic
+- **Evaluation** (`src/evaluation/`) runs standalone eval, error analysis, benchmarks — task-aware
+- **Serving** (`src/serving/`) wraps models as PyFunc for Model Serving — task-aware
+- **Monitoring** (`src/monitoring/`) queries system tables for endpoint observability
 
-Before you begin, ensure you have:
-- Access to a Databricks workspace with Unity Catalog enabled
-- A COCO format dataset uploaded to your Unity Catalog volume
-- Appropriate compute resources (GPU recommended for training)
+## Project Structure
 
-### Step 1: Repository Setup
+```
+src/
+├── config/schema.py              # Pydantic v2 config + YAML loader
+├── registry.py                   # TaskRegistry (@register decorator)
+├── engine/
+│   ├── engine.py                 # TrainingEngine: config → train → metrics
+│   ├── trainer.py                # CVTrainer (HF Trainer + task hooks)
+│   └── callbacks.py              # Checkpoint + early stopping callbacks
+├── tasks/
+│   ├── detection/                # DetectionTask, COCO dataset, DETR/YOLOS adapters
+│   └── classification/           # ClassificationTask, ImageFolder dataset
+├── evaluation/
+│   └── engine.py                 # EvaluationEngine: metrics, error analysis, benchmarks
+├── serving/
+│   ├── pyfunc.py                 # DetectionPyFuncModel, ClassificationPyFuncModel
+│   ├── registration.py           # register_model() → Unity Catalog
+│   └── deployment.py             # deploy_endpoint() → Model Serving
+└── monitoring/
+    └── endpoint_monitor.py       # Health, request metrics, prediction distribution
 
-Clone this repository in your Databricks workspace:
+jobs/
+├── train.py                      # Training CLI
+├── evaluate.py                   # Evaluation CLI
+├── deploy.py                     # Registration + deployment CLI
+└── monitor.py                    # Monitoring report CLI
+
+notebooks/
+├── 01_data_exploration.py        # EDA: stats, class distribution, quality checks
+├── 02_model_training.py          # Interactive training
+├── 03_model_evaluation.py        # Evaluation + error analysis
+├── 04_model_deployment.py        # PyFunc test → register → deploy → smoke test
+└── 05_model_monitoring.py        # Endpoint health + metrics + alerts
+
+configs/                          # YAML configs per model
+lakehouse_app/                    # Streamlit UI (9 pages, full lifecycle)
+```
+
+## Quick Start
+
+See **[GETTING_STARTED.md](GETTING_STARTED.md)** for the full setup guide. The short version:
 
 ```bash
-git clone https://github.com/Aradhya0510/databricks-cv-architecture.git
-cd databricks-cv-architecture
+# 1. Clone
+git clone <repo-url> && cd Databricks_CV_ref
+
+# 2. Pick a config, update paths
+cp configs/classification_vit_config.yaml configs/my_config.yaml
+# Edit data paths, MLflow experiment, checkpoint dirs
+
+# 3. Train
+python jobs/train.py --config_path configs/my_config.yaml
+
+# 4. Evaluate
+python jobs/evaluate.py --config_path configs/my_config.yaml --checkpoint_path /path/to/model
+
+# 5. Deploy
+python jobs/deploy.py --config_path configs/my_config.yaml --run_id <mlflow_run_id> \
+    --model_name catalog.schema.my_model --endpoint_name my-endpoint
 ```
 
-### Step 2: Unity Catalog Volume Structure
+## Extending the Framework
 
-Organize your Unity Catalog volume with the following structure:
+### Add a New Model (Same Task)
 
-```
-/Volumes/your_catalog/your_schema/your_volume/
-├── data/
-│   ├── train/
-│   │   ├── images/
-│   │   └── annotations.json
-│   ├── val/
-│   │   ├── images/
-│   │   └── annotations.json
-│   └── test/
-│       ├── images/
-│       └── annotations.json
-├── configs/
-├── checkpoints/
-├── logs/
-└── results/
-```
+For detection, just use a different HuggingFace model name in your config — if it works with `AutoModelForObjectDetection`, it works here. Same for classification with `AutoModelForImageClassification`.
 
-### Step 3: Configuration Management
+For detection models with non-standard input/output formats, add an adapter in `src/tasks/detection/adapters.py`.
 
-1. **Create a configs folder** in your Unity Catalog volume for your project/experiment
-2. **Select the appropriate config file** from the `configs/` directory in the cloned repository based on your task (detection, classification, segmentation) and model choice
-3. **Customize the configuration** by updating:
-   - Data paths to point to your Unity Catalog volume
-   - Model parameters (batch size, learning rate, epochs)
-   - Training settings (checkpoint directory, monitoring metrics)
-   - Compute-specific parameters (GPU settings, distributed training options)
+### Add a New Task
 
-Example configuration:
-```yaml
-model:
-  model_name: "facebook/detr-resnet-50"  # Just change this to switch models
-  task_type: "detection"
-  num_classes: 80
+Create a new directory under `src/tasks/` and implement the task interface:
 
-data:
-  train_data_path: "/Volumes/your_catalog/your_schema/your_volume/data/train/images"
-  train_annotation_file: "/Volumes/your_catalog/your_schema/your_volume/data/train/annotations.json"
-  val_data_path: "/Volumes/your_catalog/your_schema/your_volume/data/val/images"
-  val_annotation_file: "/Volumes/your_catalog/your_schema/your_volume/data/val/annotations.json"
-  batch_size: 16
-  num_workers: 4
-
-training:
-  max_epochs: 300
-  learning_rate: 1e-4
-  checkpoint_dir: "/Volumes/your_catalog/your_schema/your_volume/checkpoints"
-```
-
-### Step 4: Choose Your Compute Environment
-
-The framework supports two compute environments for maximum flexibility:
-
-#### Option A: Standard Databricks Compute
-Use the standard notebooks and configurations for traditional Databricks compute:
-
-**Notebooks:** `notebooks/` directory
-**Configs:** `configs/` directory
-**Import:** `from config import load_config` and `from training.trainer import UnifiedTrainer`
-
-#### Option B: Serverless GPU Compute (Recommended)
-Use the serverless GPU notebooks and configurations for optimized deep learning workloads:
-
-**Notebooks:** `notebooks_serverless/` directory
-**Configs:** `configs_serverless/` directory
-**Import:** `from databricks_cv_accelerator.config import load_config` and `from training.trainer import UnifiedTrainer`
-
-**Serverless GPU Benefits:**
-- 🚀 **Automatic environment management** with pre-configured ML frameworks
-- 💰 **Cost optimization** with pay-per-use pricing
-- ⚡ **Optimized GPU utilization** and automatic scaling
-- 🔧 **Interactive development** support for both interactive and batch workloads
-- 🎯 **A10 and H100 GPU support** with automatic distributed training setup
-
-### Step 5: Notebook Workflow
-
-Follow the provided reference notebooks in sequence. Choose the appropriate path based on your compute environment:
-
-**Standard Compute Notebook Sequence:**
-1. **`notebooks/00_setup_and_config.py`** - Environment validation and configuration setup
-2. **`notebooks/01_data_preparation.py`** - Dataset analysis and preprocessing validation
-3. **`notebooks/02_model_training.py`** - Model training with MLflow tracking
-4. **`notebooks/03_hparam_tuning.py`** - Hyperparameter optimization (optional)
-5. **`notebooks/04_model_evaluation.py`** - Comprehensive model evaluation
-6. **`notebooks/05_model_registration_deployment.py`** - Model deployment and serving setup
-
-**Serverless GPU Notebook Sequence:**
-1. **`notebooks_serverless/00_setup_and_config.py`** - Serverless GPU environment setup
-2. **`notebooks_serverless/01_data_preparation.py`** - Dataset analysis and preprocessing validation
-3. **`notebooks_serverless/02_model_training_serverless.py`** - Serverless GPU training with MLflow tracking
-4. **`notebooks_serverless/03_hparam_tuning.py`** - Hyperparameter optimization with serverless GPU
-5. **`notebooks_serverless/04_model_evaluation_serverless.py`** - Comprehensive model evaluation
-6. **`notebooks_serverless/05_model_registration_deployment.py`** - Model deployment and serving setup
-
-**Configuration Setup:**
-- **Standard:** Copy and customize configs from `configs/` directory
-- **Serverless GPU:** Copy and customize configs from `configs_serverless/` directory
-
-**Important:** Ensure your configuration parameters align with your available compute resources, particularly GPU memory, batch size, and training duration.
-
-### Step 6: Serverless GPU Configuration (Optional)
-
-If using Serverless GPU compute, configure the following parameters in your `configs_serverless/` config files:
-
-```yaml
-training:
-  # Enable serverless GPU
-  use_serverless_gpu: true
-  distributed: true
-  use_ray: false  # Disabled when using serverless GPU
-  
-  # Serverless GPU specific settings
-  serverless_gpu_type: "A10"  # A10 or H100
-  serverless_gpu_count: 4     # Number of GPUs to use
-```
-
-**GPU Type Options:**
-- **A10**: Multi-node support, cost-effective for most workloads
-- **H100**: Single-node only, high-performance for large models
-
-### Step 7: MLflow Integration
-
-**Zero-Configuration MLflow Integration:** The framework uses Lightning's native MLflow integration for automatic experiment tracking, model registry, and serving.
-
-**Key Features:**
-- **Automatic checkpoint logging** with `log_model="all"`
-- **Automatic parameter logging** from LightningModule's `save_hyperparameters()`
-- **Automatic metric logging** through Lightning's `self.log()` calls
-- **Automatic model registry** in Unity Catalog
-- **Volume checkpointing** for persistent storage
-
-**Usage Example:**
 ```python
-from utils.logging import create_databricks_logger
-from training.trainer import UnifiedTrainer
+from src.registry import TaskRegistry
 
-# Create logger with automatic integration
-mlf_logger = create_databricks_logger(
-    experiment_name=experiment_name,
-    run_name=run_name,
-    log_model="all"  # Automatically log all checkpoints
-)
-
-# Initialize trainer with logger
-unified_trainer = UnifiedTrainer(
-    config=config,
-    model=model,
-    data_module=data_module,
-    logger=mlf_logger
-)
-
-# Start training - all logging handled automatically
-result = unified_trainer.train()
+@TaskRegistry.register("segmentation")
+class SegmentationTask:
+    def get_model(self, model_cfg): ...
+    def get_train_dataset(self, config): ...
+    def get_val_dataset(self, config): ...
+    def get_collate_fn(self): ...
+    def create_optimizer_and_scheduler(self, model, config, num_training_steps): ...
+    def compute_loss(model, inputs, return_outputs=False): ...
+    def get_eval_fn(self, model_cfg): ...
 ```
 
-**Everything is automatic:**
-- ✅ Parameter logging
-- ✅ Metric logging  
-- ✅ Checkpoint logging
-- ✅ Model registry
-- ✅ Model serving
+Then add `import src.tasks.segmentation` to `src/engine/engine.py` and `src/evaluation/engine.py`. The training engine, evaluation pipeline, and job scripts all work automatically.
 
-**For more details, see:** [`SIMPLIFIED_MLFLOW_INTEGRATION.md`](SIMPLIFIED_MLFLOW_INTEGRATION.md)
+## Multi-GPU
 
----
+- **Single-node (default):** HF Trainer handles DDP natively. Pass `--num_gpus N` or auto-detect.
+- **Multi-node (opt-in):** Pass `--distributed torchd` to use TorchDistributor across Spark workers.
 
-## 🎯 Supported Tasks and Models
-
-The framework supports multiple computer vision tasks with **zero-knowledge model management**. Simply specify the model name in your configuration, and the framework automatically handles all the complexity.
-
-**Supported Tasks:** Object Detection, Image Classification, Semantic Segmentation, Instance Segmentation, Universal Segmentation
-
-**Popular Models:** DETR, YOLOS, ViT, ResNet, ConvNeXT, SegFormer, Mask2Former
-
-**How to Use:** Just change the `model_name` in your configuration - the framework handles everything else automatically.
-
-**📖 For complete details:** [Supported Tasks and Models](docs/SUPPORTED_TASKS_AND_MODELS.md)
-
----
-
-## 🎯 Zero-Knowledge Development Philosophy
-
-The framework is designed for **zero-knowledge development** - you don't need deep ML expertise to use it effectively:
-
-### What You DON'T Need to Know:
-- ❌ Model architecture internals (DETR, YOLOS, ResNet, etc.)
-- ❌ Training loop implementation
-- ❌ Optimizer and scheduler configuration
-- ❌ Distributed training setup
-- ❌ MLflow logging code
-- ❌ Data preprocessing formats
-
-### What You DO Need to Know:
-- ✅ How to write a YAML configuration file
-- ✅ Your dataset structure (COCO format)
-- ✅ Basic ML concepts (learning rate, batch size, epochs)
-
-### Example: Switching from DETR to YOLOS
-```yaml
-# Just change this one line in your config:
-model:
-  model_name: "facebook/detr-resnet-50"  # Change to:
-  model_name: "hustvl/yolos-tiny"       # That's it!
-
-# No other changes needed - adapters handle everything automatically
-```
-
----
-
-## 📊 Current Features
-
-### ✅ Implemented
-
-* **Object Detection**: End-to-end support for DETR, YOLO, and other detection models
-* **Image Classification**: Support for ViT, ConvNeXT, Swin Transformer, and ResNet models
-* **Semantic Segmentation**: Dedicated module with SegFormer, DeepLabV3, and other semantic segmentation models
-* **Instance Segmentation**: Specialized module for Mask2Former and other instance segmentation models
-* **Panoptic Segmentation**: Complete module for unified scene understanding with Mask2Former and similar models
-* **Full COCO dataset compatibility** across all tasks
-* **Distributed training** using Ray on Databricks
-* **MLflow-based experiment tracking** and logging
-* **Lightning-based checkpointing** and early stopping
-* **Adapter interface** for integrating new models
-* **Config-driven modularity** with YAML
-* **Comprehensive evaluation metrics**: mAP for detection, IoU/Dice for segmentation, accuracy/F1 for classification
-
-### 🚧 In Progress
-
-* Additional model integrations (Faster R-CNN, U-Net variants)
-* Advanced augmentation strategies and pipelines
-* Multi-task learning support
-* Model compression and quantization
-
----
-
-## 🌱 Future Directions
-
-* Multi-task learning support
-* Plugin registry for dynamic model/adapter loading
-* Model compression and post-training quantization
-* Real-time inference pipeline integration
-* Custom loss function and optimizer configuration support
-* Advanced visualization and analysis tools
-
----
-
-## 📚 Documentation & Contributions
-
-We welcome contributions from the community! To contribute:
-
-* Follow the adapter design pattern for adding new models
-* Keep core modules model-agnostic and task-aligned
-* Add relevant tests and examples
-* Update documentation for all new features
-* Use type annotations and maintain readable formatting
-
-For detailed information about each task module, see:
-* [Tasks Documentation](src/tasks/README.md) - Comprehensive guide to all task modules
-* [Improved Adapters Documentation](docs/IMPROVED_ADAPTERS.md) - Detailed adapter system documentation
-
----
-
-## 🚀 Quick Start Guide
-
-### Standard Databricks Compute
 ```bash
-# Use standard notebooks and configs
-notebooks/00_setup_and_config.py
-configs/detection_detr_config.yaml
-from config import load_config
-from training.trainer import UnifiedTrainer
+# 4x A10G on a single node
+python jobs/train.py --config_path configs/my_config.yaml --num_gpus 4
+
+# Multi-node via TorchDistributor (only when needed)
+python jobs/train.py --config_path configs/my_config.yaml --distributed torchd
 ```
 
-### Serverless GPU Compute (Recommended)
-```bash
-# Use serverless notebooks and configs
-notebooks_serverless/00_setup_and_config.py
-configs_serverless/detection_detr_config.yaml
-from databricks_cv_accelerator.config import load_config
-from training.trainer import UnifiedTrainer
-```
+## Lakehouse App
 
-### Key Differences
-| Feature | Standard Compute | Serverless GPU |
-|---------|------------------|----------------|
-| **Environment** | Traditional Databricks | Serverless GPU |
-| **Notebooks** | `notebooks/` | `notebooks_serverless/` |
-| **Configs** | `configs/` | `configs_serverless/` |
-| **Trainer** | `UnifiedTrainer` | `UnifiedTrainer` (with `@distributed`) |
-| **Config Module** | `config` | `config` |
-| **Distributed Training** | Ray or DDP | @distributed decorator |
-| **Cost Model** | Per-hour cluster | Pay-per-use GPU time |
-| **Environment Setup** | Manual | Automatic |
+The `lakehouse_app/` directory contains a Streamlit UI covering the full lifecycle: config setup, data EDA, training, evaluation, model registration, deployment, inference testing, run history, and endpoint monitoring. Deploy as a Databricks App — see [`lakehouse_app/README.md`](lakehouse_app/README.md).
 
----
+## Built With
 
-## 🚀 Production Training with Databricks Lakeflow Jobs
-
-For **production training with full multi-GPU DDP support**, use the Python scripts in the `jobs/` directory with **Databricks Lakeflow Jobs UI**. This avoids PyTorch Lightning's limitations in interactive environments.
-
-### Why Use Lakeflow Jobs?
-
-**Notebooks (Interactive Environment):**
-```
-INFO:pytorch_lightning.utilities.rank_zero:Trainer will use only 1 of 4 GPUs because 
-it is running inside an interactive / notebook environment. Multi-GPU inside interactive 
-environments is considered experimental and unstable.
-```
-
-**Lakeflow Jobs (Non-Interactive):**
-- ✅ Full multi-GPU DDP support (all GPUs utilized automatically)
-- ✅ Production-grade stability
-- ✅ Simple UI-based configuration with job parameters
-- ✅ Scheduled runs and automation
-- ✅ Better resource management
-
-### Quick Start: Create a Training Job
-
-1. **Navigate to Workflows** in Databricks UI
-2. **Click "Create Job"**
-3. **Configure the task:**
-   - **Type**: Python script
-   - **Source**: Workspace
-   - **Path**: `/Workspace/.../jobs/model_training.py`
-4. **Add Job Parameter:**
-   - `config_path` = `/Volumes/main/cv/data/configs/detection_detr_config.yaml`
-5. **Select GPU Cluster:**
-   - Node type: `g5.12xlarge` (4x A10G GPUs)
-   - Workers: 0 (single-node for DDP)
-6. **Run Job** - Will automatically use all 4 GPUs with DDP!
-
-### Quick Start: Create a Deployment Job
-
-1. **Create another job**
-2. **Configure the task:**
-   - **Type**: Python script
-   - **Path**: `/Workspace/.../jobs/model_registration_deployment.py`
-3. **Add Job Parameters:**
-   ```
-   config_path: /Volumes/main/cv/data/configs/detection_detr_config.yaml
-   checkpoint_path: /Volumes/main/cv/data/checkpoints/best-model.ckpt
-   model_name: detr_coco_detector
-   deploy: true
-   ```
-4. **Select CPU Cluster** (no GPU needed)
-5. **Run Job**
-
-### Notebooks vs Lakeflow Jobs Comparison
-
-| Feature | Notebooks (Interactive) | Lakeflow Jobs (Non-Interactive) |
-|---------|------------------------|------------------------|
-| **Multi-GPU DDP** | ⚠️ Limited (1 GPU) | ✅ Full Support (All GPUs) |
-| **Configuration** | Manual code cells | UI Parameters |
-| **GPU Utilization** | Experimental | Stable & Production-Ready |
-| **Scheduling** | ❌ Not supported | ✅ Cron, triggers |
-| **Best For** | Development | Production |
-
-**Recommended Workflow:**
-1. 🧪 **Develop** in `notebooks/` - Interactive experimentation with single GPU
-2. 🚀 **Train** with `jobs/model_training.py` - Production multi-GPU training via Jobs UI
-3. 📦 **Deploy** with `jobs/model_registration_deployment.py` - Model serving via Jobs UI
-
-See [jobs/README.md](jobs/README.md) for detailed step-by-step instructions with screenshots.
-
----
-
-### 📬 Questions & Feedback
-
-Open an issue or start a discussion thread in the GitHub repo for support, ideas, or feedback.
+[HuggingFace Transformers](https://huggingface.co/docs/transformers) | [MLflow](https://mlflow.org) | [Databricks](https://databricks.com) | [PyTorch](https://pytorch.org) | [torchmetrics](https://torchmetrics.readthedocs.io)
 
 ## License
 
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+MIT License — see [LICENSE](LICENSE).

@@ -3,6 +3,7 @@ Databricks Client for Jobs API and MLflow Integration
 Handles job submission, monitoring, and MLflow interactions
 """
 
+import io
 import os
 import time
 from typing import Dict, Any, Optional, List
@@ -25,52 +26,65 @@ class DatabricksJobClient:
         self,
         job_name: str,
         config_path: str,
-        src_path: str,
+        project_path: str,
+        num_gpus: Optional[int] = None,
         cluster_config: Optional[Dict[str, Any]] = None,
+        existing_cluster_id: Optional[str] = None,
         email_notifications: Optional[List[str]] = None,
     ) -> str:
         """
-        Create a training job.
-        
+        Create a training job using the HF Trainer entry point.
+
         Args:
             job_name: Name for the job
-            config_path: Path to configuration YAML
-            src_path: Path to src directory
-            cluster_config: Optional cluster configuration
+            config_path: Path to configuration YAML (workspace or volume path)
+            project_path: Workspace path to the project root
+                (e.g. /Workspace/Users/user@databricks.com/Databricks_CV_ref)
+            num_gpus: Number of GPUs (auto-detected on cluster if omitted)
+            cluster_config: New cluster config dict (ignored if existing_cluster_id set)
+            existing_cluster_id: Use an already-running GPU cluster
             email_notifications: Optional list of emails for notifications
-            
+
         Returns:
             Job ID
         """
-        # Default cluster configuration (GPU)
-        if cluster_config is None:
-            cluster_config = {
-                "spark_version": "14.3.x-gpu-ml-scala2.12",
-                "node_type_id": "g5.4xlarge",
-                "num_workers": 0,  # Single node
-                "runtime_engine": "STANDARD",
-                "data_security_mode": "SINGLE_USER",
-            }
-        
+        # Build CLI parameters
+        python_params = ["--config_path", config_path]
+        if num_gpus is not None:
+            python_params.extend(["--num_gpus", str(num_gpus)])
+
+        # Cluster setup — prefer existing, fall back to new
+        cluster_kwargs = {}
+        if existing_cluster_id:
+            cluster_kwargs["existing_cluster_id"] = existing_cluster_id
+        else:
+            if cluster_config is None:
+                cluster_config = {
+                    "spark_version": "16.2.x-gpu-ml-scala2.12",
+                    "node_type_id": "g5.4xlarge",
+                    "num_workers": 0,
+                    "data_security_mode": "SINGLE_USER",
+                }
+            dsm = cluster_config.pop("data_security_mode", None)
+            if isinstance(dsm, str):
+                dsm = compute.DataSecurityMode(dsm)
+            spec = compute.ClusterSpec(**cluster_config)
+            if dsm is not None:
+                spec.data_security_mode = dsm
+            cluster_kwargs["new_cluster"] = spec
+
         # Job task configuration
         task = jobs.Task(
             task_key="train_model",
-            description="Train CV model",
-            new_cluster=compute.ClusterSpec(**cluster_config),
+            description="Fine-tune CV model with HF Trainer",
+            **cluster_kwargs,
             python_wheel_task=None,
             spark_python_task=jobs.SparkPythonTask(
-                python_file=f"{src_path}/../jobs/model_training.py",
-                parameters=[
-                    "--config_path", config_path,
-                    "--src_path", src_path
-                ]
+                python_file=f"{project_path}/jobs/train.py",
+                parameters=python_params,
             ),
             libraries=[
-                compute.Library(pypi=compute.PythonPyPiLibrary(package="torch>=2.0.0")),
-                compute.Library(pypi=compute.PythonPyPiLibrary(package="torchvision>=0.15.0")),
-                compute.Library(pypi=compute.PythonPyPiLibrary(package="transformers>=4.36.0")),
-                compute.Library(pypi=compute.PythonPyPiLibrary(package="lightning>=2.1.0")),
-                compute.Library(pypi=compute.PythonPyPiLibrary(package="mlflow>=2.10.0")),
+                compute.Library(pypi=compute.PythonPyPiLibrary(package="pycocotools>=2.0.6")),
             ],
             timeout_seconds=0,  # No timeout
         )
@@ -290,7 +304,7 @@ class DatabricksJobClient:
                             "stage": version.current_stage,
                             "run_id": version.run_id,
                         }
-                        for version in model.latest_versions
+                        for version in (model.latest_versions or [])
                     ]
                 }
                 for model in models
@@ -372,7 +386,7 @@ class DatabricksJobClient:
     
     def get_endpoint_status(self, endpoint_name: str) -> Dict[str, Any]:
         """
-        Get serving endpoint status.
+        Get serving endpoint status including served models.
         
         Args:
             endpoint_name: Name of the endpoint
@@ -384,14 +398,26 @@ class DatabricksJobClient:
             endpoint = self.workspace_client.serving_endpoints.get(endpoint_name)
             
             state = endpoint.state
-            config_state = str(state.config_update) if state else "UNKNOWN"
-            ready = state.ready if state else "UNKNOWN"
+            raw_config = str(state.config_update) if state else "UNKNOWN"
+            raw_ready = str(state.ready) if state else "UNKNOWN"
+            config_state = raw_config.split(".")[-1] if "." in raw_config else raw_config
+            ready = raw_ready.split(".")[-1] if "." in raw_ready else raw_ready
+            
+            served_models = []
+            if endpoint.config and endpoint.config.served_entities:
+                for entity in endpoint.config.served_entities:
+                    served_models.append({
+                        "entity_name": entity.entity_name,
+                        "entity_version": entity.entity_version,
+                        "workload_size": getattr(entity, "workload_size", "N/A"),
+                    })
             
             return {
                 "endpoint_name": endpoint_name,
                 "state": config_state,
                 "ready": ready,
-                "endpoint_url": endpoint.url if hasattr(endpoint, 'url') else None,
+                "endpoint_url": getattr(endpoint, "url", None),
+                "served_models": served_models,
             }
         except Exception as e:
             return {
@@ -399,6 +425,83 @@ class DatabricksJobClient:
                 "state": "NOT_FOUND",
                 "error": str(e),
             }
+    
+    def submit_python_job(
+        self,
+        job_name: str,
+        python_file: str,
+        parameters: List[str],
+        cluster_config: Optional[Dict[str, Any]] = None,
+    ) -> Dict[str, str]:
+        """
+        Create and immediately run a one-off Python job.
+
+        Args:
+            job_name: Name for the job
+            python_file: Workspace path to the Python file
+            parameters: CLI parameters list
+            cluster_config: Optional cluster config (defaults to a small single-node)
+
+        Returns:
+            Dict with job_id and run_id
+        """
+        if cluster_config is None:
+            cluster_config = {
+                "spark_version": "16.2.x-gpu-ml-scala2.12",
+                "node_type_id": "g5.4xlarge",
+                "num_workers": 0,
+                "data_security_mode": "SINGLE_USER",
+            }
+
+        task = jobs.Task(
+            task_key="run",
+            spark_python_task=jobs.SparkPythonTask(
+                python_file=python_file,
+                parameters=parameters,
+            ),
+            new_cluster=compute.ClusterSpec(**cluster_config),
+            libraries=[
+                compute.Library(pypi=compute.PythonPyPiLibrary(package="pycocotools>=2.0.6")),
+            ],
+        )
+
+        created_job = self.workspace_client.jobs.create(
+            name=job_name,
+            tasks=[task],
+            max_concurrent_runs=1,
+        )
+        run = self.workspace_client.jobs.run_now(job_id=created_job.job_id)
+
+        return {"job_id": str(created_job.job_id), "run_id": str(run.run_id)}
+
+    def query_endpoint(
+        self,
+        endpoint_name: str,
+        image_bytes: bytes,
+    ) -> Dict[str, Any]:
+        """
+        Send an image to a serving endpoint and return predictions.
+
+        Args:
+            endpoint_name: Serving endpoint name
+            image_bytes: Raw image bytes (JPEG/PNG)
+
+        Returns:
+            Prediction result dictionary
+        """
+        import base64 as _b64
+
+        encoded = _b64.b64encode(image_bytes).decode("utf-8")
+        payload = {"dataframe_split": {"columns": ["image"], "data": [[encoded]]}}
+
+        try:
+            resp = self.workspace_client.serving_endpoints.query(
+                name=endpoint_name,
+                dataframe_split=payload["dataframe_split"],
+            )
+            return {"predictions": resp.predictions if hasattr(resp, "predictions") else resp.as_dict()}
+        except Exception as e:
+            return {"error": str(e)}
     
     def list_clusters(self) -> List[Dict[str, Any]]:
         """
@@ -422,4 +525,96 @@ class DatabricksJobClient:
         except Exception as e:
             print(f"Error listing clusters: {e}")
             return []
+
+    # ------------------------------------------------------------------ #
+    #  Unity Catalog Volume helpers (for Databricks App runtime)          #
+    # ------------------------------------------------------------------ #
+
+    def list_volume_files(self, volume_path: str, extensions: set = None) -> List[str]:
+        """List files in a Unity Catalog Volume directory via the SDK.
+
+        Args:
+            volume_path: /Volumes/catalog/schema/volume/… path
+            extensions: optional set of lowercase extensions to filter (e.g. {".jpg", ".png"})
+
+        Returns:
+            List of file names (not full paths).
+        """
+        try:
+            entries = self.workspace_client.files.list_directory_contents(volume_path)
+            names = []
+            for entry in entries:
+                name = entry.path.rstrip("/").rsplit("/", 1)[-1] if "/" in entry.path else entry.path
+                if entry.is_directory:
+                    continue
+                if extensions and os.path.splitext(name)[1].lower() not in extensions:
+                    continue
+                names.append(name)
+            return names
+        except Exception as e:
+            print(f"Error listing volume files at {volume_path}: {e}")
+            return []
+
+    def list_volume_dirs(self, volume_path: str) -> List[str]:
+        """List sub-directories in a Volume path."""
+        try:
+            entries = self.workspace_client.files.list_directory_contents(volume_path)
+            return [
+                entry.path.rstrip("/").rsplit("/", 1)[-1]
+                for entry in entries if entry.is_directory
+            ]
+        except Exception as e:
+            print(f"Error listing volume dirs at {volume_path}: {e}")
+            return []
+
+    def download_volume_file(self, volume_path: str) -> Optional[bytes]:
+        """Download a file from a Volume and return its bytes."""
+        try:
+            resp = self.workspace_client.files.download(volume_path)
+            return resp.contents.read()
+        except Exception as e:
+            print(f"Error downloading {volume_path}: {e}")
+            return None
+
+    def download_volume_json(self, volume_path: str) -> Optional[Any]:
+        """Download a JSON file from a Volume and parse it."""
+        import json
+        raw = self.download_volume_file(volume_path)
+        if raw is None:
+            return None
+        return json.loads(raw)
+
+    def download_volume_image(self, volume_path: str):
+        """Download an image from a Volume and return a PIL Image."""
+        from PIL import Image
+        raw = self.download_volume_file(volume_path)
+        if raw is None:
+            return None
+        return Image.open(io.BytesIO(raw))
+
+    # ------------------------------------------------------------------ #
+    #  Universal path helpers (auto-detect local vs /Volumes)             #
+    # ------------------------------------------------------------------ #
+
+    @staticmethod
+    def _is_remote_path(path: str) -> bool:
+        return path.startswith("/Volumes") or path.startswith("/Workspace")
+
+    def read_json(self, path: str) -> Optional[Any]:
+        """Read a JSON file from a local path or a /Volumes path."""
+        import json
+        if self._is_remote_path(path):
+            return self.download_volume_json(path)
+        try:
+            with open(path) as f:
+                return json.load(f)
+        except Exception:
+            return None
+
+    def file_exists(self, path: str) -> bool:
+        """Check if a file exists locally or on Volumes."""
+        import os
+        if self._is_remote_path(path):
+            return self.download_volume_file(path) is not None
+        return os.path.exists(path)
 

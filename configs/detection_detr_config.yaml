@@ -13,7 +13,6 @@ model:
   scheduler_params:
     T_max: 300
     eta_min: 1e-6
-
 data:
   train_data_path: /Volumes/<catalog>/<schema>/<volume>/<path>/data/train2017/
   train_annotation_file: /Volumes/<catalog>/<schema>/<volume>/<path>/data/instances_train2017.json
@@ -24,9 +23,17 @@ data:
   batch_size: 16
   num_workers: 4
   model_name: facebook/detr-resnet-50
-  image_size: [800, 800]
-  normalize_mean: [0.485, 0.456, 0.406]
-  normalize_std: [0.229, 0.224, 0.225]
+  image_size:
+  - 800
+  - 800
+  normalize_mean:
+  - 0.485
+  - 0.456
+  - 0.406
+  normalize_std:
+  - 0.229
+  - 0.224
+  - 0.225
   augment: true
   augmentations:
     horizontal_flip: true
@@ -34,15 +41,8 @@ data:
     rotation: 10
     brightness_contrast: 0.2
     hue_saturation: 0.1
-
 training:
   max_epochs: 50
-  learning_rate: 1e-4
-  weight_decay: 1e-4
-  scheduler: cosine
-  scheduler_params:
-    T_max: 300
-    eta_min: 1e-6
   early_stopping_patience: 20
   monitor_metric: val_map
   monitor_mode: max
@@ -50,35 +50,15 @@ training:
   volume_checkpoint_dir: /Volumes/<catalog>/<schema>/<volume>/<path>/volume_checkpoints/detection
   save_top_k: 3
   log_every_n_steps: 50
-  # Distributed training settings (used by UnifiedTrainer)
-  distributed: false  # Set to true for distributed training
-  use_ray: false      # Set to true for Ray multi-node training
   use_gpu: true
-  num_workers: 1
-  resources_per_worker:
-    CPU: 4
-    GPU: 1
-  master_port: null
-  preferred_strategy: null  # Options: "ddp", "auto", "ddp_notebook"
-  preferred_devices: null   # Options: "auto", 1, 2, 4, etc.
-
-# Serverless GPU configuration (notebook-level orchestration only, not used by UnifiedTrainer)
-# These parameters are used by the @distributed decorator in serverless notebooks
-serverless:
-  enabled: false        # Set to true to enable serverless GPU training
-  gpu_type: A10         # Options: A10, H100
-  gpu_count: 4          # Number of GPUs for distributed training
-  # Note: H100 only supports single-node (gpu_count should be 1 for H100)
-
 mlflow:
   experiment_name: /Users/<your.email@databricks.com>/cv_detection_detr
   run_name: detr_resnet50
   log_model: true
   tags:
-    framework: lightning
+    framework: hf_trainer
     model: detr
     dataset: coco
-
 output:
   results_dir: /Volumes/<catalog>/<schema>/<volume>/<path>/results/detection
   save_predictions: true
@@ -86,3 +66,12 @@ output:
     save_images: true
     confidence_threshold: 0.5
     max_boxes: 20
+serving:
+  registered_model_name: <catalog>.<schema>.detr_detection
+  endpoint_name: detr-detection-endpoint
+  workload_size: Small
+  scale_to_zero: true
+monitoring:
+  drift_threshold: 0.1
+  error_rate_threshold: 0.05
+  latency_p95_threshold_ms: 500

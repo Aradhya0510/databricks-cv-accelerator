@@ -22,10 +22,26 @@ class ImageViewer:
     ]
     
     @staticmethod
+    def _get_font(size: int = 20):
+        """Get a font that works cross-platform."""
+        font_paths = [
+            "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
+            "/usr/share/fonts/truetype/liberation/LiberationSans-Bold.ttf",
+            "/System/Library/Fonts/Helvetica.ttc",
+            "C:\\Windows\\Fonts\\arial.ttf",
+        ]
+        for path in font_paths:
+            try:
+                return ImageFont.truetype(path, size)
+            except (OSError, IOError):
+                continue
+        return ImageFont.load_default()
+
+    @staticmethod
     def display_image(
         image: Image.Image,
         caption: Optional[str] = None,
-        use_column_width: bool = True
+        use_container_width: bool = True
     ):
         """
         Display a single image.
@@ -33,9 +49,9 @@ class ImageViewer:
         Args:
             image: PIL Image
             caption: Optional caption
-            use_column_width: Whether to use column width
+            use_container_width: Whether to use container width
         """
-        st.image(image, caption=caption, use_column_width=use_column_width)
+        st.image(image, caption=caption, use_container_width=use_container_width)
     
     @staticmethod
     def display_image_grid(
@@ -60,7 +76,7 @@ class ImageViewer:
             col_idx = idx % columns
             with cols[col_idx]:
                 caption = captions[idx] if captions and idx < len(captions) else None
-                st.image(image, caption=caption, use_column_width=True)
+                st.image(image, caption=caption, use_container_width=True)
     
     @staticmethod
     def draw_bounding_boxes(
@@ -87,10 +103,7 @@ class ImageViewer:
         draw = ImageDraw.Draw(img)
         width, height = img.size
         
-        try:
-            font = ImageFont.truetype("/System/Library/Fonts/Helvetica.ttc", 20)
-        except:
-            font = ImageFont.load_default()
+        font = ImageViewer._get_font(20)
         
         for idx, box in enumerate(boxes):
             color = ImageViewer.COLORS[idx % len(ImageViewer.COLORS)]
@@ -190,10 +203,10 @@ class ImageViewer:
         col1, col2 = st.columns(2)
         with col1:
             st.markdown(f"**{label1}**")
-            st.image(image1, use_column_width=True)
+            st.image(image1, use_container_width=True)
         with col2:
             st.markdown(f"**{label2}**")
-            st.image(image2, use_column_width=True)
+            st.image(image2, use_container_width=True)
     
     @staticmethod
     def get_image_info(image: Image.Image) -> Dict[str, Any]:
@@ -293,10 +306,7 @@ class ImageViewer:
         img = image.copy()
         draw = ImageDraw.Draw(img)
         
-        try:
-            font = ImageFont.truetype("/System/Library/Fonts/Helvetica.ttc", 30)
-        except:
-            font = ImageFont.load_default()
+        font = ImageViewer._get_font(30)
         
         # Create annotation text
         text = f"Predicted: {predicted_class} ({confidence:.2%})"

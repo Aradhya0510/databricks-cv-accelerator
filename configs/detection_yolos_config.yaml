@@ -44,45 +44,20 @@ data:
     hue_saturation: 0.1
 training:
   max_epochs: 50
-  learning_rate: 1e-4
-  weight_decay: 1e-4
-  scheduler: cosine
-  scheduler_params:
-    T_max: 300
-    eta_min: 1e-6
   early_stopping_patience: 20
   monitor_metric: val_map
   monitor_mode: max
   checkpoint_dir: /Volumes/<catalog>/<schema>/<volume>/<path>/checkpoints/detection
-  volume_checkpoint_dir: /Volumes/<catalog>/<schema>/<volume>/<path>/volume_checkpoints/detection
   save_top_k: 3
   log_every_n_steps: 50
-  # Distributed training settings (used by UnifiedTrainer)
-  distributed: false  # Set to true for distributed training
-  use_ray: false      # Set to true for Ray multi-node training
   use_gpu: true
-  num_workers: 1
-  resources_per_worker:
-    CPU: 4
-    GPU: 1
-  master_port: null
-  preferred_strategy: null  # Options: "ddp", "auto", "ddp_notebook"
-  preferred_devices: null   # Options: "auto", 1, 2, 4, etc.
-
-# Serverless GPU configuration (notebook-level orchestration only, not used by UnifiedTrainer)
-# These parameters are used by the @distributed decorator in serverless notebooks
-serverless:
-  enabled: false        # Set to true to enable serverless GPU training
-  gpu_type: A10         # Options: A10, H100
-  gpu_count: 4          # Number of GPUs for distributed training
-  # Note: H100 only supports single-node (gpu_count should be 1 for H100)
-
+  volume_checkpoint_dir: /Volumes/<catalog>/<schema>/<volume>/<path>/volume_checkpoints/detection
 mlflow:
   experiment_name: /Users/<your.email@databricks.com>/cv_detection_yolos
   run_name: yolos_base
   log_model: true
   tags:
-    framework: lightning
+    framework: hf_trainer
     model: yolos
     dataset: coco
 output:
@@ -92,3 +67,12 @@ output:
     save_images: true
     confidence_threshold: 0.5
     max_boxes: 20
+serving:
+  registered_model_name: <catalog>.<schema>.yolos_detection
+  endpoint_name: yolos-detection-endpoint
+  workload_size: Small
+  scale_to_zero: true
+monitoring:
+  drift_threshold: 0.1
+  error_rate_threshold: 0.05
+  latency_p95_threshold_ms: 500

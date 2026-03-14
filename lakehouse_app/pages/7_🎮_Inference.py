@@ -11,6 +11,7 @@ import io
 
 # Note: lakehouse_app is self-contained, no need for parent directory imports
 from utils.state_manager import StateManager
+from utils.databricks_client import DatabricksJobClient
 from components.image_viewer import ImageViewer
 
 # Initialize state
@@ -101,88 +102,56 @@ else:
                         help="Transparency of segmentation masks"
                     )
             
-            # Run inference
             if st.button("🚀 Run Inference", type="primary", use_container_width=True):
-                with st.spinner("Running inference..."):
-                    st.info("""
-                    🔄 Inference process would:
-                    1. Preprocess image
-                    2. Run model/endpoint prediction
-                    3. Postprocess results
-                    4. Visualize predictions
-                    """)
-                    
-                    # Mock predictions
-                    st.success("✅ Inference complete!")
-                    
-                    st.markdown("#### Predictions")
-                    
-                    if task == "detection":
-                        st.markdown("**Detected Objects:**")
-                        st.info("Mock detection results would appear here with:")
-                        st.markdown("- Bounding boxes overlaid on image")
-                        st.markdown("- Class labels and confidence scores")
-                        st.markdown("- Object count per class")
-                        
-                        # Mock results table
-                        import pandas as pd
-                        mock_detections = pd.DataFrame({
-                            "Class": ["Person", "Car", "Dog"],
-                            "Confidence": [0.95, 0.87, 0.82],
-                            "BBox": ["[10, 20, 100, 200]", "[150, 30, 250, 180]", "[200, 150, 280, 220]"]
-                        })
-                        st.dataframe(mock_detections, use_container_width=True)
-                    
-                    elif task == "classification":
-                        st.markdown("**Classification Results:**")
-                        
-                        # Mock classification results
-                        import pandas as pd
-                        mock_predictions = pd.DataFrame({
-                            "Rank": [1, 2, 3, 4, 5],
-                            "Class": ["Golden Retriever", "Labrador", "Poodle", "Beagle", "Bulldog"],
-                            "Confidence": [0.85, 0.08, 0.04, 0.02, 0.01]
-                        })
-                        st.dataframe(mock_predictions, use_container_width=True)
-                        
-                        # Bar chart
-                        import plotly.express as px
-                        fig = px.bar(
-                            mock_predictions,
-                            x="Confidence",
-                            y="Class",
-                            orientation='h',
-                            title="Top Predictions"
-                        )
-                        st.plotly_chart(fig, use_container_width=True)
-                    
-                    else:
-                        st.markdown("**Segmentation Results:**")
-                        st.info("Segmentation mask would be overlaid on the image")
-                        st.markdown("- Color-coded classes")
-                        st.markdown("- IoU scores")
-                        st.markdown("- Per-class pixel counts")
-                    
-                    st.markdown("---")
-                    
-                    # Download results
-                    col1, col2 = st.columns(2)
-                    
-                    with col1:
-                        st.download_button(
-                            "📥 Download Annotated Image",
-                            data=b"mock image data",
-                            file_name="prediction.png",
-                            mime="image/png"
-                        )
-                    
-                    with col2:
-                        st.download_button(
-                            "📥 Download Results (JSON)",
-                            data='{"predictions": "mock"}',
-                            file_name="results.json",
-                            mime="application/json"
-                        )
+                if inference_type != "endpoint" or not selected_endpoint:
+                    st.warning("⚠️ Endpoint-based inference required. Deploy a model and select an endpoint.")
+                else:
+                    with st.spinner("Running inference via endpoint..."):
+                        try:
+                            client = DatabricksJobClient()
+                            buf = io.BytesIO()
+                            image.save(buf, format="PNG")
+                            result = client.query_endpoint(selected_endpoint, buf.getvalue())
+
+                            if "error" in result:
+                                st.error(f"Endpoint error: {result['error']}")
+                            else:
+                                st.success("✅ Inference complete!")
+                                st.markdown("#### Predictions")
+
+                                preds = result.get("predictions", result)
+                                import pandas as pd, json as _json
+
+                                if isinstance(preds, list) and preds:
+                                    first = preds[0] if isinstance(preds[0], dict) else preds
+                                    if isinstance(first, dict):
+                                        st.dataframe(pd.DataFrame(preds), use_container_width=True)
+                                    else:
+                                        st.json(preds)
+                                elif isinstance(preds, dict):
+                                    st.json(preds)
+                                else:
+                                    st.write(preds)
+
+                                st.markdown("---")
+                                col1, col2 = st.columns(2)
+                                with col1:
+                                    buf.seek(0)
+                                    st.download_button(
+                                        "📥 Download Original Image",
+                                        data=buf.getvalue(),
+                                        file_name="input.png",
+                                        mime="image/png",
+                                    )
+                                with col2:
+                                    st.download_button(
+                                        "📥 Download Results (JSON)",
+                                        data=_json.dumps(result, indent=2, default=str),
+                                        file_name="results.json",
+                                        mime="application/json",
+                                    )
+                        except Exception as e:
+                            st.error(f"❌ Inference failed: {e}")
         else:
             st.info("👆 Upload an image to start inference")
     
@@ -258,7 +227,7 @@ else:
         if image_url:
             try:
                 st.markdown("#### Image from URL")
-                st.image(image_url, use_column_width=True)
+                st.image(image_url, use_container_width=True)
                 
                 if st.button("🚀 Run Inference on URL", type="primary"):
                     st.info("Inference would run on the image from URL")

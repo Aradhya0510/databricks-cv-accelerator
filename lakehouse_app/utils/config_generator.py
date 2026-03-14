@@ -15,8 +15,8 @@ class ConfigGenerator:
     # Model mappings for each task
     TASK_MODELS = {
         "classification": [
-            {"name": "microsoft/resnet-50", "display": "ResNet-50 (Microsoft)", "size": "Medium"},
             {"name": "google/vit-base-patch16-224", "display": "ViT-Base (Google)", "size": "Large"},
+            {"name": "microsoft/resnet-50", "display": "ResNet-50 (Microsoft)", "size": "Medium"},
             {"name": "facebook/convnext-base-224", "display": "ConvNeXT-Base (Facebook)", "size": "Large"},
             {"name": "microsoft/swin-base-patch4-window7-224", "display": "Swin-Base (Microsoft)", "size": "Large"},
         ],
@@ -25,24 +25,10 @@ class ConfigGenerator:
             {"name": "facebook/detr-resnet-101", "display": "DETR ResNet-101 (Facebook)", "size": "Large"},
             {"name": "hustvl/yolos-tiny", "display": "YOLOS-Tiny (HUST-VL)", "size": "Small"},
             {"name": "hustvl/yolos-small", "display": "YOLOS-Small (HUST-VL)", "size": "Medium"},
-        ],
-        "semantic_segmentation": [
-            {"name": "nvidia/segformer-b0-finetuned-ade-512-512", "display": "SegFormer-B0 (NVIDIA)", "size": "Small"},
-            {"name": "nvidia/segformer-b1-finetuned-ade-512-512", "display": "SegFormer-B1 (NVIDIA)", "size": "Medium"},
-            {"name": "nvidia/mit-b0", "display": "MiT-B0 (NVIDIA)", "size": "Small"},
-            {"name": "facebook/mask2former-swin-base-ade-semantic", "display": "Mask2Former-Swin (Facebook)", "size": "Large"},
-        ],
-        "instance_segmentation": [
-            {"name": "facebook/mask2former-swin-base-coco-instance", "display": "Mask2Former-Swin-Base (Facebook)", "size": "Large"},
-            {"name": "facebook/mask2former-swin-small-coco-instance", "display": "Mask2Former-Swin-Small (Facebook)", "size": "Medium"},
-        ],
-        "universal_segmentation": [
-            {"name": "facebook/mask2former-swin-base-coco-panoptic", "display": "Mask2Former-Swin-Base Panoptic (Facebook)", "size": "Large"},
-            {"name": "facebook/mask2former-swin-small-coco-panoptic", "display": "Mask2Former-Swin-Small Panoptic (Facebook)", "size": "Medium"},
+            {"name": "hustvl/yolos-base", "display": "YOLOS-Base (HUST-VL)", "size": "Large"},
         ],
     }
-    
-    # Default image sizes for each model family
+
     DEFAULT_IMAGE_SIZES = {
         "resnet": 224,
         "vit": 224,
@@ -50,9 +36,6 @@ class ConfigGenerator:
         "swin": 224,
         "detr": 800,
         "yolos": 512,
-        "segformer": 512,
-        "mit": 512,
-        "mask2former": 512,
     }
     
     # Default hyperparameters by model size
@@ -217,14 +200,6 @@ class ConfigGenerator:
         
         training_dict = {
             "max_epochs": training_config.get("epochs", 100),
-            "experiment_name": mlflow_config.get("experiment_name", f"/Users/default/cv_{task}"),
-            "learning_rate": training_config.get("learning_rate", 1e-4),
-            "weight_decay": training_config.get("weight_decay", 1e-4),
-            "scheduler": training_config.get("scheduler", "cosine"),
-            "scheduler_params": {
-                "T_max": training_config.get("epochs", 100),
-                "eta_min": 1e-6
-            },
             "early_stopping_patience": training_config.get("early_stopping_patience", 20),
             "monitor_metric": monitor_metric,
             "monitor_mode": monitor_mode,
@@ -232,14 +207,13 @@ class ConfigGenerator:
             "volume_checkpoint_dir": training_config.get("volume_checkpoint_dir", f"/Volumes/<catalog>/<schema>/<volume>/volume_checkpoints/{task}"),
             "save_top_k": training_config.get("save_top_k", 3),
             "log_every_n_steps": training_config.get("log_every_n_steps", 50),
-            "distributed": training_config.get("distributed", False),
-            "use_ray": training_config.get("use_ray", False),
             "use_gpu": training_config.get("use_gpu", True),
-            "num_workers": training_config.get("num_workers", 1),
-            "resources_per_worker": {
-                "CPU": training_config.get("cpu_per_worker", 4),
-                "GPU": training_config.get("gpu_per_worker", 1),
-            }
+        }
+
+        mlflow_dict = {
+            "experiment_name": mlflow_config.get("experiment_name", f"/Users/default/cv_{task}"),
+            "run_name": mlflow_config.get("run_name", f"{task}_{model_name.split('/')[-1]}"),
+            "tags": mlflow_config.get("tags", {"framework": "hf_trainer", "task": task}),
         }
         
         # Output configuration
@@ -263,6 +237,7 @@ class ConfigGenerator:
             "model": model_config,
             "data": data_dict,
             "training": training_dict,
+            "mlflow": mlflow_dict,
             "output": output_dict,
         }
         
@@ -272,35 +247,35 @@ class ConfigGenerator:
     def save_config(cls, config: Dict[str, Any], file_path: str) -> str:
         """
         Save configuration to YAML file.
-        
-        Args:
-            config: Configuration dictionary
-            file_path: Path to save the YAML file
-            
-        Returns:
-            Path where the config was saved
+        Supports local paths and /Volumes paths (uploaded via SDK).
         """
-        path = Path(file_path)
-        path.parent.mkdir(parents=True, exist_ok=True)
-        
-        with open(path, 'w') as f:
-            yaml.dump(config, f, default_flow_style=False, sort_keys=False)
-        
-        return str(path)
+        content = yaml.dump(config, default_flow_style=False, sort_keys=False)
+        if file_path.startswith("/Volumes"):
+            import io
+            from databricks.sdk import WorkspaceClient
+            w = WorkspaceClient()
+            w.files.upload(file_path, io.BytesIO(content.encode("utf-8")), overwrite=True)
+        else:
+            path = Path(file_path)
+            path.parent.mkdir(parents=True, exist_ok=True)
+            with open(path, 'w') as f:
+                f.write(content)
+        return file_path
     
     @classmethod
     def load_config(cls, file_path: str) -> Dict[str, Any]:
         """
         Load configuration from YAML file.
-        
-        Args:
-            file_path: Path to the YAML file
-            
-        Returns:
-            Configuration dictionary
+        Supports local paths and /Volumes paths (downloaded via SDK).
         """
-        with open(file_path, 'r') as f:
-            config = yaml.safe_load(f)
+        if file_path.startswith("/Volumes"):
+            from databricks.sdk import WorkspaceClient
+            w = WorkspaceClient()
+            resp = w.files.download(file_path)
+            config = yaml.safe_load(resp.contents.read())
+        else:
+            with open(file_path, 'r') as f:
+                config = yaml.safe_load(f)
         return config
     
     @classmethod
@@ -338,7 +313,7 @@ class ConfigGenerator:
         
         # Validate training section
         if "training" in config:
-            required_training_fields = ["max_epochs", "learning_rate", "checkpoint_dir"]
+            required_training_fields = ["max_epochs", "checkpoint_dir"]
             for field in required_training_fields:
                 if field not in config["training"]:
                     errors.append(f"Missing required field: training.{field}")

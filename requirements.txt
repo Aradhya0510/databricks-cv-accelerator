@@ -1,37 +1,20 @@
-# Development Environment Dependencies (Databricks ML Runtime)
-# Only includes packages NOT provided by DBR ML 16.4 LTS runtime
+# Local Development Dependencies
+# For Databricks runtime extras (packages needed on-cluster but not in DBR ML),
+# see requirements_runtime.txt — those are auto-installed by jobs/*.py entry points.
 
-# Core dependencies
-lightning==2.5.2
+# --- Runtime deps (also listed in requirements_runtime.txt) ---
+pycocotools>=2.0.6  # COCO dataset handling (detection task)
 
-# Training and optimization
-optuna>=3.2.0
-
-# Data handling (not in runtime)
-pycocotools>=2.0.6
-
-# Testing (development only)
+# --- Testing ---
 pytest>=7.3.1
 pytest-cov>=4.1.0
 
-# Documentation (development only)
+# --- Documentation ---
 sphinx>=6.1.3
 sphinx-rtd-theme>=1.2.0
-
-# Computer Vision libraries
-timm>=0.9.0
-albumentations==2.0.8
-opencv-python>=4.8.0  # REQUIRED: Used in all task data.py and inference.py files
-
-# Environment management (development only)
-uv==0.2.0
-
-#Stabilize
-numpy==1.26.4
 
 # Note: The following are provided by DBR ML runtime and don't need to be installed:
 # - torch, torchvision, torchmetrics
 # - transformers, tokenizers
 # - numpy, pandas, pillow, requests
-# - pyyaml, tqdm
-# Note: opencv-python may be provided by DBR but is explicitly listed above for clarity
+# - pyyaml, tqdm, opencv-python

@@ -1,0 +1,172 @@
+"""Model registration: save artifacts, log PyFunc, validate, register to UC."""
+
+from __future__ import annotations
+
+import os
+import tempfile
+from typing import Any, Dict, List, Optional
+
+import mlflow
+from mlflow.models import infer_signature
+
+
+def register_model(
+    run_id: str,
+    registered_model_name: str,
+    *,
+    task_type: str = "detection",
+    aliases: Optional[List[str]] = None,
+    tags: Optional[Dict[str, str]] = None,
+    validate: bool = True,
+    test_image_path: Optional[str] = None,
+) -> Dict[str, Any]:
+    """Log a PyFunc model to MLflow and register it to Unity Catalog.
+
+    Args:
+        run_id: MLflow run ID whose model artifact to wrap.
+        registered_model_name: Three-level UC name (catalog.schema.model).
+        task_type: "detection" or "classification" — selects PyFunc wrapper.
+        aliases: Aliases to set on the new version (e.g. ["champion", "latest"]).
+        tags: Tags to attach to the model version.
+        validate: If True, run a local prediction test before registering.
+        test_image_path: Optional path to a real image for validation.
+
+    Returns:
+        Dict with model_uri, model_version, and registered_model_name.
+    """
+    from transformers import AutoImageProcessor
+
+    aliases = aliases or ["champion", "latest"]
+    tags = tags or {}
+
+    # 1. Download model artifact from the run
+    artifact_path = mlflow.artifacts.download_artifacts(
+        run_id=run_id, artifact_path="model"
+    )
+
+    # 2. Save model + processor to a clean temp directory
+    tmpdir = tempfile.mkdtemp(prefix="cv_pyfunc_")
+    model_dir = os.path.join(tmpdir, "model_artifacts")
+
+    if task_type == "classification":
+        from transformers import AutoModelForImageClassification
+
+        model = AutoModelForImageClassification.from_pretrained(artifact_path)
+    else:
+        from transformers import AutoModelForObjectDetection
+
+        model = AutoModelForObjectDetection.from_pretrained(artifact_path)
+
+    processor = AutoImageProcessor.from_pretrained(artifact_path)
+    model.save_pretrained(model_dir)
+    processor.save_pretrained(model_dir)
+
+    # 3. Build conda environment
+    conda_env = {
+        "channels": ["defaults", "conda-forge"],
+        "dependencies": [
+            "python=3.10",
+            "pip",
+            {
+                "pip": [
+                    "mlflow>=2.10",
+                    "torch>=2.0",
+                    "transformers>=4.36",
+                    "Pillow>=9.0",
+                    "numpy>=1.24",
+                ]
+            },
+        ],
+        "name": "cv_pyfunc_env",
+    }
+
+    # 4. Build input/output signature (task-specific)
+    import pandas as pd
+
+    input_example = pd.DataFrame(
+        [{"image": "base64_encoded_image_string"}]
+    )
+
+    if task_type == "classification":
+        output_example = [
+            {
+                "predictions": {
+                    "label": 0,
+                    "label_name": "class_0",
+                    "confidence": 0.95,
+                    "top_k": [{"label": 0, "label_name": "class_0", "confidence": 0.95}],
+                    "status": "success",
+                }
+            }
+        ]
+    else:
+        output_example = [
+            {
+                "predictions": {
+                    "boxes": [[0.0, 0.0, 100.0, 100.0]],
+                    "scores": [0.95],
+                    "labels": [1],
+                    "num_detections": 1,
+                    "status": "success",
+                }
+            }
+        ]
+
+    signature = infer_signature(input_example, output_example)
+
+    # 5. Log the PyFunc model
+    if task_type == "classification":
+        from .pyfunc import ClassificationPyFuncModel
+
+        pyfunc_model = ClassificationPyFuncModel()
+        artifact_name = "classification_pyfunc"
+    else:
+        from .pyfunc import DetectionPyFuncModel
+
+        pyfunc_model = DetectionPyFuncModel()
+        artifact_name = "detection_pyfunc"
+
+    with mlflow.start_run(run_id=run_id):
+        model_info = mlflow.pyfunc.log_model(
+            artifact_path=artifact_name,
+            python_model=pyfunc_model,
+            artifacts={"model_dir": model_dir},
+            conda_env=conda_env,
+            signature=signature,
+            input_example=input_example,
+        )
+
+    model_uri = model_info.model_uri
+
+    # 6. Validate with a real prediction (optional)
+    if validate and test_image_path:
+        print("Validating model with test image...")
+        import base64
+
+        with open(test_image_path, "rb") as f:
+            b64 = base64.b64encode(f.read()).decode()
+
+        test_input = pd.DataFrame([{"image": b64}])
+        loaded = mlflow.pyfunc.load_model(model_uri)
+        result = loaded.predict(test_input)
+        print(f"Validation result: {result[0]['predictions']['status']}")
+        assert result[0]["predictions"]["status"] == "success", "Validation failed"
+
+    # 7. Register to Unity Catalog
+    mv = mlflow.register_model(model_uri, registered_model_name)
+    version = mv.version
+
+    # 8. Set aliases and tags
+    client = mlflow.MlflowClient()
+    for alias in aliases:
+        client.set_registered_model_alias(registered_model_name, alias, version)
+
+    for k, v in tags.items():
+        client.set_model_version_tag(registered_model_name, version, k, v)
+
+    print(f"Registered {registered_model_name} version {version}")
+    return {
+        "model_uri": model_uri,
+        "model_version": version,
+        "registered_model_name": registered_model_name,
+    }

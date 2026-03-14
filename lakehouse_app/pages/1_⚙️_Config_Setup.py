@@ -67,8 +67,8 @@ with tab1:
     st.markdown("## Step 4: Configure MLflow Tracking")
     
     mlflow_defaults = {}
-    if current_config and "training" in current_config:
-        mlflow_defaults["experiment_name"] = current_config["training"].get("experiment_name", "")
+    if current_config:
+        mlflow_defaults["experiment_name"] = current_config.get("mlflow", {}).get("experiment_name", "")
     
     mlflow_config = ConfigFormBuilder.mlflow_config_form(mlflow_defaults)
     
@@ -90,21 +90,12 @@ with tab1:
     st.markdown("---")
     st.markdown("## Step 7: Generate and Save Configuration")
     
-    col1, col2 = st.columns(2)
-    
-    with col1:
-        config_name = st.text_input(
-            "Configuration Name",
-            value=f"{task}_{model_name.split('/')[-1]}_{datetime.now().strftime('%Y%m%d_%H%M%S')}",
-            help="Name for this configuration"
-        )
-    
-    with col2:
-        save_path = st.text_input(
-            "Save Path",
-            value=f"/Volumes/<catalog>/<schema>/<volume>/configs/{config_name}.yaml",
-            help="Path where the configuration will be saved"
-        )
+    config_name = st.text_input(
+        "Configuration Name",
+        value=f"{task}_{model_name.split('/')[-1]}_{datetime.now().strftime('%Y%m%d_%H%M%S')}",
+        help="Name for this configuration"
+    )
+    save_path = f"/tmp/configs/{config_name}.yaml"
     
     # Preview button
     if st.button("👁️ Preview Configuration", type="secondary", use_container_width=True):
@@ -137,80 +128,75 @@ with tab1:
     # Save and apply buttons
     col1, col2, col3 = st.columns(3)
     
+    def _generate_and_validate():
+        """Generate config and validate, returning (config, is_valid, errors)."""
+        config = ConfigGenerator.generate_config(
+            task=task,
+            model_name=model_name,
+            data_config=data_config,
+            training_config=training_config,
+            mlflow_config=mlflow_config,
+            output_config=output_config,
+            model_specific_config=model_specific_config
+        )
+        is_valid, errors = ConfigGenerator.validate_config(config)
+        return config, is_valid, errors
+
     with col1:
         if st.button("💾 Save Configuration", type="primary", use_container_width=True):
             try:
-                # Generate config
-                config = ConfigGenerator.generate_config(
-                    task=task,
-                    model_name=model_name,
-                    data_config=data_config,
-                    training_config=training_config,
-                    mlflow_config=mlflow_config,
-                    output_config=output_config,
-                    model_specific_config=model_specific_config
-                )
-                
-                # Validate
-                is_valid, errors = ConfigGenerator.validate_config(config)
+                config, is_valid, errors = _generate_and_validate()
                 if not is_valid:
                     st.error("❌ Cannot save invalid configuration. Please fix the errors:")
                     for error in errors:
                         st.error(f"  - {error}")
                 else:
-                    # Save to file
                     saved_path = ConfigGenerator.save_config(config, save_path)
-                    st.success(f"✅ Configuration saved to: {saved_path}")
-                    
-                    # Update state
                     StateManager.set_current_config(config, saved_path)
-                    
+                    st.success(f"✅ Configuration saved to: {saved_path}")
                     st.balloons()
-            
             except Exception as e:
                 st.error(f"❌ Error saving configuration: {str(e)}")
     
     with col2:
         if st.button("✅ Save & Set as Active", type="primary", use_container_width=True):
             try:
-                # Generate config
-                config = ConfigGenerator.generate_config(
-                    task=task,
-                    model_name=model_name,
-                    data_config=data_config,
-                    training_config=training_config,
-                    mlflow_config=mlflow_config,
-                    output_config=output_config,
-                    model_specific_config=model_specific_config
-                )
-                
-                # Validate
-                is_valid, errors = ConfigGenerator.validate_config(config)
+                config, is_valid, errors = _generate_and_validate()
                 if not is_valid:
                     st.error("❌ Cannot save invalid configuration. Please fix the errors:")
                     for error in errors:
                         st.error(f"  - {error}")
                 else:
-                    # Save to file
                     saved_path = ConfigGenerator.save_config(config, save_path)
-                    
-                    # Update state
                     StateManager.set_current_config(config, saved_path)
-                    
-                    st.success(f"✅ Configuration saved and set as active!")
+                    st.success("✅ Configuration saved and set as active!")
                     st.info(f"📁 Path: {saved_path}")
-                    st.info("💡 You can now proceed to Data EDA or Training pages")
-                    
+                    st.info("You can now proceed to Data EDA or Training pages")
                     st.balloons()
-            
             except Exception as e:
                 st.error(f"❌ Error saving configuration: {str(e)}")
     
     with col3:
         if st.button("🔄 Reset Form", use_container_width=True):
-            # Clear specific form-related state
             StateManager.set_current_config(None, None)
             st.rerun()
+    
+    # Download button for the YAML config
+    try:
+        preview_config = ConfigGenerator.generate_config(
+            task=task, model_name=model_name, data_config=data_config,
+            training_config=training_config, mlflow_config=mlflow_config,
+            output_config=output_config, model_specific_config=model_specific_config
+        )
+        st.download_button(
+            label="📥 Download Config YAML",
+            data=yaml.dump(preview_config, default_flow_style=False, sort_keys=False),
+            file_name=f"{config_name}.yaml",
+            mime="application/x-yaml",
+            use_container_width=True,
+        )
+    except Exception:
+        pass
 
 with tab2:
     st.markdown("### Load Existing Configuration")

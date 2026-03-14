@@ -91,7 +91,7 @@ with tab1:
     with col1:
         tags_input = st.text_input(
             "Tags (comma-separated)",
-            value="cv,pytorch,lightning",
+            value="cv,pytorch,hf_trainer",
             help="Add tags for easy searching"
         )
         tags = [tag.strip() for tag in tags_input.split(",") if tag.strip()]
@@ -115,45 +115,64 @@ with tab1:
         st.markdown(f"**Tags:** {', '.join(tags)}")
         st.markdown(f"**Stage:** {stage}")
     
+    # MLflow Run ID for HF Trainer models
+    run_id = st.text_input(
+        "MLflow Run ID",
+        value="",
+        help="Run ID from training (HF Trainer logs model to MLflow automatically)"
+    )
+
     col1, col2 = st.columns([2, 1])
-    
+
     with col1:
         if st.button("📦 Register Model", type="primary", use_container_width=True):
-            if not checkpoint_path or "<" in checkpoint_path:
-                st.error("❌ Please provide a valid checkpoint path")
-            elif not config_path or "<" in config_path:
-                st.error("❌ Please provide a valid configuration path")
+            if not run_id:
+                st.error("❌ Please provide an MLflow Run ID (from training)")
+            elif not full_model_name or "<" in full_model_name:
+                st.error("❌ Please provide a valid model name")
             else:
-                with st.spinner("Registering model..."):
-                    st.info("""
-                    🔄 Registration process would:
-                    1. Load model from checkpoint
-                    2. Create PyFunc wrapper
-                    3. Register to Unity Catalog
-                    4. Add metadata and tags
-                    5. Set initial stage
-                    """)
-                    
-                    # Mock registration
-                    import time
-                    time.sleep(2)
-                    
-                    # Update state
-                    StateManager.add_registered_model({
-                        "name": full_model_name,
-                        "version": "1",
-                        "checkpoint_path": checkpoint_path,
-                        "config_path": config_path,
-                        "description": description,
-                        "tags": tags,
-                        "stage": stage,
-                        "creation_timestamp": datetime.now().isoformat()
-                    })
-                    
-                    st.success("✅ Model registered successfully!")
-                    st.balloons()
-                    st.info(f"**Model:** {full_model_name} (version 1)")
-                    st.info("💡 You can now deploy this model from the Deployment page")
+                with st.spinner("Registering model to Unity Catalog..."):
+                    try:
+                        import mlflow
+                        model_uri = f"runs:/{run_id}/model"
+                        mv = mlflow.register_model(model_uri, full_model_name)
+                        version = mv.version
+
+                        if description:
+                            client.mlflow_client.update_registered_model(
+                                full_model_name, description=description
+                            )
+                        for tag in tags:
+                            client.mlflow_client.set_registered_model_tag(
+                                full_model_name, tag, "true"
+                            )
+
+                        StateManager.add_registered_model({
+                            "name": full_model_name,
+                            "version": str(version),
+                            "run_id": run_id,
+                            "config_path": config_path,
+                            "description": description,
+                            "tags": tags,
+                            "stage": stage,
+                            "creation_timestamp": datetime.now().isoformat()
+                        })
+
+                        st.success(f"✅ Registered **{full_model_name}** version {version}")
+                        st.info("💡 You can now deploy this model from the Deployment page")
+                    except Exception as e:
+                        st.error(f"❌ Error registering model: {e}")
+                        st.info("Tracking locally — you can retry registration later")
+                        StateManager.add_registered_model({
+                            "name": full_model_name,
+                            "version": "pending",
+                            "run_id": run_id,
+                            "config_path": config_path,
+                            "description": description,
+                            "tags": tags,
+                            "stage": stage,
+                            "creation_timestamp": datetime.now().isoformat()
+                        })
     
     with col2:
         if st.button("💾 Save as Draft", use_container_width=True):

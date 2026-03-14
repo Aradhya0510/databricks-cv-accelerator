@@ -218,12 +218,18 @@ with tab2:
                         st.switch_page("pages/7_🎮_Inference.py")
                 
                 with col2:
-                    if st.button("📊 Metrics", key=f"metrics_{endpoint_name}", use_container_width=True):
-                        st.info("Endpoint metrics dashboard")
-                
+                    if st.button("📡 Monitor", key=f"metrics_{endpoint_name}", use_container_width=True):
+                        st.switch_page("pages/9_📡_Monitoring.py")
+
                 with col3:
-                    if st.button("⚙️ Update", key=f"update_{endpoint_name}", use_container_width=True):
-                        st.info("Update endpoint configuration")
+                    if st.button("🧪 Smoke Test", key=f"smoke_{endpoint_name}", use_container_width=True):
+                        with st.spinner("Running smoke test..."):
+                            st.code(
+                                f"python -c \"from src.serving.deployment import test_endpoint; "
+                                f"test_endpoint('{endpoint_name}', test_image_path='<path>')\"",
+                                language="bash",
+                            )
+                            st.info("Use a test image path or run from a GPU cluster for live smoke tests.")
                 
                 with col4:
                     if st.button("🗑️ Delete", key=f"delete_{endpoint_name}", use_container_width=True):

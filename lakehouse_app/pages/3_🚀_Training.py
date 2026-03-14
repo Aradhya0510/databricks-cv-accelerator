@@ -8,8 +8,8 @@ import sys
 from pathlib import Path
 from datetime import datetime
 import time
+import yaml
 
-# Note: lakehouse_app is self-contained, no need for parent directory imports
 from utils.state_manager import StateManager
 from utils.databricks_client import DatabricksJobClient
 from utils.config_generator import ConfigGenerator
@@ -76,46 +76,39 @@ with tab1:
         )
     
     with col2:
-        src_path = st.text_input(
-            "Source Code Path",
-            value="/Workspace/Repos/<username>/Databricks_CV_ref/src",
-            help="Path to the src directory in your workspace"
+        project_path = st.text_input(
+            "Project Path",
+            value="/Workspace/Users/<username>/Databricks_CV_ref",
+            help="Workspace path to the project root (contains jobs/, src/, configs/)"
         )
     
     # Cluster configuration
     st.markdown("#### Compute Configuration")
     
-    use_serverless = st.checkbox(
-        "Use Serverless Compute",
-        value=False,
-        help="Use Databricks serverless compute (recommended for simpler setup)"
-    )
-    
-    if not use_serverless:
-        col1, col2 = st.columns(2)
-        
-        with col1:
-            node_type = st.selectbox(
-                "Node Type",
-                options=[
-                    "g5.4xlarge (1 GPU, 16 vCPU, 64GB)",
-                    "g5.8xlarge (1 GPU, 32 vCPU, 128GB)",
-                    "g5.12xlarge (4 GPU, 48 vCPU, 192GB)",
-                    "g5.24xlarge (4 GPU, 96 vCPU, 384GB)",
-                ],
-                index=0,
-                help="Select GPU instance type"
-            )
-            node_type_id = node_type.split(" ")[0]
-        
-        with col2:
-            num_workers = st.number_input(
-                "Number of Workers",
-                min_value=0,
-                max_value=10,
-                value=0,
-                help="0 for single-node, >0 for distributed training"
-            )
+    col1, col2 = st.columns(2)
+
+    with col1:
+        node_type = st.selectbox(
+            "Node Type",
+            options=[
+                "g5.4xlarge (1 GPU, 16 vCPU, 64GB)",
+                "g5.8xlarge (1 GPU, 32 vCPU, 128GB)",
+                "g5.12xlarge (4 GPU, 48 vCPU, 192GB)",
+                "g5.24xlarge (4 GPU, 96 vCPU, 384GB)",
+            ],
+            index=0,
+            help="Select GPU instance type"
+        )
+        node_type_id = node_type.split(" ")[0]
+
+    with col2:
+        num_workers = st.number_input(
+            "Number of Workers",
+            min_value=0,
+            max_value=10,
+            value=0,
+            help="0 for single-node, >0 for distributed training"
+        )
     
     # Email notifications
     with st.expander("📧 Email Notifications (Optional)"):
@@ -139,28 +132,49 @@ with tab1:
         if st.button("🚀 Launch Training Job", type="primary", use_container_width=True):
             if not config_path:
                 st.error("❌ Configuration path not found. Please save your configuration first.")
-            elif not src_path or "<username>" in src_path:
-                st.error("❌ Please provide a valid source code path")
+            elif not project_path or "<username>" in project_path:
+                st.error("❌ Please provide a valid project path")
             else:
                 try:
                     with st.spinner("Creating and launching job..."):
-                        # Initialize Databricks client
                         client = DatabricksJobClient()
-                        
-                        # Create cluster config
-                        cluster_config = None if use_serverless else {
-                            "spark_version": "14.3.x-gpu-ml-scala2.12",
+
+                        # Upload config YAML to a Volume so the cluster can read it via FUSE
+                        config_filename = Path(config_path).name if config_path else f"{job_name}.yaml"
+                        data_cfg = current_config.get("data", {})
+                        train_path = data_cfg.get("train_data_path", "")
+                        if train_path.startswith("/Volumes"):
+                            parts = train_path.strip("/").split("/")
+                            vol_base = "/".join(parts[:4])
+                            vol_config_dir = f"/{vol_base}/configs"
+                        else:
+                            vol_config_dir = "/tmp/configs"
+                        remote_config_path = f"{vol_config_dir}/{config_filename}"
+                        config_bytes = yaml.dump(
+                            current_config, default_flow_style=False, sort_keys=False
+                        ).encode("utf-8")
+                        import io as _io
+                        if remote_config_path.startswith("/Volumes"):
+                            client.workspace_client.files.upload(
+                                remote_config_path, _io.BytesIO(config_bytes), overwrite=True
+                            )
+                        else:
+                            Path(vol_config_dir).mkdir(parents=True, exist_ok=True)
+                            with open(remote_config_path, "wb") as fout:
+                                fout.write(config_bytes)
+                        st.info(f"Config uploaded to `{remote_config_path}`")
+
+                        cluster_config = {
+                            "spark_version": "16.2.x-gpu-ml-scala2.12",
                             "node_type_id": node_type_id,
                             "num_workers": num_workers,
-                            "runtime_engine": "STANDARD",
                             "data_security_mode": "SINGLE_USER",
                         }
                         
-                        # Create job
                         job_id = client.create_training_job(
                             job_name=job_name,
-                            config_path=config_path,
-                            src_path=src_path,
+                            config_path=remote_config_path,
+                            project_path=project_path,
                             cluster_config=cluster_config,
                             email_notifications=emails if emails else None
                         )
@@ -254,13 +268,20 @@ with tab2:
             if state == "RUNNING":
                 st.info("🔄 Training in progress...")
                 
-                # Show progress bar (mock - in real impl would get from MLflow)
-                epochs = current_config.get("training", {}).get("max_epochs", 100)
-                mock_current_epoch = min(10, epochs)  # Mock current epoch
+                max_epochs = current_config.get("training", {}).get("max_epochs", 100)
+                current_epoch = max_epochs
+                mlflow_experiment = current_config.get("mlflow", {}).get("experiment_name", "")
+                if mlflow_experiment:
+                    try:
+                        runs = client.get_mlflow_runs(mlflow_experiment, max_results=1)
+                        if runs and "epoch" in runs[0].get("metrics", {}):
+                            current_epoch = int(runs[0]["metrics"]["epoch"])
+                    except Exception:
+                        pass
                 
                 MetricsDisplay.display_progress_bar(
-                    mock_current_epoch,
-                    epochs,
+                    min(current_epoch, max_epochs),
+                    max_epochs,
                     "Training Progress"
                 )
             
@@ -276,58 +297,37 @@ with tab2:
             
             st.markdown("---")
             
-            # Metrics display (mock - would fetch from MLflow in real implementation)
             st.markdown("#### Training Metrics")
-            
-            st.info("💡 Real-time metrics will be displayed here from MLflow")
-            
-            # Mock metrics visualization
+
             if state == "RUNNING" or result == "SUCCESS":
-                # Mock metric data
-                import random
-                random.seed(42)
-                
-                mock_train_loss = [
-                    {"step": i, "value": 2.0 * (0.9 ** i) + random.uniform(-0.1, 0.1), "timestamp": datetime.now()}
-                    for i in range(20)
-                ]
-                
-                mock_val_loss = [
-                    {"step": i * 5, "value": 2.0 * (0.85 ** (i * 5 / 5)) + random.uniform(-0.1, 0.1), "timestamp": datetime.now()}
-                    for i in range(4)
-                ]
-                
-                # Display charts
-                col1, col2 = st.columns(2)
-                
-                with col1:
-                    fig = VisualizationHelper.multi_metric_chart(
-                        mock_train_loss,
-                        mock_val_loss,
-                        "Loss"
-                    )
-                    st.plotly_chart(fig, use_container_width=True)
-                
-                with col2:
-                    # Mock accuracy/mAP
-                    if task == "classification":
-                        metric_name = "Accuracy"
-                        mock_val_metric = [
-                            {"step": i * 5, "value": 0.3 + 0.6 * (1 - 0.9 ** (i * 5 / 5)), "timestamp": datetime.now()}
-                            for i in range(4)
-                        ]
-                    else:
-                        metric_name = "mAP"
-                        mock_val_metric = [
-                            {"step": i * 5, "value": 0.2 + 0.5 * (1 - 0.9 ** (i * 5 / 5)), "timestamp": datetime.now()}
-                            for i in range(4)
-                        ]
-                    
-                    fig = VisualizationHelper.training_metrics_chart(
-                        mock_val_metric,
-                        metric_name
-                    )
-                    st.plotly_chart(fig, use_container_width=True)
+                mlflow_experiment = current_config.get("mlflow", {}).get("experiment_name", "")
+                if mlflow_experiment:
+                    try:
+                        runs = client.get_mlflow_runs(mlflow_experiment, max_results=1)
+                        if runs:
+                            latest = runs[0]
+                            metrics = latest.get("metrics", {})
+                            loss_history = client.get_run_metrics_history(latest["run_id"], "eval_loss")
+                            primary_metric = "eval_map" if task != "classification" else "eval_accuracy"
+                            primary_history = client.get_run_metrics_history(latest["run_id"], primary_metric)
+
+                            col1, col2 = st.columns(2)
+                            with col1:
+                                if loss_history:
+                                    fig = VisualizationHelper.training_metrics_chart(loss_history, "Eval Loss")
+                                    st.plotly_chart(fig, use_container_width=True)
+                                elif "eval_loss" in metrics:
+                                    st.metric("Eval Loss", f"{metrics['eval_loss']:.4f}")
+                            with col2:
+                                if primary_history:
+                                    fig = VisualizationHelper.training_metrics_chart(primary_history, primary_metric.replace("_", " ").title())
+                                    st.plotly_chart(fig, use_container_width=True)
+                                elif primary_metric in metrics:
+                                    st.metric(primary_metric.replace("_", " ").title(), f"{metrics[primary_metric]:.4f}")
+                    except Exception:
+                        st.info("💡 Metrics will appear once the run starts logging to MLflow")
+                else:
+                    st.info("💡 Configure an MLflow experiment in your config to see live metrics")
             
             st.markdown("---")
             
