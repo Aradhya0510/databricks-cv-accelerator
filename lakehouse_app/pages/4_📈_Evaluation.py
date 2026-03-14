@@ -35,10 +35,13 @@ with tab1:
     # Select experiment
     col1, col2 = st.columns([3, 1])
     
+    current_config = StateManager.get_current_config()
+    default_exp = (current_config or {}).get("mlflow", {}).get("experiment_name", "/Users/<email@databricks.com>/cv_experiments")
+
     with col1:
         experiment_name = st.text_input(
             "MLflow Experiment Name",
-            value="/Users/<email@databricks.com>/cv_experiments",
+            value=default_exp,
             help="Enter the MLflow experiment path"
         )
     
@@ -144,17 +147,13 @@ with tab2:
     results_dir_input = st.text_input("Results Directory", value=results_dir)
 
     if st.button("📂 Load Evaluation Results", type="primary"):
-        import json, os
+        rd = results_dir_input.rstrip("/")
+        metrics_path = f"{rd}/evaluation_metrics.json"
+        error_path = f"{rd}/error_analysis.json"
+        bench_path = f"{rd}/benchmark.json"
 
-        # Load metrics
-        metrics_path = os.path.join(results_dir_input, "evaluation_metrics.json")
-        error_path = os.path.join(results_dir_input, "error_analysis.json")
-        bench_path = os.path.join(results_dir_input, "benchmark.json")
-
-        if os.path.exists(metrics_path):
-            with open(metrics_path) as f:
-                eval_metrics = json.load(f)
-
+        eval_metrics = client.read_json(metrics_path)
+        if eval_metrics:
             st.markdown("#### mAP Metrics")
             metric_cols = st.columns(4)
             key_metrics = ["eval_map", "eval_map_50", "eval_map_75", "eval_loss"]
@@ -163,7 +162,6 @@ with tab2:
                     with metric_cols[i]:
                         st.metric(key, f"{eval_metrics[key]:.4f}")
 
-            # Per-class AP
             per_class = {k: v for k, v in eval_metrics.items() if "map_class_" in k}
             if per_class:
                 st.markdown("#### Per-Class AP")
@@ -175,10 +173,8 @@ with tab2:
         else:
             st.warning(f"No evaluation_metrics.json found in {results_dir_input}")
 
-        if os.path.exists(error_path):
-            with open(error_path) as f:
-                error_data = json.load(f)
-
+        error_data = client.read_json(error_path)
+        if error_data:
             st.markdown("---")
             st.markdown("#### Error Analysis")
             summary = error_data.get("summary", {})
@@ -194,10 +190,8 @@ with tab2:
             with col3:
                 st.metric("False Negatives", summary.get("false_negatives", 0))
 
-        if os.path.exists(bench_path):
-            with open(bench_path) as f:
-                bench_data = json.load(f)
-
+        bench_data = client.read_json(bench_path)
+        if bench_data:
             st.markdown("---")
             st.markdown("#### Benchmark")
             col1, col2, col3 = st.columns(3)
@@ -320,22 +314,49 @@ with tab4:
     
     if st.button("📄 Generate Report", type="primary"):
         with st.spinner("Generating report..."):
+            import json as _json
+            config = StateManager.get_current_config() or {}
+            exp_name = config.get("mlflow", {}).get("experiment_name", "")
+            report_data = {"generated_at": datetime.now().isoformat(), "report_type": report_type}
+
+            if exp_name:
+                try:
+                    runs = client.get_mlflow_runs(exp_name, max_results=10)
+                    report_data["experiment"] = exp_name
+                    report_data["runs"] = [
+                        {"run_id": r["run_id"], "run_name": r["run_name"], "status": r["status"], "metrics": r.get("metrics", {})}
+                        for r in runs
+                    ]
+                except Exception:
+                    report_data["runs"] = []
+
+            results_dir = config.get("output", {}).get("results_dir", "")
+            for fname in ["evaluation_metrics.json", "error_analysis.json", "benchmark.json"]:
+                if results_dir:
+                    fpath = f"{results_dir.rstrip('/')}/{fname}"
+                    data = client.read_json(fpath)
+                    if data:
+                        report_data[fname.replace(".json", "")] = data
+
+            if report_format == "JSON":
+                content = _json.dumps(report_data, indent=2, default=str)
+                mime = "application/json"
+            else:
+                lines = [f"# Evaluation Report — {report_type}", f"Generated: {report_data['generated_at']}", ""]
+                for run in report_data.get("runs", []):
+                    lines.append(f"## {run['run_name']} ({run['status']})")
+                    for k, v in sorted(run.get("metrics", {}).items()):
+                        lines.append(f"- **{k}:** {v:.4f}" if isinstance(v, float) else f"- **{k}:** {v}")
+                    lines.append("")
+                content = "\n".join(lines)
+                mime = "text/markdown"
+
             st.success("✅ Report generated!")
-            
-            st.info(f"""
-            Report would include:
-            - **Type:** {report_type}
-            - **Format:** {report_format}
-            - **Visualizations:** {'Yes' if include_visualizations else 'No'}
-            - **Sample Predictions:** {'Yes' if include_sample_predictions else 'No'}
-            """)
-            
-            # Mock download button
             st.download_button(
                 label="📥 Download Report",
-                data="Mock report content",
-                file_name=f"evaluation_report_{datetime.now().strftime('%Y%m%d_%H%M%S')}.{report_format.lower()}",
-                mime="application/octet-stream"
+                data=content,
+                file_name=f"evaluation_report_{datetime.now().strftime('%Y%m%d_%H%M%S')}.{report_format.lower() if report_format == 'JSON' else 'md'}",
+                mime=mime,
             )
     
     st.markdown("---")

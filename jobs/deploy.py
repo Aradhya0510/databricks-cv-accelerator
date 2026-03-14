@@ -24,6 +24,14 @@ _project_root = _this_file.parent.parent
 sys.path.insert(0, str(_project_root / "src"))
 sys.path.insert(0, str(_project_root))
 
+_runtime_reqs = _project_root / "requirements_runtime.txt"
+if _runtime_reqs.exists():
+    import subprocess
+    subprocess.check_call(
+        [sys.executable, "-m", "pip", "install", "-q", "-r", str(_runtime_reqs)],
+        stdout=subprocess.DEVNULL,
+    )
+
 
 def main():
     parser = argparse.ArgumentParser(description="Register and deploy a CV model")

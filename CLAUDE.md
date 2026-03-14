@@ -234,12 +234,19 @@ mcp__databricks__manage_jobs(
         "--num_gpus", "4"
       ]
     },
-    "existing_cluster_id": "{cluster_id}"
+    "existing_cluster_id": "{cluster_id}",
+    "libraries": [{"pypi": {"package": "pycocotools>=2.0.6"}}]
   }],
   tags={"task": "detection", "model": "yolos", "framework": "hf_trainer"}
 )
 → {job_id: 12345}
 ```
+
+**Required libraries per task:**
+- **Detection:** `pycocotools>=2.0.6` (COCO evaluation)
+- **Classification:** None beyond DBR ML runtime
+
+All job entry points (`jobs/*.py`) also auto-install packages from `requirements_runtime.txt` as a safety net, but specifying libraries in the job definition is preferred (installed during cluster setup, before the script runs).
 
 **Cluster selection in tasks:**
 - `existing_cluster_id`: Use a running GPU cluster (simplest).
@@ -368,6 +375,7 @@ mcp__databricks__create_or_update_app(
 
 ## Development Notes
 
+- **Dependencies:** `requirements_runtime.txt` lists packages needed on Databricks that are NOT in the ML Runtime (currently only `pycocotools`). All `jobs/*.py` entry points auto-install from this file before importing `src`. When creating jobs via MCP, also include these as `libraries` in the task definition for faster cluster-level installation. Do NOT pin `numpy` — the ML Runtime ships its own version and pinning causes binary incompatibility with pre-compiled packages.
 - **Detection and classification** both use HF Trainer. Other tasks (segmentation) can be added via `TaskRegistry`.
 - Classification uses `ImageFolderClassificationDataset` (ImageFolder-style directory layout, no annotation files).
 - Detection uses `COCODetectionDataset` (COCO JSON annotations).

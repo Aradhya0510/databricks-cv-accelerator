@@ -316,7 +316,7 @@ class MetricsDisplay:
             st.markdown(f"**Model Name:** {model_info.get('name', 'N/A')}")
             st.markdown(f"**Task:** {model_info.get('task', 'N/A')}")
             st.markdown(f"**Version:** {model_info.get('version', 'N/A')}")
-            st.markdown(f"**Framework:** {model_info.get('framework', 'PyTorch Lightning')}")
+            st.markdown(f"**Framework:** {model_info.get('framework', 'HF Trainer')}")
         
         with col2:
             st.markdown("#### Metadata")

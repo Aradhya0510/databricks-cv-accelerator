@@ -131,23 +131,25 @@ with tab1:
             elif not full_model_name or "<" in full_model_name:
                 st.error("❌ Please provide a valid model name")
             else:
-                with st.spinner("Registering model via jobs/deploy.py ..."):
+                with st.spinner("Registering model to Unity Catalog..."):
                     try:
-                        result = client.submit_job(
-                            job_name="cv-model-registration",
-                            python_file="/Workspace/Users/{user}/Databricks_CV_ref/jobs/deploy.py",
-                            parameters=[
-                                "--config_path", config_path,
-                                "--run_id", run_id,
-                                "--model_name", full_model_name,
-                                "--skip_test",
-                            ],
-                        )
+                        import mlflow
+                        model_uri = f"runs:/{run_id}/model"
+                        mv = mlflow.register_model(model_uri, full_model_name)
+                        version = mv.version
 
-                        # Update state
+                        if description:
+                            client.mlflow_client.update_registered_model(
+                                full_model_name, description=description
+                            )
+                        for tag in tags:
+                            client.mlflow_client.set_registered_model_tag(
+                                full_model_name, tag, "true"
+                            )
+
                         StateManager.add_registered_model({
                             "name": full_model_name,
-                            "version": "1",
+                            "version": str(version),
                             "run_id": run_id,
                             "config_path": config_path,
                             "description": description,
@@ -156,15 +158,14 @@ with tab1:
                             "creation_timestamp": datetime.now().isoformat()
                         })
 
-                        st.success("✅ Registration job submitted!")
-                        st.info(f"**Model:** {full_model_name}")
+                        st.success(f"✅ Registered **{full_model_name}** version {version}")
                         st.info("💡 You can now deploy this model from the Deployment page")
                     except Exception as e:
-                        st.error(f"❌ Error submitting registration job: {e}")
-                        st.info("Falling back to local state tracking")
+                        st.error(f"❌ Error registering model: {e}")
+                        st.info("Tracking locally — you can retry registration later")
                         StateManager.add_registered_model({
                             "name": full_model_name,
-                            "version": "1",
+                            "version": "pending",
                             "run_id": run_id,
                             "config_path": config_path,
                             "description": description,
@@ -172,7 +173,6 @@ with tab1:
                             "stage": stage,
                             "creation_timestamp": datetime.now().isoformat()
                         })
-                        st.success("✅ Model tracked locally")
     
     with col2:
         if st.button("💾 Save as Draft", use_container_width=True):

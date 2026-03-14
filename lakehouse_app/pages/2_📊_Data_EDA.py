@@ -12,13 +12,21 @@ import random
 from typing import Dict, Any, List
 import os
 
-# Note: lakehouse_app is self-contained, no need for parent directory imports
 from utils.state_manager import StateManager
+from utils.databricks_client import DatabricksJobClient
 from components.visualizations import VisualizationHelper
 from components.image_viewer import ImageViewer
 
 # Initialize state
 StateManager.initialize()
+
+@st.cache_resource
+def _get_client():
+    return DatabricksJobClient()
+
+client = _get_client()
+
+IMAGE_EXTS = {".jpg", ".jpeg", ".png", ".bmp", ".tiff"}
 
 # Page config
 st.title("📊 Data Exploration & Analysis")
@@ -72,36 +80,34 @@ with tab1:
     st.info("💡 Click 'Analyze Dataset' to scan your data directories and compute statistics")
     
     if st.button("🔍 Analyze Dataset", type="primary"):
-        with st.spinner("Analyzing dataset..."):
-            # Try to load pre-computed stats from Volume
-            results_dir = current_config.get("output", {}).get("results_dir", "")
-            stats_file = os.path.join(results_dir, "dataset_stats.json") if results_dir else ""
-            pre_computed = None
-            if stats_file and os.path.exists(stats_file):
-                try:
-                    with open(stats_file) as f:
-                        pre_computed = json.load(f)
-                except Exception:
-                    pass
+        with st.spinner("Analyzing dataset (reading from Volumes via SDK)..."):
+            def _count_images(directory):
+                return len(client.list_volume_files(directory, extensions=IMAGE_EXTS))
 
-            if pre_computed:
-                mock_stats = pre_computed
-            else:
-                # Fallback: mock data for demonstration
-                mock_stats = {
-                    "train": {
-                        "num_images": 5000,
-                        "num_annotations": 5000 if task != "detection" else 25000,
-                    },
-                    "val": {
-                        "num_images": 1000,
-                        "num_annotations": 1000 if task != "detection" else 5000,
-                    },
-                    "test": {
-                        "num_images": 500,
-                        "num_annotations": 500 if task != "detection" else 2500,
-                    } if test_path else None
-                }
+            def _count_annotations(ann_file):
+                data = client.download_volume_json(ann_file)
+                if data is None:
+                    return 0
+                return len(data.get("annotations", []))
+
+            train_ann_file = data_config.get("train_annotation_file", "")
+            val_ann_file = data_config.get("val_annotation_file", "")
+            test_ann_file = data_config.get("test_annotation_file", "")
+
+            dataset_stats = {
+                "train": {
+                    "num_images": _count_images(train_path) if train_path else 0,
+                    "num_annotations": _count_annotations(train_ann_file) if train_ann_file else 0,
+                },
+                "val": {
+                    "num_images": _count_images(val_path) if val_path else 0,
+                    "num_annotations": _count_annotations(val_ann_file) if val_ann_file else 0,
+                },
+                "test": {
+                    "num_images": _count_images(test_path) if test_path else 0,
+                    "num_annotations": _count_annotations(test_ann_file) if test_ann_file else 0,
+                } if test_path else None
+            }
             
             st.success("✅ Analysis complete!")
             
@@ -109,32 +115,31 @@ with tab1:
             cols = st.columns(3)
             
             with cols[0]:
-                st.metric("Training Images", mock_stats["train"]["num_images"])
-                if task in ["detection", "instance_segmentation", "universal_segmentation"]:
-                    st.metric("Training Annotations", mock_stats["train"]["num_annotations"])
+                st.metric("Training Images", dataset_stats["train"]["num_images"])
+                if task in ["detection"]:
+                    st.metric("Training Annotations", dataset_stats["train"]["num_annotations"])
             
             with cols[1]:
-                st.metric("Validation Images", mock_stats["val"]["num_images"])
-                if task in ["detection", "instance_segmentation", "universal_segmentation"]:
-                    st.metric("Validation Annotations", mock_stats["val"]["num_annotations"])
+                st.metric("Validation Images", dataset_stats["val"]["num_images"])
+                if task in ["detection"]:
+                    st.metric("Validation Annotations", dataset_stats["val"]["num_annotations"])
             
             with cols[2]:
-                if mock_stats["test"]:
-                    st.metric("Test Images", mock_stats["test"]["num_images"])
-                    if task in ["detection", "instance_segmentation", "universal_segmentation"]:
-                        st.metric("Test Annotations", mock_stats["test"]["num_annotations"])
+                if dataset_stats["test"]:
+                    st.metric("Test Images", dataset_stats["test"]["num_images"])
+                    if task in ["detection"]:
+                        st.metric("Test Annotations", dataset_stats["test"]["num_annotations"])
                 else:
                     st.info("No test set")
             
-            # Data split visualization
             st.markdown("#### Data Split")
             
             split_data = {
-                "Train": mock_stats["train"]["num_images"],
-                "Val": mock_stats["val"]["num_images"],
+                "Train": dataset_stats["train"]["num_images"],
+                "Val": dataset_stats["val"]["num_images"],
             }
-            if mock_stats["test"]:
-                split_data["Test"] = mock_stats["test"]["num_images"]
+            if dataset_stats["test"]:
+                split_data["Test"] = dataset_stats["test"]["num_images"]
             
             fig = VisualizationHelper.class_distribution_chart(
                 split_data,
@@ -142,19 +147,11 @@ with tab1:
             )
             st.plotly_chart(fig, use_container_width=True)
             
-            # Image size statistics (mock)
-            st.markdown("#### Image Size Distribution")
-            st.info("📊 Most common image sizes:")
-            
-            size_col1, size_col2, size_col3 = st.columns(3)
-            with size_col1:
-                st.metric("Min Size", "224 x 224")
-            with size_col2:
-                st.metric("Max Size", "1920 x 1080")
-            with size_col3:
-                st.metric("Mean Size", "800 x 600")
-            
-            st.info("💡 Images will be resized to configured size during training")
+            st.markdown("#### Training Image Size")
+            configured_size = data_config.get("image_size", "N/A")
+            if isinstance(configured_size, list):
+                configured_size = f"{configured_size[0]} x {configured_size[1]}"
+            st.info(f"Images will be resized to **{configured_size}** during training (configured in `data.image_size`)")
 
 with tab2:
     st.markdown("### Sample Viewer")
@@ -176,32 +173,32 @@ with tab2:
     )
     
     if st.button("🎲 Load Random Samples", type="primary"):
-        st.info("💡 In a real implementation, this would load random images from your dataset")
-        st.markdown("#### Sample Images")
-        
-        # Mock: Display placeholder
-        st.warning("📷 Image loading from Unity Catalog Volumes will be implemented when connected to actual data")
-        
-        # Example of how images would be displayed:
-        st.code("""
-# Example code that would run:
-from PIL import Image
-import os
-import random
-
-# Get images from path
-split_path = train_path if split == "Training" else val_path
-image_files = [f for f in os.listdir(split_path) if f.endswith(('.jpg', '.png'))]
-sample_files = random.sample(image_files, min(num_samples, len(image_files)))
-
-# Load and display
-images = []
-for file in sample_files:
-    img = Image.open(os.path.join(split_path, file))
-    images.append(img)
-
-ImageViewer.display_image_grid(images, columns=3)
-        """, language="python")
+        split_path = train_path if split == "Training" else (val_path if split == "Validation" else test_path)
+        if not split_path:
+            st.warning("⚠️ Path not configured for this split")
+        else:
+            with st.spinner("Loading images from Volume..."):
+                try:
+                    all_files = client.list_volume_files(split_path, extensions=IMAGE_EXTS)
+                    if not all_files:
+                        st.warning(f"No image files found in `{split_path}`")
+                    else:
+                        sample_files = random.sample(all_files, min(num_samples, len(all_files)))
+                        images = []
+                        captions = []
+                        for fname in sample_files:
+                            full_path = split_path.rstrip("/") + "/" + fname
+                            img = client.download_volume_image(full_path)
+                            if img is not None:
+                                images.append(img)
+                                captions.append(fname)
+                        if images:
+                            st.markdown("#### Sample Images")
+                            ImageViewer.display_image_grid(images, captions=captions, columns=3)
+                        else:
+                            st.warning("Could not download any images")
+                except Exception as e:
+                    st.error(f"Error loading images: {e}")
     
     st.markdown("---")
     st.markdown("#### Sample with Annotations")
@@ -303,21 +300,35 @@ with tab4:
         st.info(f"📊 Dataset configured for {num_classes} classes")
         
         if st.button("📊 Analyze Class Distribution", type="primary"):
-            with st.spinner("Analyzing class distribution..."):
-                # Mock class distribution data
-                if task == "detection":
-                    # COCO-style classes
-                    class_names = ["person", "bicycle", "car", "motorcycle", "airplane", 
-                                 "bus", "train", "truck", "boat", "traffic light"][:min(num_classes, 10)]
-                elif task == "classification":
+            with st.spinner("Analyzing class distribution (reading from Volumes)..."):
+                class_counts = {}
+                train_ann_file = data_config.get("train_annotation_file", "")
+                if task in ["detection"] and train_ann_file:
+                    try:
+                        coco_data = client.download_volume_json(train_ann_file)
+                        if coco_data:
+                            cat_map = {c["id"]: c["name"] for c in coco_data.get("categories", [])}
+                            from collections import Counter
+                            cat_counter = Counter(ann["category_id"] for ann in coco_data.get("annotations", []))
+                            class_counts = {cat_map.get(cid, str(cid)): cnt for cid, cnt in cat_counter.most_common()}
+                    except Exception:
+                        pass
+                elif task == "classification" and train_path:
+                    try:
+                        subdirs = client.list_volume_dirs(train_path)
+                        for d in sorted(subdirs):
+                            sub_path = train_path.rstrip("/") + "/" + d
+                            n = len(client.list_volume_files(sub_path, extensions=IMAGE_EXTS))
+                            if n > 0:
+                                class_counts[d] = n
+                    except Exception:
+                        pass
+
+                if not class_counts:
                     class_names = [f"Class_{i}" for i in range(min(num_classes, 10))]
-                else:
-                    class_names = [f"Class_{i}" for i in range(min(num_classes, 10))]
-                
-                # Generate mock counts
-                import random
-                random.seed(42)
-                class_counts = {name: random.randint(100, 1000) for name in class_names}
+                    random.seed(42)
+                    class_counts = {name: random.randint(100, 1000) for name in class_names}
+                    st.info("Could not read annotations — showing sample distribution")
                 
                 st.success("✅ Analysis complete!")
                 

@@ -4,7 +4,6 @@ Display endpoint health, request metrics, and prediction distributions.
 """
 
 import streamlit as st
-import json
 from datetime import datetime
 
 from utils.state_manager import StateManager
@@ -72,22 +71,20 @@ with tab2:
         selected_endpoint = st.selectbox("Select Endpoint", endpoint_names, key="metrics_endpoint")
         hours = st.slider("Lookback (hours)", 1, 168, 24)
 
+        report_dir = st.text_input(
+            "Report Directory",
+            value="/tmp/monitoring",
+            help="Directory where jobs/monitor.py writes reports",
+            key="metrics_report_dir",
+        )
+
         if st.button("📊 Load Metrics", type="primary"):
-            with st.spinner("Querying system tables..."):
-                st.info(f"Querying `system.serving.served_model_requests` for last {hours}h")
-
+            with st.spinner("Loading metrics report..."):
                 st.markdown("#### Metrics Summary")
-                st.markdown("""
-                Metrics are queried from `system.serving.served_model_requests`.
-                Run `jobs/monitor.py` to generate a full report, then view results here.
-                """)
 
-                # Check for pre-computed report
-                report_path = f"/tmp/monitoring/monitoring_report_{selected_endpoint}.json"
-                try:
-                    with open(report_path) as f:
-                        report = json.load(f)
-
+                report_path = f"{report_dir.rstrip('/')}/monitoring_report_{selected_endpoint}.json"
+                report = client.read_json(report_path)
+                if report:
                     req = report.get("request_metrics_24h", {})
                     if "error" not in req:
                         col1, col2, col3, col4 = st.columns(4)
@@ -101,8 +98,7 @@ with tab2:
                             st.metric("P95 Latency", f"{req.get('p95_latency_ms', 0):.0f} ms")
                     else:
                         st.warning(f"Report error: {req.get('error')}")
-
-                except FileNotFoundError:
+                else:
                     st.info("No pre-computed report found. Run `jobs/monitor.py` first.")
                     st.code(
                         f"python jobs/monitor.py --endpoint_name {selected_endpoint} --hours {hours}",
@@ -117,12 +113,17 @@ with tab3:
     else:
         selected_endpoint = st.selectbox("Select Endpoint", endpoint_names, key="dist_endpoint")
 
-        if st.button("📈 Load Distribution", type="primary"):
-            report_path = f"/tmp/monitoring/monitoring_report_{selected_endpoint}.json"
-            try:
-                with open(report_path) as f:
-                    report = json.load(f)
+        dist_report_dir = st.text_input(
+            "Report Directory",
+            value="/tmp/monitoring",
+            help="Directory where jobs/monitor.py writes reports",
+            key="dist_report_dir",
+        )
 
+        if st.button("📈 Load Distribution", type="primary"):
+            report_path = f"{dist_report_dir.rstrip('/')}/monitoring_report_{selected_endpoint}.json"
+            report = client.read_json(report_path)
+            if report:
                 pred_dist = report.get("prediction_distribution_24h", {})
                 class_dist = pred_dist.get("class_distribution", {})
 
@@ -142,7 +143,7 @@ with tab3:
                         st.metric("Min Confidence", f"{conf.get('min', 0):.3f}")
                     with col3:
                         st.metric("Max Confidence", f"{conf.get('max', 0):.3f}")
-            except FileNotFoundError:
+            else:
                 st.info("No pre-computed report found. Run `jobs/monitor.py` first.")
 
 with tab4:

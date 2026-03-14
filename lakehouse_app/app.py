@@ -167,33 +167,21 @@ def main():
     st.markdown("---")
     st.markdown("### 📋 Supported Tasks")
     
-    task_col1, task_col2, task_col3, task_col4, task_col5 = st.columns(5)
+    task_col1, task_col2 = st.columns(2)
     
     with task_col1:
-        st.markdown("**🔍 Detection**")
-        st.markdown("DETR, YOLOS")
+        st.markdown("**🔍 Object Detection**")
+        st.markdown("DETR, YOLOS (HuggingFace)")
     
     with task_col2:
-        st.markdown("**🏷️ Classification**")
-        st.markdown("ResNet, ViT")
-    
-    with task_col3:
-        st.markdown("**🎨 Semantic Seg.**")
-        st.markdown("SegFormer, MiT")
-    
-    with task_col4:
-        st.markdown("**🖼️ Instance Seg.**")
-        st.markdown("Mask2Former")
-    
-    with task_col5:
-        st.markdown("**🌐 Universal Seg.**")
-        st.markdown("Mask2Former")
+        st.markdown("**🏷️ Image Classification**")
+        st.markdown("ViT, any `AutoModelForImageClassification` model")
     
     # Footer
     st.markdown("---")
     st.markdown("""
     <div style="text-align: center; color: #666; padding: 2rem 0;">
-        Built on Databricks Lakehouse Platform | Powered by PyTorch Lightning & MLflow
+        Built on Databricks Lakehouse Platform | Powered by HF Trainer & MLflow
     </div>
     """, unsafe_allow_html=True)
 

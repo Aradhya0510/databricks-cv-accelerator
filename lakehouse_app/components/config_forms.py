@@ -22,9 +22,6 @@ class ConfigFormBuilder:
         task_options = {
             "🔍 Object Detection": "detection",
             "🏷️ Image Classification": "classification",
-            "🎨 Semantic Segmentation": "semantic_segmentation",
-            "🖼️ Instance Segmentation": "instance_segmentation",
-            "🌐 Universal Segmentation": "universal_segmentation",
         }
         
         selected_display = st.selectbox(
@@ -202,12 +199,15 @@ class ConfigFormBuilder:
                 help="Number of data loading workers"
             )
         
-        # Image size
+        # Image size — config may store as int or [H, W] list
+        _img_default = default_values.get("image_size", 512)
+        if isinstance(_img_default, (list, tuple)):
+            _img_default = _img_default[0]
         config["image_size"] = st.number_input(
             "Image Size",
             min_value=64,
             max_value=2048,
-            value=default_values.get("image_size", 512),
+            value=int(_img_default),
             step=32,
             help="Input image size (will be resized to square)"
         )

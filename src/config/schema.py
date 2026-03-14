@@ -191,7 +191,7 @@ class PipelineConfig(BaseModel):
     @model_validator(mode="before")
     @classmethod
     def _clean_training_section(cls, values: Dict[str, Any]) -> Dict[str, Any]:
-        """Strip deprecated keys from the training section (backward compat)."""
+        """Strip deprecated keys from the training section."""
         training = values.get("training")
         if isinstance(training, dict):
             for removed_key in [
