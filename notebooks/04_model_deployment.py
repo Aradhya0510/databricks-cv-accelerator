@@ -65,8 +65,13 @@ from PIL import Image
 import mlflow
 import tempfile
 
-# Download model from MLflow and save locally
-artifact_path = mlflow.artifacts.download_artifacts(run_id=RUN_ID, artifact_path="model")
+# Download model from MLflow — resolve via logged_model_uri (MLflow 3) or
+# fall back to the deprecated runs:/ URI for backward compatibility.
+_client = mlflow.MlflowClient()
+_run = _client.get_run(RUN_ID)
+_stored_uri = _run.data.params.get("logged_model_uri")
+_download_uri = _stored_uri if _stored_uri else f"runs:/{RUN_ID}/model"
+artifact_path = mlflow.artifacts.download_artifacts(artifact_uri=_download_uri)
 
 tmpdir = tempfile.mkdtemp()
 model = AutoModelForObjectDetection.from_pretrained(artifact_path)

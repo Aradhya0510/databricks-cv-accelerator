@@ -33,14 +33,32 @@ class EvaluationEngine:
         self,
         model_path: Optional[str] = None,
         run_id: Optional[str] = None,
+        model_uri: Optional[str] = None,
     ) -> torch.nn.Module:
-        """Load a model from a local path or MLflow run."""
+        """Load a model from a local path, model URI, or MLflow run.
+
+        Preferred resolution order: *model_uri* → *run_id* → *model_path*.
+        """
+        if model_uri is not None:
+            import mlflow
+
+            return mlflow.transformers.load_model(model_uri)
+
         if run_id is not None:
             import mlflow
 
-            artifact_uri = f"runs:/{run_id}/model"
-            local_path = mlflow.transformers.load_model(artifact_uri)
-            return local_path
+            # Try model URI stored as a run param (MLflow 3 path)
+            try:
+                client = mlflow.MlflowClient()
+                run = client.get_run(run_id)
+                stored_uri = run.data.params.get("logged_model_uri")
+                if stored_uri:
+                    return mlflow.transformers.load_model(stored_uri)
+            except Exception:
+                pass
+
+            # Fallback: runs:/ URI (deprecated in MLflow 3 but still functional)
+            return mlflow.transformers.load_model(f"runs:/{run_id}/model")
 
         if model_path is not None:
             task_type = self.config.model.task_type
@@ -80,13 +98,14 @@ class EvaluationEngine:
         self,
         model_path: Optional[str] = None,
         run_id: Optional[str] = None,
+        model_uri: Optional[str] = None,
         max_batches: Optional[int] = None,
     ) -> dict:
         """Compute mAP metrics on the validation set.
 
         Reuses the task's ``get_eval_fn()`` for metric computation.
         """
-        model = self._load_model(model_path, run_id)
+        model = self._load_model(model_path, run_id, model_uri=model_uri)
         device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         model = model.to(device).eval()
 
@@ -116,6 +135,7 @@ class EvaluationEngine:
         self,
         model_path: Optional[str] = None,
         run_id: Optional[str] = None,
+        model_uri: Optional[str] = None,
         max_batches: int = 100,
     ) -> dict:
         """Categorise predictions into error types.
@@ -125,17 +145,18 @@ class EvaluationEngine:
         """
         task_type = self.config.model.task_type
         if task_type == "classification":
-            return self._error_analysis_classification(model_path, run_id, max_batches)
-        return self._error_analysis_detection(model_path, run_id, max_batches)
+            return self._error_analysis_classification(model_path, run_id, max_batches, model_uri=model_uri)
+        return self._error_analysis_detection(model_path, run_id, max_batches, model_uri=model_uri)
 
     def _error_analysis_classification(
         self,
         model_path: Optional[str],
         run_id: Optional[str],
         max_batches: int,
+        model_uri: Optional[str] = None,
     ) -> dict:
         """Classification error analysis: confusion matrix + per-class accuracy."""
-        model = self._load_model(model_path, run_id)
+        model = self._load_model(model_path, run_id, model_uri=model_uri)
         device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         model = model.to(device).eval()
 
@@ -205,9 +226,10 @@ class EvaluationEngine:
         model_path: Optional[str],
         run_id: Optional[str],
         max_batches: int,
+        model_uri: Optional[str] = None,
     ) -> dict:
         """Detection error analysis: TP, FP (background/confusion/localisation), FN."""
-        model = self._load_model(model_path, run_id)
+        model = self._load_model(model_path, run_id, model_uri=model_uri)
         device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         model = model.to(device).eval()
 
@@ -292,11 +314,12 @@ class EvaluationEngine:
         self,
         model_path: Optional[str] = None,
         run_id: Optional[str] = None,
+        model_uri: Optional[str] = None,
         num_warmup: int = 10,
         num_batches: int = 100,
     ) -> dict:
         """Measure inference throughput and latency."""
-        model = self._load_model(model_path, run_id)
+        model = self._load_model(model_path, run_id, model_uri=model_uri)
         device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         model = model.to(device).eval()
 

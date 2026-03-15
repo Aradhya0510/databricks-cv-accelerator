@@ -163,10 +163,11 @@ class TrainingEngine:
         try:
             import mlflow
             if int(os.environ.get("LOCAL_RANK", "0")) == 0:
-                mlflow.transformers.log_model(
+                model_info = mlflow.transformers.log_model(
                     transformers_model=model,
-                    artifact_path="model",
+                    name="model",
                 )
+                mlflow.log_param("logged_model_uri", model_info.model_uri)
         except Exception as e:
             print(f"Warning: MLflow model logging failed: {e}")
 

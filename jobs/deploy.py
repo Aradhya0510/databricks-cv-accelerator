@@ -37,6 +37,7 @@ def main():
     parser = argparse.ArgumentParser(description="Register and deploy a CV model")
     parser.add_argument("--config_path", type=str, required=True, help="Path to YAML config file")
     parser.add_argument("--run_id", type=str, required=True, help="MLflow run ID")
+    parser.add_argument("--model_uri", type=str, default=None, help="MLflow model URI (preferred over --run_id for artifact resolution)")
     parser.add_argument("--model_name", type=str, default=None, help="Unity Catalog model name (catalog.schema.model)")
     parser.add_argument("--endpoint_name", type=str, default=None, help="Serving endpoint name")
     parser.add_argument("--workload_size", type=str, default=None, help="Endpoint workload size")
@@ -66,6 +67,7 @@ def main():
         run_id=args.run_id,
         registered_model_name=model_name,
         task_type=config.model.task_type,
+        model_uri=args.model_uri,
         aliases=["champion", "latest"],
         tags={"framework": "hf_trainer", "task": config.model.task_type},
         validate=True,
