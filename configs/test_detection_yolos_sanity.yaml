@@ -15,12 +15,12 @@ model:
     eta_min: 1e-6
   epochs: 2
 data:
-  train_data_path: /Volumes/users/aradhya_chouhan/cv_arch_test/coco2017_detection_dataset/val2017/
-  train_annotation_file: /Volumes/users/aradhya_chouhan/cv_arch_test/coco2017_detection_dataset/annotations/instances_val2017.json
-  val_data_path: /Volumes/users/aradhya_chouhan/cv_arch_test/coco2017_detection_dataset/val2017/
-  val_annotation_file: /Volumes/users/aradhya_chouhan/cv_arch_test/coco2017_detection_dataset/annotations/instances_val2017.json
-  test_data_path: /Volumes/users/aradhya_chouhan/cv_arch_test/coco2017_detection_dataset/val2017/
-  test_annotation_file: /Volumes/users/aradhya_chouhan/cv_arch_test/coco2017_detection_dataset/annotations/instances_val2017.json
+  train_data_path: /Volumes/<catalog>/<schema>/<volume>/data/val2017/
+  train_annotation_file: /Volumes/<catalog>/<schema>/<volume>/data/annotations/instances_val2017.json
+  val_data_path: /Volumes/<catalog>/<schema>/<volume>/data/val2017/
+  val_annotation_file: /Volumes/<catalog>/<schema>/<volume>/data/annotations/instances_val2017.json
+  test_data_path: /Volumes/<catalog>/<schema>/<volume>/data/val2017/
+  test_annotation_file: /Volumes/<catalog>/<schema>/<volume>/data/annotations/instances_val2017.json
   batch_size: 4
   num_workers: 4
   model_name: hustvl/yolos-base
@@ -45,16 +45,16 @@ training:
   save_top_k: 1
   log_every_n_steps: 10
   use_gpu: true
-  volume_checkpoint_dir: /Volumes/users/aradhya_chouhan/cv_arch_test/checkpoints/detection_yolos_sanity
+  volume_checkpoint_dir: /Volumes/<catalog>/<schema>/<volume>/checkpoints/detection_yolos_sanity
 mlflow:
-  experiment_name: /Users/aradhya.chouhan@databricks.com/CV Accelerator
-  run_name: yolos_base_sanity_4gpu
+  experiment_name: /Users/<your.email@databricks.com>/cv_detection_sanity
+  run_name: yolos_base_sanity
   log_model: false
   tags:
     framework: hf_trainer
     model: yolos
     dataset: coco_val
-    test_type: sanity_check_multi_gpu
+    test_type: sanity_check
 output:
   results_dir: /tmp/results/detection_yolos_sanity
   save_predictions: false
