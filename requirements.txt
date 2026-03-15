@@ -1,9 +1,6 @@
 # Local Development Dependencies
-# For Databricks runtime extras (packages needed on-cluster but not in DBR ML),
-# see requirements_runtime.txt — those are auto-installed by jobs/*.py entry points.
-
-# --- Runtime deps (also listed in requirements_runtime.txt) ---
-pycocotools>=2.0.6  # COCO dataset handling (detection task)
+# Core runtime deps (auto-installed on Databricks by jobs/*.py entry points):
+-r requirements_runtime.txt
 
 # --- Testing ---
 pytest>=7.3.1
