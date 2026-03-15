@@ -115,26 +115,40 @@ with tab1:
         st.markdown(f"**Tags:** {', '.join(tags)}")
         st.markdown(f"**Stage:** {stage}")
     
-    # MLflow Run ID for HF Trainer models
+    # MLflow model source
     run_id = st.text_input(
         "MLflow Run ID",
         value="",
         help="Run ID from training (HF Trainer logs model to MLflow automatically)"
+    )
+    model_uri_input = st.text_input(
+        "Model URI (optional, preferred over Run ID)",
+        value="",
+        help="Direct model URI from log_model, e.g. models:/abc123 — leave blank to auto-resolve from run",
     )
 
     col1, col2 = st.columns([2, 1])
 
     with col1:
         if st.button("📦 Register Model", type="primary", use_container_width=True):
-            if not run_id:
-                st.error("❌ Please provide an MLflow Run ID (from training)")
+            if not run_id and not model_uri_input:
+                st.error("❌ Please provide an MLflow Run ID or Model URI")
             elif not full_model_name or "<" in full_model_name:
                 st.error("❌ Please provide a valid model name")
             else:
                 with st.spinner("Registering model to Unity Catalog..."):
                     try:
                         import mlflow
-                        model_uri = f"runs:/{run_id}/model"
+
+                        if model_uri_input:
+                            model_uri = model_uri_input
+                        else:
+                            # Resolve model URI from run params (MLflow 3 path)
+                            _client = mlflow.MlflowClient()
+                            _run = _client.get_run(run_id)
+                            stored = _run.data.params.get("logged_model_uri")
+                            model_uri = stored if stored else f"runs:/{run_id}/model"
+
                         mv = mlflow.register_model(model_uri, full_model_name)
                         version = mv.version
 

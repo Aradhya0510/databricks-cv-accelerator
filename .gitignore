@@ -31,6 +31,10 @@ ENV/
 .cursor/
 .claude/
 .ai-dev-kit/
+CLAUDE.md
+
+# Personal / local-only configs
+configs/test_*
 *.swp
 *.swo
 .DS_Store

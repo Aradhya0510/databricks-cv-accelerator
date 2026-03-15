@@ -28,7 +28,7 @@ Make sure you're deploying from the correct location. Based on your workspace st
 
 ```bash
 # If repo is at: /Workspace/Users/<user>/Databricks_CV_ref/
-cd /Workspace/Users/aradhya.chouhan@databricks.com/Databricks_CV_ref
+cd /Workspace/Users/<your.email@databricks.com>/Databricks_CV_ref
 
 # Deploy the app
 databricks apps deploy cv-training-pipeline --source-code-path lakehouse_app
@@ -94,7 +94,7 @@ databricks apps stop cv-training-pipeline
 databricks apps delete cv-training-pipeline
 
 # Deploy again
-cd /Workspace/Users/aradhya.chouhan@databricks.com/Databricks_CV_ref
+cd /Workspace/Users/<your.email@databricks.com>/Databricks_CV_ref
 databricks apps deploy cv-training-pipeline --source-code-path lakehouse_app
 
 # Check logs immediately
@@ -135,7 +135,7 @@ lakehouse_app/
 Before deploying, test the app locally to catch import errors:
 
 ```bash
-cd /Workspace/Users/aradhya.chouhan@databricks.com/Databricks_CV_ref/lakehouse_app
+cd /Workspace/Users/<your.email@databricks.com>/Databricks_CV_ref/lakehouse_app
 streamlit run app.py
 ```
 

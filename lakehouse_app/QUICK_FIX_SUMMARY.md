@@ -16,7 +16,7 @@ The app is now **fully self-contained** and ready for deployment!
 
 ### 1. Navigate to your repo
 ```bash
-cd /Workspace/Users/aradhya.chouhan@databricks.com/Databricks_CV_ref
+cd /Workspace/Users/<your.email@databricks.com>/Databricks_CV_ref
 ```
 
 ### 2. Delete the broken app
@@ -49,12 +49,12 @@ After redeployment, your app will:
 **Before (Wrong):**
 ```bash
 databricks apps deploy cv-training-pipeline \
-  --source-code-path /Workspace/Users/aradhya.chouhan@databricks.com/databricks-cv-accelerator/lakehouse_app
+  --source-code-path /Workspace/Users/<your.email@databricks.com>/databricks-cv-accelerator/lakehouse_app
 ```
 
 **After (Correct):**
 ```bash
-cd /Workspace/Users/aradhya.chouhan@databricks.com/Databricks_CV_ref
+cd /Workspace/Users/<your.email@databricks.com>/Databricks_CV_ref
 databricks apps deploy cv-training-pipeline --source-code-path lakehouse_app
 ```
 

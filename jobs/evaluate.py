@@ -35,6 +35,7 @@ def main():
     parser = argparse.ArgumentParser(description="Evaluate a trained CV model")
     parser.add_argument("--config_path", type=str, required=True, help="Path to YAML config file")
     parser.add_argument("--run_id", type=str, default=None, help="MLflow run ID to load model from")
+    parser.add_argument("--model_uri", type=str, default=None, help="MLflow model URI (preferred over --run_id)")
     parser.add_argument("--checkpoint_path", type=str, default=None, help="Local model checkpoint path")
     parser.add_argument("--max_batches", type=int, default=None, help="Max batches for evaluation")
     parser.add_argument("--output_dir", type=str, default=None, help="Override results output directory")
@@ -56,6 +57,7 @@ def main():
     metrics = engine.evaluate(
         model_path=args.checkpoint_path,
         run_id=args.run_id,
+        model_uri=args.model_uri,
         max_batches=args.max_batches,
     )
     for k, v in sorted(metrics.items()):
@@ -68,6 +70,7 @@ def main():
     errors = engine.error_analysis(
         model_path=args.checkpoint_path,
         run_id=args.run_id,
+        model_uri=args.model_uri,
         max_batches=args.max_batches or 100,
     )
     for k, v in errors["summary"].items():
@@ -80,6 +83,7 @@ def main():
     bench = engine.benchmark(
         model_path=args.checkpoint_path,
         run_id=args.run_id,
+        model_uri=args.model_uri,
     )
     print(f"  FPS:              {bench['fps']:.1f}")
     print(f"  Latency p50 (ms): {bench['latency_per_batch_ms']['p50']:.1f}")

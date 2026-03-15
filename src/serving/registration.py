@@ -10,11 +10,40 @@ import mlflow
 from mlflow.models import infer_signature
 
 
+def _resolve_model_artifacts(
+    run_id: str,
+    model_uri: Optional[str] = None,
+) -> str:
+    """Download the HF model artifacts logged during training.
+
+    In MLflow 3.x, model artifacts live under a dedicated LoggedModel rather
+    than as run artifacts.  When *model_uri* is provided (preferred) we use
+    it directly.  Otherwise we search for a LoggedModel linked to *run_id*,
+    falling back to the deprecated ``runs:/`` URI scheme.
+    """
+    if model_uri:
+        return mlflow.artifacts.download_artifacts(artifact_uri=model_uri)
+
+    client = mlflow.MlflowClient()
+
+    # Prefer the model_uri stored as a run param by the training engine
+    run = client.get_run(run_id)
+    stored_uri = run.data.params.get("logged_model_uri")
+    if stored_uri:
+        return mlflow.artifacts.download_artifacts(artifact_uri=stored_uri)
+
+    # Fallback: runs:/ URI (deprecated in MLflow 3 but still functional)
+    return mlflow.artifacts.download_artifacts(
+        artifact_uri=f"runs:/{run_id}/model",
+    )
+
+
 def register_model(
     run_id: str,
     registered_model_name: str,
     *,
     task_type: str = "detection",
+    model_uri: Optional[str] = None,
     aliases: Optional[List[str]] = None,
     tags: Optional[Dict[str, str]] = None,
     validate: bool = True,
@@ -26,6 +55,8 @@ def register_model(
         run_id: MLflow run ID whose model artifact to wrap.
         registered_model_name: Three-level UC name (catalog.schema.model).
         task_type: "detection" or "classification" — selects PyFunc wrapper.
+        model_uri: Direct model URI from log_model (preferred in MLflow 3).
+                   When omitted, resolved automatically from the run.
         aliases: Aliases to set on the new version (e.g. ["champion", "latest"]).
         tags: Tags to attach to the model version.
         validate: If True, run a local prediction test before registering.
@@ -39,10 +70,8 @@ def register_model(
     aliases = aliases or ["champion", "latest"]
     tags = tags or {}
 
-    # 1. Download model artifact from the run
-    artifact_path = mlflow.artifacts.download_artifacts(
-        run_id=run_id, artifact_path="model"
-    )
+    # 1. Download model artifact
+    artifact_path = _resolve_model_artifacts(run_id, model_uri)
 
     # 2. Save model + processor to a clean temp directory
     tmpdir = tempfile.mkdtemp(prefix="cv_pyfunc_")
@@ -61,26 +90,7 @@ def register_model(
     model.save_pretrained(model_dir)
     processor.save_pretrained(model_dir)
 
-    # 3. Build conda environment
-    conda_env = {
-        "channels": ["defaults", "conda-forge"],
-        "dependencies": [
-            "python=3.10",
-            "pip",
-            {
-                "pip": [
-                    "mlflow>=2.10",
-                    "torch>=2.0",
-                    "transformers>=4.36",
-                    "Pillow>=9.0",
-                    "numpy>=1.24",
-                ]
-            },
-        ],
-        "name": "cv_pyfunc_env",
-    }
-
-    # 4. Build input/output signature (task-specific)
+    # 3. Build input/output signature (task-specific)
     import pandas as pd
 
     input_example = pd.DataFrame(
@@ -114,7 +124,7 @@ def register_model(
 
     signature = infer_signature(input_example, output_example)
 
-    # 5. Log the PyFunc model
+    # 4. Log the PyFunc model
     if task_type == "classification":
         from .pyfunc import ClassificationPyFuncModel
 
@@ -126,19 +136,26 @@ def register_model(
         pyfunc_model = DetectionPyFuncModel()
         artifact_name = "detection_pyfunc"
 
-    with mlflow.start_run(run_id=run_id):
-        model_info = mlflow.pyfunc.log_model(
-            artifact_path=artifact_name,
-            python_model=pyfunc_model,
-            artifacts={"model_dir": model_dir},
-            conda_env=conda_env,
-            signature=signature,
-            input_example=input_example,
-        )
+    pip_requirements = [
+        "mlflow>=3.1",
+        "torch>=2.0",
+        "transformers>=4.36",
+        "Pillow>=9.0",
+        "numpy>=1.24",
+    ]
 
-    model_uri = model_info.model_uri
+    model_info = mlflow.pyfunc.log_model(
+        name=artifact_name,
+        python_model=pyfunc_model,
+        artifacts={"model_dir": model_dir},
+        pip_requirements=pip_requirements,
+        signature=signature,
+        input_example=input_example,
+    )
 
-    # 6. Validate with a real prediction (optional)
+    pyfunc_model_uri = model_info.model_uri
+
+    # 5. Validate with a real prediction (optional)
     if validate and test_image_path:
         print("Validating model with test image...")
         import base64
@@ -147,16 +164,16 @@ def register_model(
             b64 = base64.b64encode(f.read()).decode()
 
         test_input = pd.DataFrame([{"image": b64}])
-        loaded = mlflow.pyfunc.load_model(model_uri)
+        loaded = mlflow.pyfunc.load_model(pyfunc_model_uri)
         result = loaded.predict(test_input)
         print(f"Validation result: {result[0]['predictions']['status']}")
         assert result[0]["predictions"]["status"] == "success", "Validation failed"
 
-    # 7. Register to Unity Catalog
-    mv = mlflow.register_model(model_uri, registered_model_name)
+    # 6. Register to Unity Catalog
+    mv = mlflow.register_model(pyfunc_model_uri, registered_model_name)
     version = mv.version
 
-    # 8. Set aliases and tags
+    # 7. Set aliases and tags
     client = mlflow.MlflowClient()
     for alias in aliases:
         client.set_registered_model_alias(registered_model_name, alias, version)
@@ -166,7 +183,7 @@ def register_model(
 
     print(f"Registered {registered_model_name} version {version}")
     return {
-        "model_uri": model_uri,
+        "model_uri": pyfunc_model_uri,
         "model_version": version,
         "registered_model_name": registered_model_name,
     }
