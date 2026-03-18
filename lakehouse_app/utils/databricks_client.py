@@ -39,7 +39,7 @@ class DatabricksJobClient:
             job_name: Name for the job
             config_path: Path to configuration YAML (workspace or volume path)
             project_path: Workspace path to the project root
-                (e.g. /Workspace/Users/user@databricks.com/Databricks_CV_ref)
+                (e.g. /Workspace/Users/user@databricks.com/databricks-cv-accelerator)
             num_gpus: Number of GPUs (auto-detected on cluster if omitted)
             cluster_config: New cluster config dict (ignored if existing_cluster_id set)
             existing_cluster_id: Use an already-running GPU cluster

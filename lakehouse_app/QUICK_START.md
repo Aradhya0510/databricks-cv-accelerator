@@ -93,7 +93,7 @@ Make sure you have:
 
 3. **Configure the job:**
    - **Job Name:** `my_first_cv_training`
-   - **Source Path:** `/Workspace/Repos/<username>/Databricks_CV_ref/src`
+   - **Source Path:** `/Workspace/Repos/<username>/databricks-cv-accelerator/src`
    - ⚠️ Replace `<username>` with your actual username!
 
 4. **Select compute:**

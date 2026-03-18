@@ -27,8 +27,8 @@ This will show you the actual error causing the app to crash.
 Make sure you're deploying from the correct location. Based on your workspace structure, use:
 
 ```bash
-# If repo is at: /Workspace/Users/<user>/Databricks_CV_ref/
-cd /Workspace/Users/<your.email@databricks.com>/Databricks_CV_ref
+# If repo is at: /Workspace/Users/<user>/databricks-cv-accelerator/
+cd /Workspace/Users/<your.email@databricks.com>/databricks-cv-accelerator
 
 # Deploy the app
 databricks apps deploy cv-training-pipeline --source-code-path lakehouse_app
@@ -94,7 +94,7 @@ databricks apps stop cv-training-pipeline
 databricks apps delete cv-training-pipeline
 
 # Deploy again
-cd /Workspace/Users/<your.email@databricks.com>/Databricks_CV_ref
+cd /Workspace/Users/<your.email@databricks.com>/databricks-cv-accelerator
 databricks apps deploy cv-training-pipeline --source-code-path lakehouse_app
 
 # Check logs immediately
@@ -135,7 +135,7 @@ lakehouse_app/
 Before deploying, test the app locally to catch import errors:
 
 ```bash
-cd /Workspace/Users/<your.email@databricks.com>/Databricks_CV_ref/lakehouse_app
+cd /Workspace/Users/<your.email@databricks.com>/databricks-cv-accelerator/lakehouse_app
 streamlit run app.py
 ```
 

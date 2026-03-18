@@ -90,7 +90,7 @@ See **[GETTING_STARTED.md](GETTING_STARTED.md)** for the full setup guide. The s
 
 ```bash
 # 1. Clone
-git clone <repo-url> && cd Databricks_CV_ref
+git clone <repo-url> && cd databricks-cv-accelerator
 
 # 2. Pick a config, update paths
 cp configs/classification_vit_config.yaml configs/my_config.yaml

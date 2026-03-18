@@ -8,17 +8,15 @@ import sys
 from pathlib import Path
 from datetime import datetime
 
-# Note: lakehouse_app is self-contained, no need for parent directory imports
 from utils.state_manager import StateManager
 from utils.databricks_client import DatabricksJobClient
 from components.metrics_display import MetricsDisplay
+from components.theme import inject_theme, page_header
 
-# Initialize state
+inject_theme()
 StateManager.initialize()
 
-# Page config
-st.title("📦 Model Registration")
-st.markdown("Register trained models to Unity Catalog Model Registry")
+page_header("Model Registration", "Register models to Unity Catalog for versioning and deployment")
 
 # Initialize client
 client = DatabricksJobClient()

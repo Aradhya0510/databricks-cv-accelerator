@@ -1,340 +1,234 @@
 """
-Page 6: Model Deployment
-Deploy models to serving endpoints
+Page 6 — Deployment
+Deploy to Model Serving, manage endpoints, view status/URL/version.
 """
 
 import streamlit as st
-import sys
-from pathlib import Path
 from datetime import datetime
 
-# Note: lakehouse_app is self-contained, no need for parent directory imports
 from utils.state_manager import StateManager
 from utils.databricks_client import DatabricksJobClient
+from components.theme import inject_theme, page_header, metric_card, section_title, status_pill
 
-# Initialize state
+inject_theme()
 StateManager.initialize()
 
-# Page config
-st.title("🌐 Model Deployment")
-st.markdown("Deploy models to Databricks Model Serving endpoints")
+page_header("Deployment", "Deploy models and manage serving endpoints")
 
-# Initialize client
 client = DatabricksJobClient()
 
-# Tabs
-tab1, tab2, tab3 = st.tabs(["🚀 Deploy Model", "📊 Active Endpoints", "⚙️ Batch Inference"])
+tab_deploy, tab_endpoints, tab_batch = st.tabs(["Deploy Model", "Active Endpoints", "Batch Inference"])
 
-with tab1:
-    st.markdown("### Deploy to Model Serving")
-    
-    # Check if model was selected from registration page
+
+# =========================== TAB 1 — Deploy ================================
+with tab_deploy:
     deployment_model = StateManager.get("deployment_model")
-    
-    # Step 1: Select model
-    st.markdown("#### Step 1: Select Model")
-    
+
+    section_title("Select Model")
+
     if deployment_model:
-        st.success(f"✅ Selected model: {deployment_model.get('name', 'N/A')}")
+        st.markdown(
+            f'<div class="glass-card">'
+            f'<strong style="color:#00D68F;">Selected:</strong> '
+            f'<code>{deployment_model.get("name", "—")}</code> v{deployment_model.get("version", "1")}'
+            f'</div>',
+            unsafe_allow_html=True,
+        )
         model_name = deployment_model.get("name", "")
         model_version = deployment_model.get("version", "1")
-        
-        if st.button("🔄 Choose Different Model"):
+        if st.button("Choose different model"):
             StateManager.set("deployment_model", None)
             st.rerun()
     else:
-        catalog = st.text_input("Catalog", value="main")
-        schema = st.text_input("Schema", value="cv_models")
-        model_name_input = st.text_input("Model Name", value="")
-        
-        if model_name_input:
-            model_name = f"{catalog}.{schema}.{model_name_input}"
-            model_version = st.text_input("Model Version", value="1")
-        else:
-            model_name = ""
-            model_version = "1"
-        
-        st.info("💡 Or select a model from the Model Registration page")
-    
-    # Step 2: Endpoint configuration
-    st.markdown("---")
-    st.markdown("#### Step 2: Endpoint Configuration")
-    
+        c1, c2, c3 = st.columns(3)
+        with c1:
+            catalog = st.text_input("Catalog", "main", key="dep_cat")
+        with c2:
+            schema = st.text_input("Schema", "cv_models", key="dep_schema")
+        with c3:
+            model_input = st.text_input("Model Name", "", key="dep_model")
+        model_name = f"{catalog}.{schema}.{model_input}" if model_input else ""
+        model_version = st.text_input("Version", "1", key="dep_ver")
+
+    st.markdown("")
+    section_title("Endpoint Configuration")
+
     endpoint_name = st.text_input(
         "Endpoint Name",
         value=f"{model_name.split('.')[-1] if model_name else 'model'}_endpoint",
-        help="Name for the serving endpoint"
+        key="dep_ep",
     )
-    
-    col1, col2 = st.columns(2)
-    
-    with col1:
-        workload_size = st.selectbox(
-            "Workload Size",
-            options=["Small", "Medium", "Large"],
-            help="Compute size for the endpoint"
+
+    c1, c2 = st.columns(2)
+    with c1:
+        workload_size = st.selectbox("Workload Size", ["Small", "Medium", "Large"], key="dep_wl")
+    with c2:
+        scale_to_zero = st.checkbox("Scale-to-Zero", True, key="dep_s2z")
+
+    with st.expander("Workload Details"):
+        st.markdown(
+            "**Small** — dev/testing, lowest cost  \n"
+            "**Medium** — moderate production traffic  \n"
+            "**Large** — high-throughput production  \n\n"
+            "Scale-to-zero shuts down when idle to save cost."
         )
-    
-    with col2:
-        scale_to_zero = st.checkbox(
-            "Enable Scale-to-Zero",
-            value=True,
-            help="Automatically scale down when not in use"
-        )
-    
-    # Endpoint details
-    with st.expander("ℹ️ Workload Size Details"):
-        st.markdown("""
-        - **Small:** For light workloads and testing (cheaper)
-        - **Medium:** For moderate production workloads
-        - **Large:** For high-throughput production workloads
-        
-        Scale-to-zero reduces costs by shutting down when idle.
-        """)
-    
-    # Step 3: Review and deploy
-    st.markdown("---")
-    st.markdown("#### Step 3: Review and Deploy")
-    
-    with st.expander("📋 Deployment Summary", expanded=True):
-        st.markdown(f"**Model:** `{model_name}`")
-        st.markdown(f"**Version:** {model_version}")
-        st.markdown(f"**Endpoint:** `{endpoint_name}`")
-        st.markdown(f"**Workload Size:** {workload_size}")
-        st.markdown(f"**Scale-to-Zero:** {'Enabled' if scale_to_zero else 'Disabled'}")
-    
-    col1, col2 = st.columns([2, 1])
-    
-    with col1:
-        if st.button("🚀 Deploy to Endpoint", type="primary", use_container_width=True):
+
+    st.markdown("")
+    section_title("Review")
+    st.markdown(
+        f'<div class="glass-card">'
+        f'<div class="detail-row"><span class="detail-label">Model</span><span class="detail-value"><code>{model_name}</code></span></div>'
+        f'<div class="detail-row"><span class="detail-label">Version</span><span class="detail-value">{model_version}</span></div>'
+        f'<div class="detail-row"><span class="detail-label">Endpoint</span><span class="detail-value"><code>{endpoint_name}</code></span></div>'
+        f'<div class="detail-row"><span class="detail-label">Size</span><span class="detail-value">{workload_size}</span></div>'
+        f'<div class="detail-row"><span class="detail-label">Scale-to-Zero</span><span class="detail-value">{"Yes" if scale_to_zero else "No"}</span></div>'
+        f'</div>',
+        unsafe_allow_html=True,
+    )
+
+    c1, c2 = st.columns([3, 1])
+    with c1:
+        if st.button("Deploy to Endpoint", type="primary", use_container_width=True, key="do_deploy"):
             if not model_name:
-                st.error("❌ Please select or enter a model name")
+                st.error("Please enter a model name.")
             elif not endpoint_name:
-                st.error("❌ Please enter an endpoint name")
+                st.error("Please enter an endpoint name.")
             else:
-                with st.spinner("Deploying model to endpoint..."):
-                    try:
-                        result = client.create_model_serving_endpoint(
-                            endpoint_name=endpoint_name,
-                            model_name=model_name,
-                            model_version=model_version,
-                            workload_size=workload_size,
-                            scale_to_zero=scale_to_zero
-                        )
-                        
-                        if result.get("status") in ["created", "updated"]:
-                            st.success(f"✅ Model deployed successfully!")
-                            st.info(f"**Endpoint:** {endpoint_name}")
-                            st.info(f"**Status:** {result['status'].title()}")
-                            st.balloons()
-                            
-                            # Update state
-                            StateManager.add_endpoint({
-                                "endpoint_name": endpoint_name,
-                                "model_name": model_name,
-                                "model_version": model_version,
-                                "workload_size": workload_size,
-                                "created_at": datetime.now().isoformat()
-                            })
-                            
-                            st.info("💡 Endpoint is being provisioned. Check the 'Active Endpoints' tab to monitor status.")
-                        else:
-                            st.error(f"❌ Deployment failed: {result.get('error', 'Unknown error')}")
-                    
-                    except Exception as e:
-                        st.error(f"❌ Error deploying model: {str(e)}")
-    
-    with col2:
-        if st.button("💾 Save Config", use_container_width=True):
-            st.info("Deployment config saved")
+                with st.spinner("Deploying..."):
+                    result = client.create_model_serving_endpoint(
+                        endpoint_name=endpoint_name,
+                        model_name=model_name,
+                        model_version=model_version,
+                        workload_size=workload_size,
+                        scale_to_zero=scale_to_zero,
+                    )
+                if result.get("status") in ("created", "updated"):
+                    st.success(f"Endpoint **{endpoint_name}** {result['status']}.")
+                    StateManager.add_endpoint({
+                        "endpoint_name": endpoint_name,
+                        "model_name": model_name,
+                        "model_version": model_version,
+                        "workload_size": workload_size,
+                        "scale_to_zero": scale_to_zero,
+                        "created_at": datetime.now().isoformat(),
+                    })
+                else:
+                    st.error(f"Deployment failed: {result.get('error', 'Unknown')}")
+    with c2:
+        if st.button("Save Config", use_container_width=True, key="dep_save"):
+            st.info("Config saved")
 
-with tab2:
-    st.markdown("### Active Endpoints")
-    
-    col1, col2 = st.columns([3, 1])
-    
-    with col2:
-        if st.button("🔄 Refresh", use_container_width=True):
+
+# =========================== TAB 2 — Active Endpoints =====================
+with tab_endpoints:
+    section_title("Endpoints")
+
+    c1, c2 = st.columns([4, 1])
+    with c2:
+        if st.button("Refresh", use_container_width=True, key="ep_refresh"):
             st.rerun()
-    
-    # Get endpoints from state
+
     endpoints = StateManager.get("endpoints", [])
-    
+
     if not endpoints:
-        st.info("ℹ️ No endpoints tracked")
-        st.markdown("Deploy a model to create an endpoint")
+        st.info("No tracked endpoints. Deploy a model to get started.")
     else:
-        st.success(f"✅ Found {len(endpoints)} endpoint(s)")
-        
-        # Display endpoints
-        for endpoint in endpoints:
-            endpoint_name = endpoint.get("endpoint_name", "")
-            
-            with st.expander(f"🌐 {endpoint_name}", expanded=True):
-                col1, col2 = st.columns(2)
-                
-                with col1:
-                    st.markdown(f"**Endpoint:** `{endpoint_name}`")
-                    st.markdown(f"**Model:** {endpoint.get('model_name', 'N/A')}")
-                    st.markdown(f"**Version:** {endpoint.get('model_version', 'N/A')}")
-                
-                with col2:
-                    st.markdown(f"**Size:** {endpoint.get('workload_size', 'N/A')}")
-                    st.markdown(f"**Created:** {endpoint.get('created_at', 'N/A')[:10]}")
-                
-                # Get endpoint status
-                try:
-                    status = client.get_endpoint_status(endpoint_name)
-                    
-                    st.markdown("#### Status")
-                    col1, col2 = st.columns(2)
-                    
-                    with col1:
-                        state = status.get("state", "UNKNOWN")
-                        ready = status.get("ready", "UNKNOWN")
-                        
-                        if state == "NOT_UPDATING" and ready == "READY":
-                            st.success("✅ Ready")
-                        elif state == "UPDATING":
-                            st.info("🔄 Updating...")
-                        else:
-                            st.warning(f"⚠️ {state}")
-                    
-                    with col2:
-                        if status.get("endpoint_url"):
-                            st.markdown(f"[🔗 Endpoint URL]({status['endpoint_url']})")
-                
-                except Exception as e:
-                    st.error(f"Could not fetch status: {str(e)}")
-                
-                st.markdown("---")
-                
-                # Actions
-                col1, col2, col3, col4 = st.columns(4)
-                
-                with col1:
-                    if st.button("🎮 Test", key=f"test_{endpoint_name}", use_container_width=True):
-                        StateManager.set("inference_endpoint", endpoint_name)
-                        st.switch_page("pages/7_🎮_Inference.py")
-                
-                with col2:
-                    if st.button("📡 Monitor", key=f"metrics_{endpoint_name}", use_container_width=True):
-                        st.switch_page("pages/9_📡_Monitoring.py")
+        for ep in endpoints:
+            ep_name = ep.get("endpoint_name", "")
+            model = ep.get("model_name", "—")
+            version = ep.get("model_version", "—")
+            size = ep.get("workload_size", "—")
+            created = ep.get("created_at", "—")[:10]
 
-                with col3:
-                    if st.button("🧪 Smoke Test", key=f"smoke_{endpoint_name}", use_container_width=True):
-                        with st.spinner("Running smoke test..."):
-                            st.code(
-                                f"python -c \"from src.serving.deployment import test_endpoint; "
-                                f"test_endpoint('{endpoint_name}', test_image_path='<path>')\"",
-                                language="bash",
-                            )
-                            st.info("Use a test image path or run from a GPU cluster for live smoke tests.")
-                
-                with col4:
-                    if st.button("🗑️ Delete", key=f"delete_{endpoint_name}", use_container_width=True):
-                        st.warning("Delete confirmation would appear here")
+            # Fetch live status
+            live = client.get_endpoint_status(ep_name)
+            state_str = live.get("state", "UNKNOWN")
+            ready_str = live.get("ready", "UNKNOWN")
+            ep_url = live.get("endpoint_url", "")
 
-with tab3:
-    st.markdown("### Batch Inference")
-    
-    st.info("Configure batch inference jobs for processing large datasets")
-    
-    # Step 1: Select model/endpoint
-    st.markdown("#### Step 1: Select Model")
-    
-    col1, col2 = st.columns(2)
-    
-    with col1:
-        inference_type = st.radio(
-            "Inference Type",
-            options=["Use Endpoint", "Use Checkpoint"],
-            help="Choose whether to use a deployed endpoint or model checkpoint"
-        )
-    
-    with col2:
-        if inference_type == "Use Endpoint":
-            endpoints = StateManager.get("endpoints", [])
-            endpoint_names = [e["endpoint_name"] for e in endpoints]
-            
-            if endpoint_names:
-                selected_endpoint = st.selectbox("Select Endpoint", endpoint_names)
+            if state_str == "NOT_UPDATING" and ready_str == "READY":
+                pill = status_pill("READY")
+            elif state_str == "UPDATING" or ready_str != "READY":
+                pill = status_pill("RUNNING")
+            elif state_str == "NOT_FOUND":
+                pill = status_pill("FAILED")
             else:
-                st.warning("No endpoints available")
-                selected_endpoint = None
-        else:
-            checkpoint_path = st.text_input(
-                "Checkpoint Path",
-                value="/Volumes/<catalog>/<schema>/<volume>/checkpoints/model.ckpt"
+                pill = status_pill(state_str)
+
+            st.markdown(
+                f'<div class="endpoint-card">'
+                f'<div class="endpoint-header">'
+                f'<span class="endpoint-name">{ep_name}</span>'
+                f'{pill}'
+                f'</div>'
+                f'<div class="detail-row"><span class="detail-label">Model</span><span class="detail-value"><code>{model}</code></span></div>'
+                f'<div class="detail-row"><span class="detail-label">Version</span><span class="detail-value">{version}</span></div>'
+                f'<div class="detail-row"><span class="detail-label">Workload</span><span class="detail-value">{size}</span></div>'
+                f'<div class="detail-row"><span class="detail-label">Created</span><span class="detail-value">{created}</span></div>'
+                + (f'<div class="detail-row"><span class="detail-label">URL</span><span class="detail-value"><a href="{ep_url}" style="color:#6C63FF;" target="_blank">{ep_url}</a></span></div>' if ep_url else "")
+                + f'</div>',
+                unsafe_allow_html=True,
             )
-    
-    # Step 2: Input/output configuration
-    st.markdown("---")
-    st.markdown("#### Step 2: Data Configuration")
-    
-    input_path = st.text_input(
-        "Input Data Path",
-        value="/Volumes/<catalog>/<schema>/<volume>/inference/input",
-        help="Path to images or Delta table for inference"
-    )
-    
-    output_path = st.text_input(
-        "Output Path",
-        value="/Volumes/<catalog>/<schema>/<volume>/inference/output",
-        help="Path to save predictions"
-    )
-    
-    output_format = st.selectbox(
-        "Output Format",
-        options=["Delta Table", "Parquet", "JSON", "CSV"],
-        help="Format for saving predictions"
-    )
-    
-    # Step 3: Job configuration
-    st.markdown("---")
-    st.markdown("#### Step 3: Job Configuration")
-    
-    col1, col2 = st.columns(2)
-    
-    with col1:
-        batch_size = st.number_input("Batch Size", min_value=1, max_value=256, value=32)
-    
-    with col2:
-        save_visualizations = st.checkbox("Save Annotated Images", value=True)
-    
-    # Launch batch job
-    if st.button("🚀 Launch Batch Inference", type="primary"):
-        st.info("""
-        🔄 Batch inference job would:
-        1. Load input data
-        2. Run inference using model/endpoint
-        3. Save predictions to output path
-        4. Optionally save visualizations
-        """)
-        st.success("✅ Batch job configured")
-        st.info("💡 In production, this would submit a Databricks job")
 
-# Sidebar
+            # Served models detail
+            served = live.get("served_models", [])
+            if served:
+                with st.expander(f"Served Entities — {ep_name}"):
+                    for sm in served:
+                        st.markdown(
+                            f"**{sm.get('entity_name', '—')}** "
+                            f"v{sm.get('entity_version', '—')}  |  "
+                            f"Size: {sm.get('workload_size', '—')}"
+                        )
+
+            c1, c2, c3, c4 = st.columns(4)
+            with c1:
+                if st.button("Test", key=f"t_{ep_name}", use_container_width=True):
+                    StateManager.set("inference_endpoint", ep_name)
+                    st.switch_page("pages/7_🎮_Inference.py")
+            with c2:
+                if st.button("Monitor", key=f"m_{ep_name}", use_container_width=True):
+                    st.switch_page("pages/9_📡_Monitoring.py")
+            with c3:
+                if st.button("Smoke Test", key=f"s_{ep_name}", use_container_width=True):
+                    st.code(
+                        f'python -c "from src.serving.deployment import test_endpoint; '
+                        f"test_endpoint('{ep_name}', test_image_path='<path>')\"",
+                        language="bash",
+                    )
+            with c4:
+                if st.button("Delete", key=f"d_{ep_name}", use_container_width=True):
+                    st.warning("Confirm delete? (not yet implemented)")
+            st.markdown("")
+
+
+# =========================== TAB 3 — Batch Inference ======================
+with tab_batch:
+    section_title("Batch Inference")
+    st.info("Process large datasets offline via a Databricks job.")
+
+    c1, c2 = st.columns(2)
+    with c1:
+        inf_type = st.radio("Inference source", ["Endpoint", "Checkpoint"], key="bi_src")
+    with c2:
+        if inf_type == "Endpoint":
+            ep_names = [e["endpoint_name"] for e in StateManager.get("endpoints", [])]
+            bi_ep = st.selectbox("Endpoint", ep_names, key="bi_ep") if ep_names else None
+        else:
+            bi_ckpt = st.text_input("Checkpoint Path", "/Volumes/.../checkpoints/model", key="bi_ckpt")
+
+    input_path = st.text_input("Input Path", "/Volumes/.../inference/input", key="bi_in")
+    output_path = st.text_input("Output Path", "/Volumes/.../inference/output", key="bi_out")
+    output_format = st.selectbox("Format", ["Delta Table", "Parquet", "JSON", "CSV"], key="bi_fmt")
+
+    if st.button("Launch Batch Inference", type="primary", key="bi_go"):
+        st.success("Batch job would be submitted here.")
+
+
+# =========================== Sidebar ========================================
 with st.sidebar:
-    st.markdown("### 🌐 Deployment Status")
-    
-    endpoints = StateManager.get("endpoints", [])
-    st.metric("Active Endpoints", len(endpoints))
-    
-    if endpoints:
-        st.markdown("#### Quick Access")
-        for endpoint in endpoints[:3]:  # Show first 3
-            if st.button(f"🌐 {endpoint['endpoint_name']}", key=f"sidebar_{endpoint['endpoint_name']}", use_container_width=True):
-                StateManager.set("inference_endpoint", endpoint['endpoint_name'])
-                st.switch_page("pages/7_🎮_Inference.py")
-    
-    st.markdown("---")
-    st.markdown("### 💡 Tips")
-    
-    st.info("""
-    - Test endpoints before production use
-    - Enable scale-to-zero to reduce costs
-    - Monitor endpoint metrics regularly
-    - Use batch inference for large datasets
-    """)
-
+    st.markdown("### Deployment")
+    n = len(StateManager.get("endpoints", []))
+    st.metric("Endpoints", n)
+    st.divider()
+    st.info("Test endpoints with the Inference page. Monitor health via Monitoring.")

@@ -9,17 +9,15 @@ from pathlib import Path
 import yaml
 from datetime import datetime
 
-# Note: lakehouse_app is self-contained, no need for parent directory imports
 from utils.config_generator import ConfigGenerator
 from utils.state_manager import StateManager
 from components.config_forms import ConfigFormBuilder
+from components.theme import inject_theme, page_header
 
-# Initialize state
+inject_theme()
 StateManager.initialize()
 
-# Page config
-st.title("⚙️ Configuration Setup")
-st.markdown("Create and manage training configurations for your computer vision models")
+page_header("Configuration Setup", "Build and manage training configs for your CV models")
 
 # Tabs for different workflows
 tab1, tab2, tab3 = st.tabs(["🆕 Create New Config", "📂 Load Existing Config", "📋 Recent Configs"])
