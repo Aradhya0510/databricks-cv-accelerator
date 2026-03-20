@@ -68,7 +68,10 @@ class TrainingEngine:
     # ------------------------------------------------------------------
     def _train_fn(self, num_gpus: int = 1) -> Dict[str, Any]:
         """Core training logic.  HF Trainer handles DDP when num_gpus > 1."""
+        import mlflow
+
         config = self.config
+        is_rank0 = int(os.environ.get("LOCAL_RANK", "0")) == 0
 
         # --- task registry ---
         import src.tasks.detection  # noqa: F401  (triggers @register)
@@ -108,68 +111,83 @@ class TrainingEngine:
             save_strategy="epoch",
             logging_steps=config.training.log_every_n_steps,
             load_best_model_at_end=True,
-            # monitor_metric may use Lightning-style "val_" prefix; strip it
-            # since HF Trainer already adds "eval_" prefix to all eval metrics.
             metric_for_best_model="eval_{}".format(
                 config.training.monitor_metric.removeprefix("val_")
             ),
             greater_is_better=(config.training.monitor_mode == "max"),
             report_to="mlflow",
+            run_name=config.mlflow.run_name,
             bf16=torch.cuda.is_available(),
             remove_unused_columns=False,
-            save_total_limit=config.training.save_top_k + 1,  # +1 for "last"
+            save_total_limit=config.training.save_top_k + 1,
             dataloader_pin_memory=True,
             dataloader_persistent_workers=config.data.num_workers > 0,
         )
 
-        # --- MLflow setup ---
+        # --- MLflow: single run for the entire lifecycle ---
+        # Opening the run here ensures HF Trainer's MLflowCallback reuses it
+        # (it checks mlflow.active_run() and sets _auto_end_run=False).
+        # This prevents the duplicate-run problem where metrics and model
+        # artifacts end up in different runs.
+        mlflow.set_experiment(config.mlflow.experiment_name)
+
+        run_ctx = mlflow.start_run(run_name=config.mlflow.run_name) if is_rank0 else None
         try:
-            import mlflow
-            mlflow.set_experiment(config.mlflow.experiment_name)
-        except Exception as e:
-            print(f"Warning: MLflow experiment setup failed: {e}")
+            if is_rank0 and config.mlflow.tags:
+                mlflow.set_tags(config.mlflow.tags)
+            if is_rank0:
+                mlflow.log_params({
+                    "task_type": config.model.task_type,
+                    "model_name": config.model.model_name,
+                    "num_classes": config.model.num_classes,
+                    "max_epochs": config.training.max_epochs,
+                    "batch_size": config.data.batch_size,
+                    "learning_rate": config.model.learning_rate,
+                    "num_gpus": num_gpus,
+                })
 
-        # --- callbacks ---
-        callbacks = []
-        if config.training.volume_checkpoint_dir:
-            callbacks.append(VolumeCheckpointCallback(config.training.volume_checkpoint_dir))
-        callbacks.append(
-            EarlyStoppingCallback(early_stopping_patience=config.training.early_stopping_patience)
-        )
+            # --- callbacks ---
+            callbacks = []
+            if config.training.volume_checkpoint_dir:
+                callbacks.append(VolumeCheckpointCallback(config.training.volume_checkpoint_dir))
+            callbacks.append(
+                EarlyStoppingCallback(early_stopping_patience=config.training.early_stopping_patience)
+            )
 
-        # --- trainer ---
-        trainer = CVTrainer(
-            model=model,
-            args=training_args,
-            train_dataset=train_ds,
-            eval_dataset=val_ds,
-            data_collator=task.get_collate_fn(),
-            optimizers=(optimizer, scheduler),
-            callbacks=callbacks,
-        )
-        # Wire task-specific hooks into the generic trainer
-        if hasattr(task, "compute_loss"):
-            trainer.loss_fn = task.compute_loss
-        if hasattr(task, "get_eval_fn"):
-            trainer.eval_fn = task.get_eval_fn(config.model)
+            # --- trainer ---
+            trainer = CVTrainer(
+                model=model,
+                args=training_args,
+                train_dataset=train_ds,
+                eval_dataset=val_ds,
+                data_collator=task.get_collate_fn(),
+                optimizers=(optimizer, scheduler),
+                callbacks=callbacks,
+            )
+            if hasattr(task, "compute_loss"):
+                trainer.loss_fn = task.compute_loss
+            if hasattr(task, "get_eval_fn"):
+                trainer.eval_fn = task.get_eval_fn(config.model)
 
-        # --- train ---
-        trainer.train()
+            # --- train ---
+            trainer.train()
 
-        # --- final eval ---
-        metrics = trainer.evaluate()
+            # --- final eval ---
+            metrics = trainer.evaluate()
 
-        # --- log final model (rank 0 only) ---
-        try:
-            import mlflow
-            if int(os.environ.get("LOCAL_RANK", "0")) == 0:
+            # --- log final model (rank 0, inside the same run) ---
+            if is_rank0:
                 model_info = mlflow.transformers.log_model(
                     transformers_model=model,
                     name="model",
                 )
                 mlflow.log_param("logged_model_uri", model_info.model_uri)
-        except Exception as e:
-            print(f"Warning: MLflow model logging failed: {e}")
+                if config.training.volume_checkpoint_dir:
+                    mlflow.log_param("checkpoint_dir", config.training.volume_checkpoint_dir)
+
+        finally:
+            if run_ctx is not None:
+                mlflow.end_run()
 
         return metrics
 

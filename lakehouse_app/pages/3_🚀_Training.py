@@ -169,6 +169,30 @@ with tab_monitor:
             unsafe_allow_html=True,
         )
 
+        # ---- Resolve MLflow experiment + latest run early so we can
+        #      use epoch data in the header cards as well as charts.
+        mlflow_exp = config.get("mlflow", {}).get("experiment_name", "")
+        max_ep = config.get("training", {}).get("max_epochs", 0)
+        current_epoch = 0
+        mlflow_run_id = None
+        mlflow_metrics = {}
+        mlflow_error = None
+
+        if mlflow_exp:
+            try:
+                runs = client.get_mlflow_runs(mlflow_exp, max_results=1)
+                if runs:
+                    latest = runs[0]
+                    mlflow_metrics = latest.get("metrics", {})
+                    mlflow_run_id = latest["run_id"]
+                    epoch_history = client.get_run_metrics_history(mlflow_run_id, "epoch")
+                    if epoch_history:
+                        current_epoch = int(max(h["value"] for h in epoch_history))
+                    elif "epoch" in mlflow_metrics:
+                        current_epoch = int(mlflow_metrics["epoch"])
+            except Exception as exc:
+                mlflow_error = str(exc)
+
         c1, c2, c3 = st.columns(3)
         with c1:
             started = status.get("start_time")
@@ -183,22 +207,33 @@ with tab_monitor:
             else:
                 metric_card("Duration", "—")
         with c3:
-            max_ep = config.get("training", {}).get("max_epochs", 0)
-            metric_card("Epochs", f"— / {max_ep}")
+            metric_card("Epochs", f"{current_epoch} / {max_ep}" if max_ep else "—")
+
+        # Progress bar
+        if state == "RUNNING" and max_ep:
+            progress = min(current_epoch / max_ep, 1.0)
+            st.progress(progress, text=f"Epoch {current_epoch} / {max_ep}")
 
         # MLflow experiment link
-        mlflow_exp = config.get("mlflow", {}).get("experiment_name", "")
         if mlflow_exp:
             section_title("MLflow Experiment")
             try:
                 host = client.workspace_client.config.host
-                if host:
-                    exp_url = f"{host.rstrip('/')}/#mlflow/experiments/{mlflow_exp.replace('/', '%2F')}"
+                exp_id = client._resolve_experiment_id(mlflow_exp)
+                if host and exp_id:
+                    exp_url = f"{host.rstrip('/')}/#mlflow/experiments/{exp_id}"
                     st.markdown(
                         f'<div class="glass-card">'
                         f'<strong>Experiment:</strong> <code>{mlflow_exp}</code><br/>'
                         f'<a href="{exp_url}" target="_blank" style="color:#6C63FF;">Open in MLflow UI &rarr;</a>'
                         f'</div>',
+                        unsafe_allow_html=True,
+                    )
+                elif host:
+                    st.markdown(
+                        f'<div class="glass-card">'
+                        f'<strong>Experiment:</strong> <code>{mlflow_exp}</code> '
+                        f'<em>(not found on workspace — check the name/ID)</em></div>',
                         unsafe_allow_html=True,
                     )
             except Exception:
@@ -210,60 +245,49 @@ with tab_monitor:
 
         # Live loss / metric charts
         section_title("Training Curves")
-        if state in ("RUNNING", "TERMINATED") or result == "SUCCESS":
-            if mlflow_exp:
-                try:
-                    runs = client.get_mlflow_runs(mlflow_exp, max_results=1)
-                    if runs:
-                        latest = runs[0]
-                        metrics = latest.get("metrics", {})
-                        mlflow_run_id = latest["run_id"]
+        if mlflow_run_id:
+            primary_metric = "eval_map" if task != "classification" else "eval_accuracy"
+            loss_history = client.get_run_metrics_history(mlflow_run_id, "eval_loss")
+            primary_history = client.get_run_metrics_history(mlflow_run_id, primary_metric)
 
-                        primary_metric = "eval_map" if task != "classification" else "eval_accuracy"
-                        loss_history = client.get_run_metrics_history(mlflow_run_id, "eval_loss")
-                        primary_history = client.get_run_metrics_history(mlflow_run_id, primary_metric)
+            c1, c2 = st.columns(2)
+            with c1:
+                if loss_history:
+                    fig = VisualizationHelper.training_metrics_chart(loss_history, "Eval Loss", title="Loss Curve")
+                    fig.update_layout(template="plotly_dark", paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)")
+                    st.plotly_chart(fig, use_container_width=True)
+                elif "eval_loss" in mlflow_metrics:
+                    metric_card("Eval Loss", f"{mlflow_metrics['eval_loss']:.4f}")
+                else:
+                    st.info("Waiting for loss data...")
+            with c2:
+                if primary_history:
+                    fig = VisualizationHelper.training_metrics_chart(
+                        primary_history, primary_metric, title=primary_metric.replace("_", " ").title()
+                    )
+                    fig.update_layout(template="plotly_dark", paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)")
+                    st.plotly_chart(fig, use_container_width=True)
+                elif primary_metric in mlflow_metrics:
+                    metric_card(primary_metric.replace("_", " ").title(), f"{mlflow_metrics[primary_metric]:.4f}")
+                else:
+                    st.info("Waiting for metric data...")
 
-                        c1, c2 = st.columns(2)
-                        with c1:
-                            if loss_history:
-                                fig = VisualizationHelper.training_metrics_chart(loss_history, "Eval Loss", title="Loss Curve")
-                                fig.update_layout(template="plotly_dark", paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)")
-                                st.plotly_chart(fig, use_container_width=True)
-                            elif "eval_loss" in metrics:
-                                metric_card("Eval Loss", f"{metrics['eval_loss']:.4f}")
-                            else:
-                                st.info("Waiting for loss data...")
-                        with c2:
-                            if primary_history:
-                                fig = VisualizationHelper.training_metrics_chart(
-                                    primary_history, primary_metric, title=primary_metric.replace("_", " ").title()
-                                )
-                                fig.update_layout(template="plotly_dark", paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)")
-                                st.plotly_chart(fig, use_container_width=True)
-                            elif primary_metric in metrics:
-                                metric_card(primary_metric.replace("_", " ").title(), f"{metrics[primary_metric]:.4f}")
-                            else:
-                                st.info("Waiting for metric data...")
-
-                        # Extra metrics snapshot
-                        if metrics:
-                            section_title("Latest Metric Snapshot")
-                            display_keys = [k for k in sorted(metrics.keys()) if k.startswith("eval_")][:8]
-                            cols = st.columns(min(len(display_keys), 4))
-                            for i, k in enumerate(display_keys):
-                                with cols[i % 4]:
-                                    metric_card(k.replace("eval_", "").replace("_", " ").title(), f"{metrics[k]:.4f}")
-                    else:
-                        st.info("No MLflow runs found yet — metrics will appear once training starts logging.")
-                except Exception as e:
-                    st.info(f"Waiting for MLflow data... ({e})")
+            # Extra metrics snapshot
+            if mlflow_metrics:
+                section_title("Latest Metric Snapshot")
+                display_keys = [k for k in sorted(mlflow_metrics.keys()) if k.startswith("eval_")][:8]
+                if display_keys:
+                    cols = st.columns(min(len(display_keys), 4))
+                    for i, k in enumerate(display_keys):
+                        with cols[i % 4]:
+                            metric_card(k.replace("eval_", "").replace("_", " ").title(), f"{mlflow_metrics[k]:.4f}")
+        elif mlflow_exp:
+            if mlflow_error:
+                st.warning(f"Could not fetch MLflow data: {mlflow_error}")
             else:
-                st.info("Configure an MLflow experiment in your YAML to see live charts.")
-
-        # Progress bar
-        if state == "RUNNING":
-            max_ep = config.get("training", {}).get("max_epochs", 100)
-            st.progress(0.0, text=f"Training in progress — {max_ep} epochs total")
+                st.info("No MLflow runs found yet — metrics will appear once training starts logging.")
+        else:
+            st.info("Configure an MLflow experiment in your YAML to see live charts.")
 
         st.markdown("")
         c1, c2, c3 = st.columns(3)
