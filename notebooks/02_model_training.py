@@ -34,8 +34,8 @@ import torch
 from pathlib import Path
 
 # Add the src directory to Python path
-sys.path.append('/Workspace/Repos/your-repo/Databricks_CV_ref/src')
-sys.path.append('/Workspace/Repos/your-repo/Databricks_CV_ref')
+sys.path.append('/Workspace/Repos/your-repo/databricks-cv-accelerator/src')
+sys.path.append('/Workspace/Repos/your-repo/databricks-cv-accelerator')
 
 from src.config.schema import load_config
 from src.engine import TrainingEngine

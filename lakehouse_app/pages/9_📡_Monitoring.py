@@ -9,13 +9,12 @@ from datetime import datetime
 from utils.state_manager import StateManager
 from utils.databricks_client import DatabricksJobClient
 from components.visualizations import VisualizationHelper
+from components.theme import inject_theme, page_header, metric_card, section_title, status_pill
 
-# Initialize state
+inject_theme()
 StateManager.initialize()
 
-# Page config
-st.title("📡 Model Monitoring")
-st.markdown("Monitor deployed model endpoints: health, metrics, and predictions")
+page_header("Monitoring", "Endpoint health, request metrics, and prediction distributions")
 
 # Initialize client
 client = DatabricksJobClient()

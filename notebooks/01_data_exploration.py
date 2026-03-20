@@ -17,8 +17,8 @@
 import sys, os
 from pathlib import Path
 
-sys.path.append('/Workspace/Repos/your-repo/Databricks_CV_ref/src')
-sys.path.append('/Workspace/Repos/your-repo/Databricks_CV_ref')
+sys.path.append('/Workspace/Repos/your-repo/databricks-cv-accelerator/src')
+sys.path.append('/Workspace/Repos/your-repo/databricks-cv-accelerator')
 
 from src.config.schema import load_config
 

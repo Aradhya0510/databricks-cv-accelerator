@@ -16,7 +16,7 @@ This guide walks you through deploying the Computer Vision Training Pipeline as 
 - Volumes for checkpoints and results
 
 ### 3. Source Code Access
-- CV framework code in workspace (e.g., `/Workspace/Repos/<username>/Databricks_CV_ref/`)
+- CV framework code in workspace (e.g., `/Workspace/Repos/<username>/databricks-cv-accelerator/`)
 - App code uploaded or synced
 
 ## 🚀 Deployment Steps
@@ -40,7 +40,7 @@ SHOW VOLUMES IN main.cv_models;
 **Option A: Using Databricks Repos (Recommended)**
 1. Connect your Git repository
 2. Sync the repository to workspace
-3. App will be at `/Workspace/Repos/<username>/Databricks_CV_ref/lakehouse_app/`
+3. App will be at `/Workspace/Repos/<username>/databricks-cv-accelerator/lakehouse_app/`
 
 **Option B: Manual Upload**
 1. Zip the `lakehouse_app` directory

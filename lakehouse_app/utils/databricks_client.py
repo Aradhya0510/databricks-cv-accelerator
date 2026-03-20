@@ -20,7 +20,8 @@ class DatabricksJobClient:
     def __init__(self):
         """Initialize Databricks client."""
         self.workspace_client = WorkspaceClient()
-        self.mlflow_client = MlflowClient()
+        mlflow.set_tracking_uri("databricks")
+        self.mlflow_client = MlflowClient(tracking_uri="databricks")
     
     def create_training_job(
         self,
@@ -39,7 +40,7 @@ class DatabricksJobClient:
             job_name: Name for the job
             config_path: Path to configuration YAML (workspace or volume path)
             project_path: Workspace path to the project root
-                (e.g. /Workspace/Users/user@databricks.com/Databricks_CV_ref)
+                (e.g. /Workspace/Users/user@databricks.com/databricks-cv-accelerator)
             num_gpus: Number of GPUs (auto-detected on cluster if omitted)
             cluster_config: New cluster config dict (ignored if existing_cluster_id set)
             existing_cluster_id: Use an already-running GPU cluster
@@ -60,7 +61,7 @@ class DatabricksJobClient:
         else:
             if cluster_config is None:
                 cluster_config = {
-                    "spark_version": "17.3.x-gpu-ml-scala2.12",
+                    "spark_version": "17.3.x-gpu-ml-scala2.13",
                     "node_type_id": "g5.4xlarge",
                     "num_workers": 0,
                     "data_security_mode": "SINGLE_USER",
@@ -129,6 +130,12 @@ class DatabricksJobClient:
         
         return str(run.run_id)
     
+    @staticmethod
+    def _clean_enum(value) -> str:
+        """Strip SDK enum prefix: 'RunLifeCycleState.RUNNING' -> 'RUNNING'."""
+        s = str(value)
+        return s.rsplit(".", 1)[-1] if "." in s else s
+
     def get_job_status(self, run_id: str) -> Dict[str, Any]:
         """
         Get job run status.
@@ -142,8 +149,8 @@ class DatabricksJobClient:
         run = self.workspace_client.jobs.get_run(run_id=int(run_id))
         
         state = run.state
-        life_cycle_state = str(state.life_cycle_state) if state else "UNKNOWN"
-        result_state = str(state.result_state) if state and state.result_state else "UNKNOWN"
+        life_cycle_state = self._clean_enum(state.life_cycle_state) if state else "UNKNOWN"
+        result_state = self._clean_enum(state.result_state) if state and state.result_state else "UNKNOWN"
         state_message = state.state_message if state else ""
         
         # Get timing information
@@ -204,6 +211,21 @@ class DatabricksJobClient:
             for exp in experiments
         ]
     
+    def _resolve_experiment_id(self, experiment_name_or_id: str) -> Optional[str]:
+        """Resolve an experiment name or numeric ID to an experiment ID."""
+        # Try by name first
+        exp = mlflow.get_experiment_by_name(experiment_name_or_id)
+        if exp:
+            return exp.experiment_id
+        # If the value looks like a numeric ID, try direct lookup
+        try:
+            exp = self.mlflow_client.get_experiment(experiment_name_or_id)
+            if exp:
+                return exp.experiment_id
+        except Exception:
+            pass
+        return None
+
     def get_mlflow_runs(
         self,
         experiment_name: str,
@@ -213,19 +235,19 @@ class DatabricksJobClient:
         Get MLflow runs for an experiment.
         
         Args:
-            experiment_name: Name of the experiment
+            experiment_name: Experiment name (path) or numeric experiment ID
             max_results: Maximum number of runs to return
             
         Returns:
             List of run dictionaries
         """
         try:
-            experiment = mlflow.get_experiment_by_name(experiment_name)
-            if not experiment:
+            experiment_id = self._resolve_experiment_id(experiment_name)
+            if not experiment_id:
                 return []
             
             runs = self.mlflow_client.search_runs(
-                experiment_ids=[experiment.experiment_id],
+                experiment_ids=[experiment_id],
                 max_results=max_results,
                 order_by=["start_time DESC"]
             )
@@ -448,7 +470,7 @@ class DatabricksJobClient:
         """
         if cluster_config is None:
             cluster_config = {
-                "spark_version": "17.3.x-gpu-ml-scala2.12",
+                "spark_version": "17.3.x-gpu-ml-scala2.13",
                 "node_type_id": "g5.4xlarge",
                 "num_workers": 0,
                 "data_security_mode": "SINGLE_USER",
@@ -517,7 +539,7 @@ class DatabricksJobClient:
                 {
                     "cluster_id": cluster.cluster_id,
                     "cluster_name": cluster.cluster_name,
-                    "state": str(cluster.state),
+                    "state": self._clean_enum(cluster.state),
                     "node_type_id": cluster.node_type_id,
                     "num_workers": cluster.num_workers,
                 }

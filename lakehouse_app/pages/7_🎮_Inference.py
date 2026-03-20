@@ -9,17 +9,15 @@ from pathlib import Path
 from PIL import Image
 import io
 
-# Note: lakehouse_app is self-contained, no need for parent directory imports
 from utils.state_manager import StateManager
 from utils.databricks_client import DatabricksJobClient
 from components.image_viewer import ImageViewer
+from components.theme import inject_theme, page_header
 
-# Initialize state
+inject_theme()
 StateManager.initialize()
 
-# Page config
-st.title("🎮 Inference Playground")
-st.markdown("Test your models with interactive inference")
+page_header("Inference Playground", "Test deployed models interactively")
 
 # Check for selected model/endpoint
 selected_model = StateManager.get("inference_model")
@@ -227,7 +225,7 @@ else:
         if image_url:
             try:
                 st.markdown("#### Image from URL")
-                st.image(image_url, use_container_width=True)
+                st.image(image_url, use_column_width=True)
                 
                 if st.button("🚀 Run Inference on URL", type="primary"):
                     st.info("Inference would run on the image from URL")

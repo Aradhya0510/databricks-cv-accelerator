@@ -8,17 +8,15 @@ import sys
 from pathlib import Path
 from datetime import datetime
 
-# Note: lakehouse_app is self-contained, no need for parent directory imports
 from utils.state_manager import StateManager
 from utils.databricks_client import DatabricksJobClient
 from components.metrics_display import MetricsDisplay
+from components.theme import inject_theme, page_header
 
-# Initialize state
+inject_theme()
 StateManager.initialize()
 
-# Page config
-st.title("📦 Model Registration")
-st.markdown("Register trained models to Unity Catalog Model Registry")
+page_header("Model Registration", "Register models to Unity Catalog for versioning and deployment")
 
 # Initialize client
 client = DatabricksJobClient()
@@ -28,126 +26,162 @@ tab1, tab2 = st.tabs(["📝 Register Model", "📋 Registered Models"])
 
 with tab1:
     st.markdown("### Register a Trained Model")
-    
-    st.info("Register your trained model checkpoints to Unity Catalog for versioning and deployment")
-    
-    # Step 1: Select checkpoint
-    st.markdown("#### Step 1: Model Checkpoint")
-    
-    col1, col2 = st.columns([3, 1])
-    
-    with col1:
-        checkpoint_path = st.text_input(
-            "Checkpoint Path",
-            value="/Volumes/<catalog>/<schema>/<volume>/checkpoints/best_model.ckpt",
-            help="Path to the model checkpoint file"
-        )
-    
-    with col2:
-        if st.button("🔍 Browse", use_container_width=True):
-            st.info("File browser not yet implemented")
-    
-    config_path = st.text_input(
-        "Configuration Path",
-        value=StateManager.get("config_path", "/Volumes/<catalog>/<schema>/<volume>/configs/config.yaml"),
-        help="Path to the configuration used for training"
+
+    st.info(
+        "Select an MLflow run from your experiment — the model artifact and "
+        "checkpoint directory are discovered automatically."
     )
-    
-    # Step 2: Model naming
+
+    # ---- Step 1: Select source run from MLflow experiment ----
+    st.markdown("#### Step 1: Select Training Run")
+
+    config = StateManager.get_current_config() or {}
+    default_exp = config.get("mlflow", {}).get("experiment_name", "")
+    experiment_name = st.text_input(
+        "MLflow Experiment",
+        value=default_exp,
+        help="Experiment name from your training config (auto-filled from active config)",
+    )
+
+    available_runs = []
+    selected_run = None
+    if experiment_name:
+        with st.spinner("Loading runs..."):
+            available_runs = client.get_mlflow_runs(experiment_name, max_results=20)
+
+    if available_runs:
+        run_labels = []
+        for r in available_runs:
+            status = r.get("status", "?")
+            name = r.get("run_name", "unnamed")
+            ts = r.get("start_time")
+            ts_str = ts.strftime("%Y-%m-%d %H:%M") if ts else "—"
+            run_labels.append(f"{name}  |  {status}  |  {ts_str}  |  {r['run_id'][:12]}…")
+
+        choice = st.selectbox("Training Run", run_labels, index=0)
+        idx = run_labels.index(choice)
+        selected_run = available_runs[idx]
+
+        metrics = selected_run.get("metrics", {})
+        params = selected_run.get("params", {})
+        model_uri_from_run = params.get("logged_model_uri", "")
+        checkpoint_dir = params.get("checkpoint_dir", "")
+
+        m1, m2, m3 = st.columns(3)
+        with m1:
+            st.metric("Status", selected_run.get("status", "—"))
+        with m2:
+            primary = metrics.get("eval_map") or metrics.get("eval_accuracy")
+            if primary is not None:
+                st.metric("Primary Metric", f"{primary:.4f}")
+            else:
+                st.metric("Primary Metric", "—")
+        with m3:
+            st.metric("Eval Loss", f"{metrics['eval_loss']:.4f}" if "eval_loss" in metrics else "—")
+
+        if model_uri_from_run:
+            st.success(f"Model URI: `{model_uri_from_run}`")
+        if checkpoint_dir:
+            st.info(f"Checkpoint directory: `{checkpoint_dir}`")
+    elif experiment_name:
+        st.warning("No runs found in this experiment yet.")
+
+    # ---- Step 2: Model naming ----
     st.markdown("---")
     st.markdown("#### Step 2: Model Registration Details")
-    
+
     col1, col2, col3 = st.columns(3)
-    
     with col1:
         catalog = st.text_input("Catalog", value="main", help="Unity Catalog name")
-    
     with col2:
         schema = st.text_input("Schema", value="cv_models", help="Schema name")
-    
     with col3:
         model_name = st.text_input(
             "Model Name",
             value=f"cv_model_{datetime.now().strftime('%Y%m%d')}",
-            help="Name for the registered model"
+            help="Name for the registered model",
         )
-    
+
     full_model_name = f"{catalog}.{schema}.{model_name}"
-    st.info(f"📝 Full model name: `{full_model_name}`")
-    
-    # Step 3: Model metadata
+    st.info(f"Full model name: `{full_model_name}`")
+
+    # ---- Step 3: Metadata ----
     st.markdown("---")
     st.markdown("#### Step 3: Model Metadata")
-    
+
     description = st.text_area(
         "Description",
         value="",
         placeholder="Enter a description for this model...",
-        help="Describe the model, dataset, and any important details"
+        help="Describe the model, dataset, and any important details",
     )
-    
+
     col1, col2 = st.columns(2)
-    
     with col1:
         tags_input = st.text_input(
             "Tags (comma-separated)",
             value="cv,pytorch,hf_trainer",
-            help="Add tags for easy searching"
+            help="Add tags for easy searching",
         )
         tags = [tag.strip() for tag in tags_input.split(",") if tag.strip()]
-    
     with col2:
         stage = st.selectbox(
             "Initial Stage",
             options=["None", "Staging", "Production"],
-            help="Set the initial stage for this model version"
+            help="Set the initial stage for this model version",
         )
-    
-    # Step 4: Review and register
+
+    # ---- Optional overrides ----
+    with st.expander("Advanced: manual Model URI / Run ID override"):
+        model_uri_input = st.text_input(
+            "Model URI (overrides auto-discovery)",
+            value="",
+            help="Direct model URI, e.g. models:/abc123",
+        )
+        manual_run_id = st.text_input(
+            "MLflow Run ID (overrides selected run)",
+            value="",
+            help="Paste a run ID if you don't want to use the dropdown above",
+        )
+
+    # ---- Step 4: Register ----
     st.markdown("---")
     st.markdown("#### Step 4: Review and Register")
-    
-    with st.expander("📋 Registration Summary", expanded=True):
+
+    # Resolve effective values
+    eff_run_id = manual_run_id or (selected_run["run_id"] if selected_run else "")
+    eff_model_uri = model_uri_input or (
+        selected_run.get("params", {}).get("logged_model_uri", "") if selected_run else ""
+    )
+
+    with st.expander("Registration Summary", expanded=True):
         st.markdown(f"**Model Name:** `{full_model_name}`")
-        st.markdown(f"**Checkpoint:** `{checkpoint_path}`")
-        st.markdown(f"**Config:** `{config_path}`")
+        st.markdown(f"**Source Run:** `{eff_run_id[:16]}…`" if eff_run_id else "**Source Run:** —")
+        st.markdown(f"**Model URI:** `{eff_model_uri}`" if eff_model_uri else "**Model URI:** will resolve from run")
         st.markdown(f"**Description:** {description if description else 'None'}")
         st.markdown(f"**Tags:** {', '.join(tags)}")
-        st.markdown(f"**Stage:** {stage}")
-    
-    # MLflow model source
-    run_id = st.text_input(
-        "MLflow Run ID",
-        value="",
-        help="Run ID from training (HF Trainer logs model to MLflow automatically)"
-    )
-    model_uri_input = st.text_input(
-        "Model URI (optional, preferred over Run ID)",
-        value="",
-        help="Direct model URI from log_model, e.g. models:/abc123 — leave blank to auto-resolve from run",
-    )
 
     col1, col2 = st.columns([2, 1])
 
     with col1:
-        if st.button("📦 Register Model", type="primary", use_container_width=True):
-            if not run_id and not model_uri_input:
-                st.error("❌ Please provide an MLflow Run ID or Model URI")
+        if st.button("Register Model", type="primary", use_container_width=True):
+            if not eff_run_id and not eff_model_uri:
+                st.error("Select a training run or provide a Model URI / Run ID.")
             elif not full_model_name or "<" in full_model_name:
-                st.error("❌ Please provide a valid model name")
+                st.error("Please provide a valid catalog.schema.model_name.")
             else:
                 with st.spinner("Registering model to Unity Catalog..."):
                     try:
                         import mlflow
+                        mlflow.set_tracking_uri("databricks")
 
-                        if model_uri_input:
-                            model_uri = model_uri_input
+                        if eff_model_uri:
+                            model_uri = eff_model_uri
                         else:
-                            # Resolve model URI from run params (MLflow 3 path)
-                            _client = mlflow.MlflowClient()
-                            _run = _client.get_run(run_id)
+                            _client = mlflow.MlflowClient(tracking_uri="databricks")
+                            _run = _client.get_run(eff_run_id)
                             stored = _run.data.params.get("logged_model_uri")
-                            model_uri = stored if stored else f"runs:/{run_id}/model"
+                            model_uri = stored if stored else f"runs:/{eff_run_id}/model"
 
                         mv = mlflow.register_model(model_uri, full_model_name)
                         version = mv.version
@@ -164,32 +198,30 @@ with tab1:
                         StateManager.add_registered_model({
                             "name": full_model_name,
                             "version": str(version),
-                            "run_id": run_id,
-                            "config_path": config_path,
+                            "run_id": eff_run_id,
+                            "model_uri": model_uri,
                             "description": description,
                             "tags": tags,
                             "stage": stage,
-                            "creation_timestamp": datetime.now().isoformat()
+                            "creation_timestamp": datetime.now().isoformat(),
                         })
 
-                        st.success(f"✅ Registered **{full_model_name}** version {version}")
-                        st.info("💡 You can now deploy this model from the Deployment page")
+                        st.success(f"Registered **{full_model_name}** version {version}")
+                        st.info("You can now deploy this model from the Deployment page")
                     except Exception as e:
-                        st.error(f"❌ Error registering model: {e}")
-                        st.info("Tracking locally — you can retry registration later")
+                        st.error(f"Error registering model: {e}")
                         StateManager.add_registered_model({
                             "name": full_model_name,
                             "version": "pending",
-                            "run_id": run_id,
-                            "config_path": config_path,
+                            "run_id": eff_run_id,
                             "description": description,
                             "tags": tags,
                             "stage": stage,
-                            "creation_timestamp": datetime.now().isoformat()
+                            "creation_timestamp": datetime.now().isoformat(),
                         })
-    
+
     with col2:
-        if st.button("💾 Save as Draft", use_container_width=True):
+        if st.button("Save as Draft", use_container_width=True):
             st.info("Draft saved locally")
 
 with tab2:

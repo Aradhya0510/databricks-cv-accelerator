@@ -93,7 +93,7 @@ Make sure you have:
 
 3. **Configure the job:**
    - **Job Name:** `my_first_cv_training`
-   - **Source Path:** `/Workspace/Repos/<username>/Databricks_CV_ref/src`
+   - **Source Path:** `/Workspace/Repos/<username>/databricks-cv-accelerator/src`
    - ⚠️ Replace `<username>` with your actual username!
 
 4. **Select compute:**
@@ -136,18 +136,22 @@ Make sure you have:
 
 1. **Navigate to** **📦 Model Registration**
 
-2. **Fill in model details:**
-   - **Checkpoint Path:** `/Volumes/main/cv_models/cv_data/checkpoints/detection/best_model.ckpt`
+2. **Select a training run:**
+   - The experiment name is auto-filled from your config
+   - Select the completed training run from the dropdown
+   - The model URI and checkpoint directory are discovered automatically
+
+3. **Fill in registration details:**
    - **Catalog:** main
    - **Schema:** cv_models
    - **Model Name:** `my_first_detection_model`
    - **Description:** "My first object detection model trained on COCO"
    - **Tags:** `detection,detr,coco`
 
-3. **Register:**
-   - Click "📦 Register Model"
+4. **Register:**
+   - Click "Register Model"
    - Wait for registration to complete
-   - Success! Your model is now in Unity Catalog 🎉
+   - Success! Your model is now in Unity Catalog
 
 ### Step 6: Deploy Your Model (Optional, 3 minutes)
 

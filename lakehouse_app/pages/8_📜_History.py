@@ -9,16 +9,14 @@ from pathlib import Path
 from datetime import datetime
 import pandas as pd
 
-# Note: lakehouse_app is self-contained, no need for parent directory imports
 from utils.state_manager import StateManager
 from components.visualizations import VisualizationHelper
+from components.theme import inject_theme, page_header
 
-# Initialize state
+inject_theme()
 StateManager.initialize()
 
-# Page config
-st.title("📜 History & Management")
-st.markdown("Track and manage your ML pipeline activities")
+page_header("History & Management", "Track and manage your ML pipeline activities")
 
 # Tabs
 tab1, tab2, tab3, tab4 = st.tabs(["🔄 Activity Log", "📊 Analytics", "⚙️ Settings", "🗂️ Export/Import"])

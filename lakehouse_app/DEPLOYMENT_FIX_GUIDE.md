@@ -19,7 +19,7 @@ The `lakehouse_app` is now fully self-contained and ready for deployment.
 In your Databricks workspace terminal:
 
 ```bash
-cd /Workspace/Users/<your.email@databricks.com>/Databricks_CV_ref
+cd /Workspace/Users/<your.email@databricks.com>/databricks-cv-accelerator
 ```
 
 ### Step 2: (Optional) Stop/Delete Existing App
@@ -74,7 +74,7 @@ Once deployed successfully, you can access the app through:
 Before deploying to Databricks, test the app locally:
 
 ```bash
-cd /Workspace/Users/<your.email@databricks.com>/Databricks_CV_ref/lakehouse_app
+cd /Workspace/Users/<your.email@databricks.com>/databricks-cv-accelerator/lakehouse_app
 streamlit run app.py
 ```
 
@@ -85,7 +85,7 @@ If this works without errors, the deployment should also work.
 Verify all imports work correctly:
 
 ```bash
-cd /Workspace/Users/<your.email@databricks.com>/Databricks_CV_ref/lakehouse_app
+cd /Workspace/Users/<your.email@databricks.com>/databricks-cv-accelerator/lakehouse_app
 python -c "from utils.config_generator import ConfigGenerator; print('Import successful!')"
 python -c "from utils.state_manager import StateManager; print('Import successful!')"
 python -c "from components.config_forms import ConfigFormBuilder; print('Import successful!')"

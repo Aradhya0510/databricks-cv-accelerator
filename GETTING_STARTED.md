@@ -196,7 +196,7 @@ Open `notebooks/02_model_training.py` in Databricks. Update the config path and 
 
 1. Go to **Workflows > Create Job**
 2. Set task type to **Python script**, path to `jobs/train.py`
-3. Parameters: `--config_path /Workspace/Users/you/Databricks_CV_ref/configs/my_config.yaml`
+3. Parameters: `--config_path /Workspace/Users/you/databricks-cv-accelerator/configs/my_config.yaml`
 4. Select a GPU cluster (e.g. `g5.12xlarge` with 4x A10G)
 5. Run
 
