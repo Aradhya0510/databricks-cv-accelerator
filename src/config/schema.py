@@ -10,7 +10,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple, Union
 
 import yaml
-from pydantic import BaseModel, field_validator, model_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 
 # ---------------------------------------------------------------------------
@@ -141,7 +141,7 @@ class MLflowConfig(BaseModel):
     experiment_name: str = "cv_training"
     run_name: str = "default_run"
     log_model: Union[bool, str] = True
-    tags: Dict[str, str] = {}
+    tags: Dict[str, str] = Field(default_factory=dict)
 
     model_config = {"extra": "allow"}
 

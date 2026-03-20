@@ -60,7 +60,7 @@ class DatabricksJobClient:
         else:
             if cluster_config is None:
                 cluster_config = {
-                    "spark_version": "17.3.x-gpu-ml-scala2.12",
+                    "spark_version": "17.3.x-gpu-ml-scala2.13",
                     "node_type_id": "g5.4xlarge",
                     "num_workers": 0,
                     "data_security_mode": "SINGLE_USER",
@@ -448,7 +448,7 @@ class DatabricksJobClient:
         """
         if cluster_config is None:
             cluster_config = {
-                "spark_version": "17.3.x-gpu-ml-scala2.12",
+                "spark_version": "17.3.x-gpu-ml-scala2.13",
                 "node_type_id": "g5.4xlarge",
                 "num_workers": 0,
                 "data_security_mode": "SINGLE_USER",

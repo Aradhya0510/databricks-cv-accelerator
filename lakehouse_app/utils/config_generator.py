@@ -30,12 +30,12 @@ class ConfigGenerator:
     }
 
     DEFAULT_IMAGE_SIZES = {
+        "detr": 800,
+        "yolos": 512,
         "resnet": 224,
         "vit": 224,
         "convnext": 224,
         "swin": 224,
-        "detr": 800,
-        "yolos": 512,
     }
     
     # Default hyperparameters by model size
@@ -47,25 +47,35 @@ class ConfigGenerator:
     
     @classmethod
     def get_models_for_task(cls, task: str) -> List[Dict[str, str]]:
-        """Get available models for a specific task."""
-        return cls.TASK_MODELS.get(task, [])
-    
+        """Get available models for a specific task (returns a copy)."""
+        return [dict(m) for m in cls.TASK_MODELS.get(task, [])]
+
     @classmethod
     def get_model_info(cls, model_name: str) -> Optional[Dict[str, str]]:
-        """Get information about a specific model."""
+        """Get information about a specific model (returns a copy)."""
         for task_models in cls.TASK_MODELS.values():
             for model in task_models:
                 if model["name"] == model_name:
-                    return model
+                    return dict(model)
         return None
     
     @classmethod
     def get_default_image_size(cls, model_name: str) -> int:
-        """Get default image size for a model."""
-        for model_family, size in cls.DEFAULT_IMAGE_SIZES.items():
-            if model_family in model_name.lower():
+        """Get default image size for a model.
+
+        Matches against the architecture portion of the HuggingFace model ID
+        (after the last '/') using a starts-with check, so 'detr-resnet-50'
+        matches 'detr' rather than 'resnet'.  Falls back to substring search
+        if no prefix match is found.
+        """
+        arch = model_name.rsplit("/", 1)[-1].lower()
+        for family, size in cls.DEFAULT_IMAGE_SIZES.items():
+            if arch.startswith(family):
                 return size
-        return 512  # Default fallback
+        for family, size in cls.DEFAULT_IMAGE_SIZES.items():
+            if family in arch:
+                return size
+        return 512
     
     @classmethod
     def get_default_batch_size(cls, model_name: str) -> int:

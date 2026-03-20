@@ -225,7 +225,7 @@ else:
         if image_url:
             try:
                 st.markdown("#### Image from URL")
-                st.image(image_url, use_container_width=True)
+                st.image(image_url, use_column_width=True)
                 
                 if st.button("🚀 Run Inference on URL", type="primary"):
                     st.info("Inference would run on the image from URL")

@@ -46,9 +46,15 @@ class StateManager:
     }
     
     @classmethod
+    def _fresh_defaults(cls) -> dict:
+        """Return a deep copy of DEFAULT_STATE so mutable values are never shared."""
+        import copy
+        return copy.deepcopy(cls.DEFAULT_STATE)
+
+    @classmethod
     def initialize(cls):
         """Initialize session state with default values."""
-        for key, value in cls.DEFAULT_STATE.items():
+        for key, value in cls._fresh_defaults().items():
             if key not in st.session_state:
                 st.session_state[key] = value
     
@@ -292,7 +298,7 @@ class StateManager:
     @classmethod
     def reset_state(cls):
         """Reset all state to defaults."""
-        for key, value in cls.DEFAULT_STATE.items():
+        for key, value in cls._fresh_defaults().items():
             st.session_state[key] = value
     
     @classmethod

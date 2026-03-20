@@ -117,7 +117,7 @@ with tab_launch:
                             f.write(cfg_bytes)
 
                     cluster_config = {
-                        "spark_version": "17.3.x-gpu-ml-scala2.12",
+                        "spark_version": "17.3.x-gpu-ml-scala2.13",
                         "node_type_id": node_type_id,
                         "num_workers": num_workers,
                         "data_security_mode": "SINGLE_USER",

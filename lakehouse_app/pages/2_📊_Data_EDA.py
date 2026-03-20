@@ -164,7 +164,7 @@ with tab_annotated:
                             cols = st.columns(cols_per_row)
                             for idx, (im, cap) in enumerate(zip(img_row, cap_row)):
                                 with cols[idx]:
-                                    st.image(im, caption=cap, use_container_width=True)
+                                    st.image(im, caption=cap, use_column_width=True)
                     else:
                         st.warning("Could not download any images")
 
