@@ -8,10 +8,9 @@ from datetime import datetime
 
 from utils.state_manager import StateManager
 from utils.databricks_client import DatabricksJobClient
-from components.theme import inject_theme, page_header, metric_card, section_title, status_pill
+from components.theme import inject_theme, page_header, metric_card, section_title, status_badge
 from components.visualizations import VisualizationHelper
 from components.metrics_display import MetricsDisplay
-from components.image_viewer import ImageViewer
 
 inject_theme()
 StateManager.initialize()
@@ -21,12 +20,11 @@ page_header("Evaluation", "Inspect metrics, view predictions on images, and comp
 client = DatabricksJobClient()
 config = StateManager.get_current_config()
 
-# ---------------------------------------------------------------------------
 tab_dash, tab_preds, tab_compare, tab_reports = st.tabs(
     ["Metrics Dashboard", "Prediction Viewer", "Model Comparison", "Reports"]
 )
 
-# =========================== TAB 1 — Metrics Dashboard =====================
+# ========================= TAB 1 — Metrics Dashboard ========================
 with tab_dash:
     default_exp = (config or {}).get("mlflow", {}).get("experiment_name", "")
 
@@ -52,24 +50,23 @@ with tab_dash:
             metrics = run.get("metrics", {})
             task = run.get("params", {}).get("task", config.get("model", {}).get("task_type", "detection") if config else "detection")
 
-            # Key metrics banner
             if task == "detection":
                 keys = ["eval_map", "eval_map_50", "eval_map_75", "eval_loss"]
             elif task == "classification":
                 keys = ["eval_accuracy", "eval_f1", "eval_precision", "eval_loss"]
+            elif task == "segmentation":
+                keys = ["eval_miou", "eval_pixel_accuracy", "eval_loss"]
             else:
                 keys = ["eval_loss"]
 
             available = [k for k in keys if k in metrics]
             if available:
-                cols = st.columns(len(available))
+                cols = st.columns(min(len(available), 3))
                 for i, k in enumerate(available):
-                    with cols[i]:
+                    with cols[i % len(cols)]:
                         metric_card(k.replace("eval_", "").replace("_", " ").title(), f"{metrics[k]:.4f}")
 
             st.markdown("")
-
-            # Metric history charts
             section_title("Metric Curves")
             all_metric_keys = sorted(metrics.keys())
             chosen = st.multiselect("Metrics to plot", all_metric_keys, default=available[:4], key="eval_chart_sel")
@@ -81,12 +78,10 @@ with tab_dash:
                         history = client.get_run_metrics_history(run["run_id"], mk)
                         if history:
                             fig = VisualizationHelper.training_metrics_chart(history, mk, title=mk.replace("_", " ").title())
-                            fig.update_layout(template="plotly_dark", paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)")
                             st.plotly_chart(fig, use_container_width=True)
                         else:
                             st.info(f"No history for {mk}")
 
-            # Per-class metrics
             per_class = {k: v for k, v in metrics.items() if "class_" in k}
             if per_class:
                 section_title("Per-Class Performance")
@@ -94,16 +89,19 @@ with tab_dash:
 
                 names = [k.split("_")[-1] for k in sorted(per_class.keys())]
                 vals = [per_class[k] for k in sorted(per_class.keys())]
-                fig = go.Figure(go.Bar(x=names, y=vals, marker_color="#6C63FF"))
+                fig = go.Figure(go.Bar(x=names, y=vals, marker_color="#00C2A8"))
                 fig.update_layout(
                     title="Per-Class Metric",
                     template="plotly_dark",
                     paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)",
+                    font=dict(family="Figtree, sans-serif", color="#8A91A8"),
+                    title_font=dict(family="Syne, sans-serif", color="#EDF0F7"),
                     xaxis_tickangle=-45,
+                    xaxis=dict(gridcolor="rgba(255,255,255,0.04)"),
+                    yaxis=dict(gridcolor="rgba(255,255,255,0.04)"),
                 )
                 st.plotly_chart(fig, use_container_width=True)
 
-            # Params
             with st.expander("Run Parameters"):
                 import pandas as pd
 
@@ -113,15 +111,13 @@ with tab_dash:
                         pd.DataFrame([{"Parameter": k, "Value": v} for k, v in sorted(params.items())]),
                         use_container_width=True, hide_index=True,
                     )
-
     else:
         st.info("Enter an experiment name and click **Load Runs**.")
 
 
-# =========================== TAB 2 — Prediction Viewer =====================
+# ========================= TAB 2 — Prediction Viewer =======================
 with tab_preds:
     section_title("Predicted Annotations on Images")
-
     st.info("Load evaluation results from `jobs/evaluate.py` to see predictions overlaid on images.")
 
     results_dir = (config or {}).get("output", {}).get("results_dir", "/tmp/results")
@@ -139,9 +135,9 @@ with tab_preds:
                            "eval_accuracy", "eval_f1", "eval_precision", "eval_recall"]
             found = [k for k in key_display if k in eval_metrics]
             if found:
-                cols = st.columns(min(len(found), 4))
+                cols = st.columns(min(len(found), 3))
                 for i, k in enumerate(found):
-                    with cols[i % 4]:
+                    with cols[i % len(cols)]:
                         metric_card(k.replace("eval_", "").replace("_", " ").title(), f"{eval_metrics[k]:.4f}")
 
             per_class = {k: v for k, v in eval_metrics.items() if "map_class_" in k}
@@ -149,11 +145,15 @@ with tab_preds:
                 import plotly.graph_objects as go
                 names = [k.split("_")[-1] for k in sorted(per_class.keys())]
                 vals = [per_class[k] for k in sorted(per_class.keys())]
-                fig = go.Figure(go.Bar(x=names, y=vals, marker_color="#6C63FF"))
+                fig = go.Figure(go.Bar(x=names, y=vals, marker_color="#00C2A8"))
                 fig.update_layout(
                     title="Per-Class Average Precision",
                     template="plotly_dark",
                     paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)",
+                    font=dict(family="Figtree, sans-serif", color="#8A91A8"),
+                    title_font=dict(family="Syne, sans-serif", color="#EDF0F7"),
+                    xaxis=dict(gridcolor="rgba(255,255,255,0.04)"),
+                    yaxis=dict(gridcolor="rgba(255,255,255,0.04)"),
                 )
                 st.plotly_chart(fig, use_container_width=True)
         else:
@@ -162,7 +162,7 @@ with tab_preds:
         if error_data:
             section_title("Error Analysis")
             summary = error_data.get("summary", {})
-            c1, c2, c3, c4 = st.columns(4)
+            c1, c2, c3 = st.columns(3)
             with c1:
                 metric_card("True Positives", str(summary.get("true_positives", 0)))
             with c2:
@@ -172,14 +172,8 @@ with tab_preds:
                 metric_card("False Positives", str(fp))
             with c3:
                 metric_card("False Negatives", str(summary.get("false_negatives", 0)))
-            with c4:
-                total = summary.get("true_positives", 0) + fp + summary.get("false_negatives", 0)
-                prec = summary.get("true_positives", 0) / (summary.get("true_positives", 0) + fp) if (summary.get("true_positives", 0) + fp) > 0 else 0
-                metric_card("Precision", f"{prec:.2%}")
 
-            # FP breakdown
             import plotly.graph_objects as go
-
             fp_bg = summary.get("false_positives_background", 0)
             fp_conf = summary.get("false_positives_confusion", 0)
             fp_loc = summary.get("false_positives_localisation", 0)
@@ -187,19 +181,21 @@ with tab_preds:
                 fig = go.Figure(go.Pie(
                     labels=["Background", "Confusion", "Localisation"],
                     values=[fp_bg, fp_conf, fp_loc],
-                    marker_colors=["#FF6B6B", "#FFAA00", "#6C63FF"],
+                    marker_colors=["#F25C5C", "#F4A742", "#5B8AF5"],
                     hole=0.4,
                 ))
                 fig.update_layout(
                     title="False Positive Breakdown",
                     template="plotly_dark",
                     paper_bgcolor="rgba(0,0,0,0)",
+                    font=dict(family="Figtree, sans-serif", color="#8A91A8"),
+                    title_font=dict(family="Syne, sans-serif", color="#EDF0F7"),
                 )
                 st.plotly_chart(fig, use_container_width=True)
 
         if bench_data:
             section_title("Benchmark")
-            c1, c2, c3, c4 = st.columns(4)
+            c1, c2, c3 = st.columns(3)
             with c1:
                 metric_card("FPS", f"{bench_data.get('fps', 0):.1f}")
             with c2:
@@ -207,12 +203,9 @@ with tab_preds:
                 metric_card("P50 Latency", f"{lat.get('p50', 0):.0f} ms")
             with c3:
                 metric_card("P95 Latency", f"{lat.get('p95', 0):.0f} ms")
-            with c4:
-                mem = bench_data.get("gpu_memory_mb", 0)
-                metric_card("GPU Memory", f"{mem:.0f} MB" if mem else "—")
 
 
-# =========================== TAB 3 — Model Comparison ======================
+# ========================= TAB 3 — Model Comparison ========================
 with tab_compare:
     section_title("Compare Runs Side-by-Side")
 
@@ -239,11 +232,10 @@ with tab_compare:
                     st.markdown("")
                     for m in met_sel:
                         fig = VisualizationHelper.model_comparison_chart(selected, m)
-                        fig.update_layout(template="plotly_dark", paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)")
                         st.plotly_chart(fig, use_container_width=True)
 
 
-# =========================== TAB 4 — Reports ===============================
+# ========================= TAB 4 — Reports =================================
 with tab_reports:
     section_title("Generate Report")
 
@@ -278,8 +270,7 @@ with tab_reports:
 
         if report_format == "JSON":
             content = _json.dumps(report, indent=2, default=str)
-            mime = "application/json"
-            ext = "json"
+            mime, ext = "application/json", "json"
         else:
             lines = [f"# Evaluation Report — {report_type}", f"Generated: {report['generated_at']}", ""]
             for r in report.get("runs", []):
@@ -288,20 +279,19 @@ with tab_reports:
                     lines.append(f"- **{k}:** {v:.4f}" if isinstance(v, float) else f"- **{k}:** {v}")
                 lines.append("")
             content = "\n".join(lines)
-            mime = "text/markdown"
-            ext = "md"
+            mime, ext = "text/markdown", "md"
 
         st.success("Report generated")
         st.download_button("Download Report", data=content, file_name=f"report_{datetime.now():%Y%m%d_%H%M%S}.{ext}", mime=mime)
 
 
-# =========================== Sidebar ========================================
+# ========================= Sidebar ==========================================
 with st.sidebar:
     st.markdown("### Evaluation")
     if config:
         t = config.get("model", {}).get("task_type", "—")
         st.markdown(f"**Task:** {t.replace('_', ' ').title()}")
-        key_m = {"detection": "mAP, mAP@50, mAP@75", "classification": "Accuracy, F1, Precision"}
+        key_m = {"detection": "mAP, mAP@50, mAP@75", "classification": "Accuracy, F1, Precision", "segmentation": "mIoU, Pixel Acc"}
         st.markdown(f"**Metrics:** {key_m.get(t, 'Loss')}")
     st.divider()
     if st.button("Train New Model", use_container_width=True):

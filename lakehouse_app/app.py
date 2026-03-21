@@ -12,70 +12,60 @@ st.set_page_config(
     initial_sidebar_state="expanded",
 )
 
-from components.theme import inject_theme, metric_card, status_pill
+from components.theme import inject_theme, metric_card, status_badge, section_title
 from utils.state_manager import StateManager
 
 inject_theme()
 StateManager.initialize()
 
 
-def _quick_stat(label, value, icon=""):
-    return (
-        f'<div class="glass-card" style="text-align:center;padding:1.2rem;">'
-        f'<div style="font-size:1.3rem;margin-bottom:0.3rem;">{icon}</div>'
-        f'<div style="font-size:1.6rem;font-weight:700;color:#fff;">{value}</div>'
-        f'<div style="font-size:0.78rem;color:#8B949E;text-transform:uppercase;'
-        f'letter-spacing:0.04em;margin-top:0.2rem;">{label}</div>'
-        f'</div>'
-    )
-
-
 def main():
-    # Hero banner
     st.markdown(
         '<div class="hero-banner">'
         "<h1>Computer Vision Pipeline</h1>"
-        "<p>End-to-end training, evaluation, and deployment for object detection "
-        "and image classification on Databricks</p>"
+        "<p>End-to-end training, evaluation, and deployment for object detection, "
+        "image classification, and segmentation on Databricks</p>"
         "</div>",
         unsafe_allow_html=True,
     )
 
-    # Quick-stats row
     config = StateManager.get_current_config()
     training_history = StateManager.get("training_history", [])
     endpoints = StateManager.get("endpoints", [])
     active_run = StateManager.get_active_training_run()
 
-    c1, c2, c3, c4 = st.columns(4)
+    # Three metric cards — always at the top
+    c1, c2, c3 = st.columns(3)
     with c1:
-        task = config.get("model", {}).get("task_type", "—").replace("_", " ").title() if config else "—"
-        st.markdown(_quick_stat("Active Task", task, ""), unsafe_allow_html=True)
+        task = (
+            config.get("model", {}).get("task_type", "—").replace("_", " ").title()
+            if config
+            else "—"
+        )
+        metric_card("Active Task", task)
     with c2:
-        model = config.get("model", {}).get("model_name", "—").split("/")[-1] if config else "—"
-        st.markdown(_quick_stat("Model", model, ""), unsafe_allow_html=True)
+        model = (
+            config.get("model", {}).get("model_name", "—").split("/")[-1]
+            if config
+            else "—"
+        )
+        metric_card("Model", model)
     with c3:
-        st.markdown(
-            _quick_stat("Training Runs", str(len(training_history)), ""),
-            unsafe_allow_html=True,
-        )
-    with c4:
-        st.markdown(
-            _quick_stat("Endpoints", str(len(endpoints)), ""),
-            unsafe_allow_html=True,
-        )
+        metric_card("Training Runs", str(len(training_history)))
 
     st.markdown("")
 
     # Live training indicator
     if active_run:
         st.markdown(
-            f'<div class="glass-card" style="display:flex;align-items:center;gap:1rem;">'
-            f'<div style="width:10px;height:10px;border-radius:50%;background:#FFAA00;'
+            f'<div class="surface-card" style="display:flex;align-items:center;gap:12px;">'
+            f'<div style="width:8px;height:8px;border-radius:50%;background:#F4A742;'
             f'animation:pulse 1.5s infinite;"></div>'
-            f'<div><strong style="color:#E6EDF3;">Training in progress</strong>'
-            f'<span style="color:#8B949E;margin-left:0.5rem;">Run ID: {str(active_run)[:12]}...</span></div>'
-            f'<style>@keyframes pulse{{0%,100%{{opacity:1}}50%{{opacity:.3}}}}</style>'
+            f'<div>'
+            f'<span style="font-family:Syne,sans-serif;font-weight:600;color:#EDF0F7;">Training in progress</span>'
+            f'<span style="font-family:IBM Plex Mono,monospace;font-size:11px;color:#4E566A;'
+            f'margin-left:8px;">Run {str(active_run)[:12]}…</span>'
+            f'</div>'
             f'</div>',
             unsafe_allow_html=True,
         )
@@ -83,22 +73,21 @@ def main():
 
     # Navigation cards
     nav_items = [
-        ("", "Config Setup", "Build YAML configs with an interactive form. Select models, data paths, and hyperparameters.", "pages/1_⚙️_Config_Setup.py"),
-        ("", "Data Explorer", "Visualize images with annotations overlaid, analyze class distributions, and spot data issues.", "pages/2_📊_Data_EDA.py"),
-        ("", "Training", "Launch jobs, monitor loss curves and epoch progress live from MLflow.", "pages/3_🚀_Training.py"),
-        ("", "Evaluation", "Inspect metrics, view predictions on images, and compare model runs.", "pages/4_📈_Evaluation.py"),
-        ("", "Registration", "Register models to Unity Catalog with versioning and lineage.", "pages/5_📦_Model_Registration.py"),
-        ("", "Deployment", "Deploy to Model Serving, view endpoint URLs and health status.", "pages/6_🌐_Deployment.py"),
-        ("", "Inference", "Test deployed models interactively with image uploads.", "pages/7_🎮_Inference.py"),
-        ("", "Monitoring", "Track endpoint health, request metrics, and prediction drift.", "pages/9_📡_Monitoring.py"),
+        ("Config Setup", "Build YAML configs with an interactive form. Select models, data paths, and hyperparameters.", "pages/1_⚙️_Config_Setup.py"),
+        ("Data Explorer", "Visualize images with annotations overlaid, analyze class distributions, and spot data issues.", "pages/2_📊_Data_EDA.py"),
+        ("Training", "Launch jobs, monitor loss curves and epoch progress live from MLflow.", "pages/3_🚀_Training.py"),
+        ("Evaluation", "Inspect metrics, view predictions on images, and compare model runs.", "pages/4_📈_Evaluation.py"),
+        ("Registration", "Register models to Unity Catalog with versioning and lineage.", "pages/5_📦_Model_Registration.py"),
+        ("Deployment", "Deploy to Model Serving, view endpoint URLs and health status.", "pages/6_🌐_Deployment.py"),
+        ("Inference", "Test deployed models interactively with image uploads.", "pages/7_🎮_Inference.py"),
+        ("Monitoring", "Track endpoint health, request metrics, and prediction drift.", "pages/9_📡_Monitoring.py"),
     ]
 
     cols = st.columns(4)
-    for idx, (icon, title, desc, page) in enumerate(nav_items):
+    for idx, (title, desc, page) in enumerate(nav_items):
         with cols[idx % 4]:
             st.markdown(
                 f'<div class="nav-card">'
-                f'<div class="nav-icon">{icon}</div>'
                 f"<h3>{title}</h3>"
                 f"<p>{desc}</p>"
                 f"</div>",
@@ -109,34 +98,41 @@ def main():
 
     # Supported tasks
     st.markdown("")
-    st.markdown(
-        '<div class="section-title">Supported Tasks</div>',
-        unsafe_allow_html=True,
-    )
-    c1, c2 = st.columns(2)
+    section_title("Supported Tasks")
+    c1, c2, c3 = st.columns(3)
     with c1:
         st.markdown(
-            '<div class="glass-card">'
-            '<strong style="color:#E6EDF3;">Object Detection</strong>'
-            '<p style="color:#8B949E;font-size:0.88rem;margin:0.4rem 0 0 0;">'
-            "DETR, YOLOS &mdash; COCO-format annotations, mAP evaluation</p>"
+            '<div class="raised-card">'
+            f'<strong style="color:#EDF0F7;font-family:Syne,sans-serif;font-size:14px;">Object Detection</strong>'
+            f'<p style="color:#8A91A8;font-size:12px;font-family:Figtree,sans-serif;margin:6px 0 0 0;line-height:1.6;">'
+            "DETR, YOLOS, Conditional DETR, RT-DETR, DETA — COCO-format, mAP evaluation</p>"
             "</div>",
             unsafe_allow_html=True,
         )
     with c2:
         st.markdown(
-            '<div class="glass-card">'
-            '<strong style="color:#E6EDF3;">Image Classification</strong>'
-            '<p style="color:#8B949E;font-size:0.88rem;margin:0.4rem 0 0 0;">'
-            "ViT, ResNet, any AutoModelForImageClassification &mdash; ImageFolder layout</p>"
+            '<div class="raised-card">'
+            f'<strong style="color:#EDF0F7;font-family:Syne,sans-serif;font-size:14px;">Image Classification</strong>'
+            f'<p style="color:#8A91A8;font-size:12px;font-family:Figtree,sans-serif;margin:6px 0 0 0;line-height:1.6;">'
+            "ViT, ResNet, ConvNeXT, Swin — ImageFolder layout, accuracy/F1 metrics</p>"
+            "</div>",
+            unsafe_allow_html=True,
+        )
+    with c3:
+        st.markdown(
+            '<div class="raised-card">'
+            f'<strong style="color:#EDF0F7;font-family:Syne,sans-serif;font-size:14px;">Image Segmentation</strong>'
+            f'<p style="color:#8A91A8;font-size:12px;font-family:Figtree,sans-serif;margin:6px 0 0 0;line-height:1.6;">'
+            "SegFormer, Mask2Former — COCO instances/panoptic or ADE20K, mIoU metrics</p>"
             "</div>",
             unsafe_allow_html=True,
         )
 
     # Footer
     st.markdown(
-        '<div style="text-align:center;color:#8B949E;padding:2rem 0 1rem 0;font-size:0.82rem;">'
-        "Built on Databricks Lakehouse &bull; HuggingFace Trainer &bull; MLflow 3"
+        f'<div style="text-align:center;color:#4E566A;padding:32px 0 16px 0;'
+        f'font-family:IBM Plex Mono,monospace;font-size:11px;letter-spacing:0.05em;">'
+        "BUILT ON DATABRICKS LAKEHOUSE &bull; HUGGINGFACE TRAINER &bull; MLFLOW 3"
         "</div>",
         unsafe_allow_html=True,
     )

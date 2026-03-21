@@ -26,12 +26,25 @@ class ConfigGenerator:
             {"name": "hustvl/yolos-tiny", "display": "YOLOS-Tiny (HUST-VL)", "size": "Small"},
             {"name": "hustvl/yolos-small", "display": "YOLOS-Small (HUST-VL)", "size": "Medium"},
             {"name": "hustvl/yolos-base", "display": "YOLOS-Base (HUST-VL)", "size": "Large"},
+            {"name": "PekingU/rtdetr_r50vd", "display": "RT-DETR R50 (PekingU)", "size": "Medium"},
+            {"name": "microsoft/conditional-detr-resnet-50", "display": "Conditional DETR R50 (Microsoft)", "size": "Medium"},
+            {"name": "jozhang97/deta-swin-large", "display": "DETA Swin-Large", "size": "Large"},
+        ],
+        "segmentation": [
+            {"name": "nvidia/segformer-b3-finetuned-ade-512-512", "display": "SegFormer-B3 (ADE20K)", "size": "Medium"},
+            {"name": "facebook/mask2former-swin-base-coco-instance", "display": "Mask2Former Swin-B (COCO Instance)", "size": "Large"},
+            {"name": "facebook/mask2former-swin-base-coco-panoptic", "display": "Mask2Former Swin-B (COCO Panoptic)", "size": "Large"},
         ],
     }
 
     DEFAULT_IMAGE_SIZES = {
         "detr": 800,
+        "conditional-detr": 800,
+        "deta": 800,
+        "rtdetr": 640,
         "yolos": 512,
+        "segformer": 512,
+        "mask2former": 512,
         "resnet": 224,
         "vit": 224,
         "convnext": 224,
@@ -146,7 +159,7 @@ class ConfigGenerator:
                 "dropout": model_specific_config.get("dropout", 0.2) if model_specific_config else 0.2,
                 "mixup_alpha": model_specific_config.get("mixup_alpha", 0.2) if model_specific_config else 0.2,
             })
-        elif task in ["semantic_segmentation", "instance_segmentation", "universal_segmentation"]:
+        elif task == "segmentation":
             model_config.update({
                 "aux_loss_weight": model_specific_config.get("aux_loss_weight", 0.4) if model_specific_config else 0.4,
                 "mask_threshold": model_specific_config.get("mask_threshold", 0.5) if model_specific_config else 0.5,
@@ -164,7 +177,7 @@ class ConfigGenerator:
         }
         
         # Add data paths
-        if task in ["detection", "instance_segmentation", "universal_segmentation"]:
+        if task in ["detection", "segmentation"]:
             data_dict.update({
                 "train_data_path": data_config.get("train_data_path", ""),
                 "train_annotation_file": data_config.get("train_annotation_file", ""),
@@ -202,9 +215,7 @@ class ConfigGenerator:
         monitor_metrics = {
             "classification": ("val_loss", "min"),
             "detection": ("val_map", "max"),
-            "semantic_segmentation": ("val_miou", "max"),
-            "instance_segmentation": ("val_map", "max"),
-            "universal_segmentation": ("val_miou", "max"),
+            "segmentation": ("val_miou", "max"),
         }
         monitor_metric, monitor_mode = monitor_metrics.get(task, ("val_loss", "min"))
         

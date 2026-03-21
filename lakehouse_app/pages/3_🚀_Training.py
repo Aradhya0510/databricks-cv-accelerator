@@ -12,7 +12,7 @@ import yaml
 from utils.state_manager import StateManager
 from utils.databricks_client import DatabricksJobClient
 from utils.config_generator import ConfigGenerator
-from components.theme import inject_theme, page_header, metric_card, section_title, status_pill
+from components.theme import inject_theme, page_header, metric_card, section_title, status_badge
 from components.visualizations import VisualizationHelper
 
 inject_theme()
@@ -34,25 +34,20 @@ model_name = config.get("model", {}).get("model_name", "N/A")
 epochs = config.get("training", {}).get("max_epochs", "N/A")
 batch_size = config.get("data", {}).get("batch_size", "N/A")
 
-# ---------------------------------------------------------------------------
-# Tabs
-# ---------------------------------------------------------------------------
 tab_launch, tab_monitor, tab_history = st.tabs(["Launch", "Live Dashboard", "History"])
 
 
-# =========================== TAB 1 — Launch ================================
+# ========================= TAB 1 — Launch ===================================
 with tab_launch:
     section_title("Active Configuration")
 
-    c1, c2, c3, c4 = st.columns(4)
+    c1, c2, c3 = st.columns(3)
     with c1:
         metric_card("Task", task.replace("_", " ").title())
     with c2:
         metric_card("Model", model_name.split("/")[-1])
     with c3:
         metric_card("Epochs", str(epochs))
-    with c4:
-        metric_card("Batch Size", str(batch_size))
 
     with st.expander("View YAML"):
         st.code(ConfigGenerator.get_config_preview(config), language="yaml")
@@ -94,7 +89,7 @@ with tab_launch:
             elif "<username>" in project_path:
                 st.error("Update the project path with your actual username.")
             else:
-                with st.spinner("Creating job and uploading config..."):
+                with st.status("Creating job and uploading config...", expanded=True) as status:
                     client = DatabricksJobClient()
                     cfg_filename = Path(config_path).name if config_path else f"{job_name}.yaml"
                     data_cfg = config.get("data", {})
@@ -137,6 +132,7 @@ with tab_launch:
                         "model": model_name, "timestamp": datetime.now().isoformat(),
                         "status": "RUNNING",
                     })
+                    status.update(label="Job launched", state="complete")
 
                 st.success(f"Job launched — Run ID `{run_id}`")
                 st.info("Switch to the **Live Dashboard** tab to monitor progress.")
@@ -148,7 +144,7 @@ with tab_launch:
             st.switch_page("pages/2_📊_Data_EDA.py")
 
 
-# =========================== TAB 2 — Live Dashboard ========================
+# ========================= TAB 2 — Live Dashboard ==========================
 with tab_monitor:
     active_run_id = StateManager.get_active_training_run()
 
@@ -158,19 +154,17 @@ with tab_monitor:
         client = DatabricksJobClient()
         status = client.get_job_status(active_run_id)
         state = status.get("life_cycle_state", "UNKNOWN")
-        result = status.get("result_state", "UNKNOWN")
 
         # Status header
         st.markdown(
-            f'<div class="glass-card" style="display:flex;align-items:center;justify-content:space-between;">'
-            f'<div><strong style="color:#E6EDF3;">Run {str(active_run_id)[:12]}...</strong></div>'
-            f'<div>{status_pill(state)}</div>'
+            f'<div class="surface-card" style="display:flex;align-items:center;justify-content:space-between;">'
+            f'<div style="font-family:IBM Plex Mono,monospace;font-size:12px;color:#EDF0F7;">'
+            f'Run {str(active_run_id)[:12]}…</div>'
+            f'<div>{status_badge(state)}</div>'
             f'</div>',
             unsafe_allow_html=True,
         )
 
-        # ---- Resolve MLflow experiment + latest run early so we can
-        #      use epoch data in the header cards as well as charts.
         mlflow_exp = config.get("mlflow", {}).get("experiment_name", "")
         max_ep = config.get("training", {}).get("max_epochs", 0)
         current_epoch = 0
@@ -209,12 +203,15 @@ with tab_monitor:
         with c3:
             metric_card("Epochs", f"{current_epoch} / {max_ep}" if max_ep else "—")
 
-        # Progress bar
         if state == "RUNNING" and max_ep:
             progress = min(current_epoch / max_ep, 1.0)
-            st.progress(progress, text=f"Epoch {current_epoch} / {max_ep}")
+            st.markdown(
+                f'<div style="font-family:IBM Plex Mono,monospace;font-size:11px;color:#8A91A8;'
+                f'margin-bottom:4px;">Training: {progress:.0%}</div>',
+                unsafe_allow_html=True,
+            )
+            st.progress(progress)
 
-        # MLflow experiment link
         if mlflow_exp:
             section_title("MLflow Experiment")
             try:
@@ -223,30 +220,35 @@ with tab_monitor:
                 if host and exp_id:
                     exp_url = f"{host.rstrip('/')}/#mlflow/experiments/{exp_id}"
                     st.markdown(
-                        f'<div class="glass-card">'
-                        f'<strong>Experiment:</strong> <code>{mlflow_exp}</code><br/>'
-                        f'<a href="{exp_url}" target="_blank" style="color:#6C63FF;">Open in MLflow UI &rarr;</a>'
+                        f'<div class="raised-card">'
+                        f'<div style="font-family:IBM Plex Mono,monospace;font-size:10px;color:#4E566A;'
+                        f'text-transform:uppercase;letter-spacing:0.08em;margin-bottom:4px;">EXPERIMENT</div>'
+                        f'<code style="font-size:12px;color:#EDF0F7;">{mlflow_exp}</code><br/>'
+                        f'<a href="{exp_url}" target="_blank" style="color:#5B8AF5;font-family:Figtree,sans-serif;'
+                        f'font-size:13px;">Open in MLflow UI</a>'
                         f'</div>',
                         unsafe_allow_html=True,
                     )
                 elif host:
                     st.markdown(
-                        f'<div class="glass-card">'
-                        f'<strong>Experiment:</strong> <code>{mlflow_exp}</code> '
-                        f'<em>(not found on workspace — check the name/ID)</em></div>',
+                        f'<div class="raised-card">'
+                        f'<code style="font-size:12px;color:#EDF0F7;">{mlflow_exp}</code> '
+                        f'<em style="color:#8A91A8;">(not found on workspace — check the name/ID)</em></div>',
                         unsafe_allow_html=True,
                     )
             except Exception:
-                st.markdown(f'<div class="glass-card"><strong>Experiment:</strong> <code>{mlflow_exp}</code></div>', unsafe_allow_html=True)
+                st.markdown(
+                    f'<div class="raised-card"><code style="font-size:12px;color:#EDF0F7;">{mlflow_exp}</code></div>',
+                    unsafe_allow_html=True,
+                )
 
-        # Run page link
         if status.get("run_page_url"):
             st.markdown(f"[Open Job Run in Databricks]({status['run_page_url']})")
 
-        # Live loss / metric charts
         section_title("Training Curves")
         if mlflow_run_id:
-            primary_metric = "eval_map" if task != "classification" else "eval_accuracy"
+            _TASK_PRIMARY_METRIC = {"detection": "eval_map", "classification": "eval_accuracy", "segmentation": "eval_miou"}
+            primary_metric = _TASK_PRIMARY_METRIC.get(task, "eval_loss")
             loss_history = client.get_run_metrics_history(mlflow_run_id, "eval_loss")
             primary_history = client.get_run_metrics_history(mlflow_run_id, primary_metric)
 
@@ -254,7 +256,6 @@ with tab_monitor:
             with c1:
                 if loss_history:
                     fig = VisualizationHelper.training_metrics_chart(loss_history, "Eval Loss", title="Loss Curve")
-                    fig.update_layout(template="plotly_dark", paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)")
                     st.plotly_chart(fig, use_container_width=True)
                 elif "eval_loss" in mlflow_metrics:
                     metric_card("Eval Loss", f"{mlflow_metrics['eval_loss']:.4f}")
@@ -265,14 +266,12 @@ with tab_monitor:
                     fig = VisualizationHelper.training_metrics_chart(
                         primary_history, primary_metric, title=primary_metric.replace("_", " ").title()
                     )
-                    fig.update_layout(template="plotly_dark", paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)")
                     st.plotly_chart(fig, use_container_width=True)
                 elif primary_metric in mlflow_metrics:
                     metric_card(primary_metric.replace("_", " ").title(), f"{mlflow_metrics[primary_metric]:.4f}")
                 else:
                     st.info("Waiting for metric data...")
 
-            # Extra metrics snapshot
             if mlflow_metrics:
                 section_title("Latest Metric Snapshot")
                 display_keys = [k for k in sorted(mlflow_metrics.keys()) if k.startswith("eval_")][:8]
@@ -311,7 +310,7 @@ with tab_monitor:
             st.rerun()
 
 
-# =========================== TAB 3 — History ===============================
+# ========================= TAB 3 — History =================================
 with tab_history:
     section_title("Past Runs")
     history = StateManager.get("training_history", [])
@@ -358,13 +357,17 @@ with tab_history:
                         st.rerun()
 
 
-# =========================== Sidebar ========================================
+# ========================= Sidebar ==========================================
 with st.sidebar:
     st.markdown("### Training")
     active = StateManager.get_active_training_run()
     if active:
-        st.markdown(f'{status_pill("RUNNING")}', unsafe_allow_html=True)
-        st.code(f"Run: {str(active)[:16]}...")
+        st.markdown(status_badge("RUNNING"), unsafe_allow_html=True)
+        st.markdown(
+            f'<code style="font-family:IBM Plex Mono,monospace;font-size:11px;color:#8A91A8;">'
+            f'Run: {str(active)[:16]}…</code>',
+            unsafe_allow_html=True,
+        )
     else:
         st.info("No active run")
     st.divider()

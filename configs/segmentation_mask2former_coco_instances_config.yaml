@@ -1,0 +1,64 @@
+model:
+  model_name: facebook/mask2former-swin-base-coco-instance
+  task_type: segmentation
+  num_classes: 80
+  pretrained: true
+  image_size: 512
+  learning_rate: 1e-4
+  weight_decay: 5e-2
+  scheduler: cosine
+  epochs: 50
+  aux_loss_weight: 0.4
+  mask_threshold: 0.5
+data:
+  # COCO instances format: the same instances_*.json used for detection.
+  # The framework auto-detects that this is an instances file (not panoptic)
+  # and uses pycocotools.annToMask() to extract per-instance binary masks,
+  # composing them into the panoptic-style format that HF processors expect.
+  # This means a single annotation file drives both detection and segmentation.
+  train_data_path: /Volumes/<catalog>/<schema>/<volume>/<path>/data/train2017/
+  train_annotation_file: /Volumes/<catalog>/<schema>/<volume>/<path>/data/instances_train2017.json
+  val_data_path: /Volumes/<catalog>/<schema>/<volume>/<path>/data/val2017/
+  val_annotation_file: /Volumes/<catalog>/<schema>/<volume>/<path>/data/instances_val2017.json
+  batch_size: 4
+  num_workers: 4
+  model_name: facebook/mask2former-swin-base-coco-instance
+  image_size:
+  - 512
+  - 512
+  augment: true
+  augmentations:
+    horizontal_flip: true
+    random_crop: true
+    color_jitter: 0.2
+training:
+  max_epochs: 50
+  early_stopping_patience: 10
+  monitor_metric: val_miou
+  monitor_mode: max
+  checkpoint_dir: /Volumes/<catalog>/<schema>/<volume>/<path>/checkpoints/mask2former_instances
+  volume_checkpoint_dir: /Volumes/<catalog>/<schema>/<volume>/<path>/volume_checkpoints/mask2former_instances
+  save_top_k: 3
+  log_every_n_steps: 50
+  use_gpu: true
+mlflow:
+  experiment_name: /Users/<your.email@databricks.com>/cv_segmentation_mask2former_instances
+  run_name: mask2former_swin_base_coco_instances
+  log_model: true
+  tags:
+    framework: hf_trainer
+    model: mask2former
+    task: segmentation
+    dataset: coco_instances
+output:
+  results_dir: /Volumes/<catalog>/<schema>/<volume>/<path>/results/mask2former_instances
+  save_predictions: true
+serving:
+  registered_model_name: <catalog>.<schema>.mask2former_instance_segmentation
+  endpoint_name: mask2former-instance-segmentation-endpoint
+  workload_size: Small
+  scale_to_zero: true
+monitoring:
+  drift_threshold: 0.1
+  error_rate_threshold: 0.05
+  latency_p95_threshold_ms: 500

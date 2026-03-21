@@ -1,415 +1,334 @@
-from abc import ABC, abstractmethod
-from typing import Dict, Any, Optional, List, Tuple
+"""Detection model-family adapters — config, not class hierarchies.
+
+Each detection model family's quirks (pixel mask requirements, box format,
+output attribute names) are captured in a ``DetectionFamilyConfig`` dataclass.
+``detect_detection_family()`` selects the right config by substring match on
+the model name — the same pattern the SLM accelerator uses for LoRA target
+modules.
+
+Adding a new detection architecture means adding an entry to
+``_FAMILY_CONFIGS`` — no new class, no inheritance.
+"""
+
+from __future__ import annotations
+
+from dataclasses import dataclass
+from types import SimpleNamespace
+from typing import Any, Dict, List, Optional, Tuple
+
 import torch
-from transformers import AutoImageProcessor
-from transformers.models.detr.modeling_detr import DetrObjectDetectionOutput
-from transformers.models.yolos.modeling_yolos import YolosObjectDetectionOutput
-from pycocotools.coco import COCO
-from pycocotools.cocoeval import COCOeval
-import numpy as np
-from PIL import Image
 import torchvision.transforms.functional as F
+from PIL import Image
+from transformers import AutoImageProcessor
 
-class BaseAdapter(ABC):
-    """Base class for model-specific data adapters."""
-    
-    @abstractmethod
-    def __call__(self, image: Image.Image, target: Dict) -> Tuple[torch.Tensor, Dict]:
-        """Process a single sample.
-        
-        Args:
-            image: A PIL image
-            target: A dictionary containing 'boxes' and 'labels'
-            
-        Returns:
-            A tuple containing the processed image tensor and target dictionary
-        """
-        pass
 
-class NoOpInputAdapter(BaseAdapter):
-    """A "No-Operation" input adapter.
-    - Converts image to a tensor
-    - Keeps targets in the standard [x1, y1, x2, y2] absolute pixel format
-    - Suitable for models like torchvision's Faster R-CNN
+# ---------------------------------------------------------------------------
+# Family config dataclass
+# ---------------------------------------------------------------------------
+
+@dataclass(frozen=True)
+class DetectionFamilyConfig:
+    """Declares how a detection model family handles inputs and outputs.
+
+    Captures behavioural differences between detection architectures so a
+    single adapter class can handle all of them.  Each field maps to a
+    concrete difference in preprocessing or postprocessing logic.
     """
-    def __call__(self, image: Image.Image, target: Dict) -> Tuple[torch.Tensor, Dict]:
-        target["class_labels"] = target["labels"]  # Rename for consistency
-        return F.to_tensor(image), target
 
-class DETRInputAdapter(BaseAdapter):
-    """Input adapter for DETR-like models (DETR, YOLOS, etc.).
-    - Converts image to a tensor
-    - Converts bounding boxes from [x1, y1, x2, y2] absolute pixels to
-      [cx, cy, w, h] normalized format
-    - Handles image resizing according to DETR guidelines
+    requires_pixel_mask: bool
+    box_format: str  # "cxcywh_normalized" | "xyxy_absolute"
+    output_logits_attr: str
+    output_boxes_attr: str
+
+
+# ---------------------------------------------------------------------------
+# Family registry — extend the framework by adding an entry here
+# ---------------------------------------------------------------------------
+
+_FAMILY_CONFIGS: Dict[str, DetectionFamilyConfig] = {
+    # More specific patterns first — order matters for substring matching.
+    # "conditional-detr" and "rt-detr" must precede "detr" so they don't
+    # fall through to the generic DETR entry.
+    "yolos": DetectionFamilyConfig(
+        requires_pixel_mask=False,
+        box_format="cxcywh_normalized",
+        output_logits_attr="logits",
+        output_boxes_attr="pred_boxes",
+    ),
+    "deta": DetectionFamilyConfig(
+        requires_pixel_mask=True,
+        box_format="cxcywh_normalized",
+        output_logits_attr="logits",
+        output_boxes_attr="pred_boxes",
+    ),
+    "conditional-detr": DetectionFamilyConfig(
+        requires_pixel_mask=True,
+        box_format="cxcywh_normalized",
+        output_logits_attr="logits",
+        output_boxes_attr="pred_boxes",
+    ),
+    "rt-detr": DetectionFamilyConfig(
+        requires_pixel_mask=False,
+        box_format="cxcywh_normalized",
+        output_logits_attr="logits",
+        output_boxes_attr="pred_boxes",
+    ),
+    "rtdetr": DetectionFamilyConfig(
+        requires_pixel_mask=False,
+        box_format="cxcywh_normalized",
+        output_logits_attr="logits",
+        output_boxes_attr="pred_boxes",
+    ),
+    "detr": DetectionFamilyConfig(
+        requires_pixel_mask=True,
+        box_format="cxcywh_normalized",
+        output_logits_attr="logits",
+        output_boxes_attr="pred_boxes",
+    ),
+}
+
+_DEFAULT_CONFIG = DetectionFamilyConfig(
+    requires_pixel_mask=False,
+    box_format="xyxy_absolute",
+    output_logits_attr="logits",
+    output_boxes_attr="pred_boxes",
+)
+
+
+def detect_detection_family(model_name: str) -> Tuple[str, DetectionFamilyConfig]:
+    """Select family config by substring match on model name.
+
+    Returns ``(family_name, config)``.  The first match wins, so more
+    specific patterns should come before general ones in ``_FAMILY_CONFIGS``.
     """
-    def __init__(self, model_name: str, image_size: int = 800):
+    model_lower = model_name.lower()
+    for family, cfg in _FAMILY_CONFIGS.items():
+        if family in model_lower:
+            return family, cfg
+    return "generic", _DEFAULT_CONFIG
+
+
+# ---------------------------------------------------------------------------
+# Input adapter (single class, config-driven)
+# ---------------------------------------------------------------------------
+
+class DetectionInputAdapter:
+    """Unified input adapter parameterised by :class:`DetectionFamilyConfig`."""
+
+    def __init__(
+        self,
+        model_name: str,
+        image_size: int,
+        family_cfg: DetectionFamilyConfig,
+    ):
+        self.family_cfg = family_cfg
+        self.image_size = image_size
+        self.processor: Optional[AutoImageProcessor] = None
+
+        if family_cfg.box_format == "cxcywh_normalized":
+            self.processor = AutoImageProcessor.from_pretrained(
+                model_name,
+                size={"height": image_size, "width": image_size},
+                do_resize=True,
+                do_rescale=True,
+                do_normalize=True,
+                do_pad=True,
+            )
+
+    def __call__(
+        self, image: Image.Image, target: Dict,
+    ) -> Tuple[torch.Tensor, Dict]:
+        if self.family_cfg.box_format == "xyxy_absolute":
+            target["class_labels"] = target["labels"]
+            return F.to_tensor(image), target
+
+        return self._preprocess_detr_family(image, target)
+
+    def _preprocess_detr_family(
+        self, image: Image.Image, target: Dict,
+    ) -> Tuple[torch.Tensor, Dict]:
+        w, h = image.size
+        boxes_xyxy = target["boxes"]
+
+        if boxes_xyxy.shape[0] == 0:
+            boxes_cxcywh = torch.zeros((0, 4), dtype=torch.float32)
+        else:
+            boxes_cxcywh = _xyxy_to_cxcywh(boxes_xyxy)
+
+        boxes_normalized = boxes_cxcywh / torch.tensor(
+            [w, h, w, h], dtype=torch.float32,
+        )
+
+        adapted_target = {
+            "boxes": boxes_normalized,
+            "class_labels": target["labels"],
+            "image_id": target["image_id"],
+            "orig_size": torch.tensor([h, w]),
+            "size": torch.tensor([h, w]),
+        }
+
+        processed = self.processor(
+            image,
+            return_tensors="pt",
+            do_resize=True,
+            do_rescale=True,
+            do_normalize=True,
+            do_pad=True,
+        )
+
+        return processed.pixel_values.squeeze(0), adapted_target
+
+
+# ---------------------------------------------------------------------------
+# Output adapter (single class, config-driven)
+# ---------------------------------------------------------------------------
+
+class DetectionOutputAdapter:
+    """Unified output adapter parameterised by :class:`DetectionFamilyConfig`."""
+
+    def __init__(
+        self,
+        model_name: str,
+        image_size: int,
+        family_cfg: DetectionFamilyConfig,
+    ):
+        self.family_cfg = family_cfg
         self.image_size = image_size
         self.processor = AutoImageProcessor.from_pretrained(
             model_name,
             size={"height": image_size, "width": image_size},
-            do_resize=True,
-            do_rescale=True,
-            do_normalize=True,
-            do_pad=True
         )
-    
-    def __call__(self, image: Image.Image, target: Dict) -> Tuple[torch.Tensor, Dict]:
-        # Get original image size
-        w, h = image.size
-        
-        # Convert boxes from [x1, y1, x2, y2] to [cx, cy, w, h]
-        boxes_xyxy = target["boxes"]
-        if boxes_xyxy.shape[0] == 0:
-            # Handle cases with no annotations
-            boxes_cxcwh = torch.zeros((0, 4), dtype=torch.float32)
-        else:
-            # Convert to center format
-            boxes_cxcwh = self._xyxy_to_cxcwh(boxes_xyxy)
-        
-        # Normalize boxes by original image size
-        boxes_cxcwh_normalized = boxes_cxcwh / torch.tensor([w, h, w, h], dtype=torch.float32)
-        
-        # Update target dictionary
-        adapted_target = {
-            "boxes": boxes_cxcwh_normalized,
-            "class_labels": target["labels"],
-            "image_id": target["image_id"],
-            "orig_size": torch.tensor([h, w]),
-            "size": torch.tensor([h, w])  # Original size before processing
-        }
-        
-        # Use processor for complete image preprocessing (resize, pad, normalize)
-        processed = self.processor(
-            image,
-            return_tensors="pt",
-            do_resize=True,  # Let processor handle resizing
-            do_rescale=True,
-            do_normalize=True,
-            do_pad=True  # Enable padding to ensure consistent size
-        )
-        
-        return processed.pixel_values.squeeze(0), adapted_target
-    
-    @staticmethod
-    def _xyxy_to_cxcwh(boxes_xyxy: torch.Tensor) -> torch.Tensor:
-        """Converts [x1, y1, x2, y2] to [center_x, center_y, width, height]"""
-        x1, y1, x2, y2 = boxes_xyxy.unbind(1)
-        b = [(x1 + x2) / 2, (y1 + y2) / 2, (x2 - x1), (y2 - y1)]
-        return torch.stack(b, dim=-1)
 
-class YOLOSInputAdapter(BaseAdapter):
-    """Input adapter for YOLOS models.
-    - Similar to DETR but optimized for YOLOS architecture
-    - Converts image to a tensor
-    - Converts bounding boxes from [x1, y1, x2, y2] absolute pixels to
-      [cx, cy, w, h] normalized format
-    - Handles image resizing according to YOLOS guidelines
-    """
-    def __init__(self, model_name: str, image_size: int = 800):
-        self.image_size = image_size
-        self.processor = AutoImageProcessor.from_pretrained(
-            model_name,
-            size={"height": image_size, "width": image_size},
-            do_resize=True,
-            do_rescale=True,
-            do_normalize=True,
-            do_pad=True
-        )
-    
-    def __call__(self, image: Image.Image, target: Dict) -> Tuple[torch.Tensor, Dict]:
-        # Get original image size
-        w, h = image.size
-        
-        # Convert boxes from [x1, y1, x2, y2] to [cx, cy, w, h]
-        boxes_xyxy = target["boxes"]
-        if boxes_xyxy.shape[0] == 0:
-            # Handle cases with no annotations
-            boxes_cxcwh = torch.zeros((0, 4), dtype=torch.float32)
-        else:
-            # Convert to center format
-            boxes_cxcwh = self._xyxy_to_cxcwh(boxes_xyxy)
-        
-        # Normalize boxes by original image size
-        boxes_cxcwh_normalized = boxes_cxcwh / torch.tensor([w, h, w, h], dtype=torch.float32)
-        
-        # Update target dictionary
-        adapted_target = {
-            "boxes": boxes_cxcwh_normalized,
-            "class_labels": target["labels"],
-            "image_id": target["image_id"],
-            "orig_size": torch.tensor([h, w]),
-            "size": torch.tensor([h, w])  # Original size before processing
-        }
-        
-        # Use processor for complete image preprocessing (resize, pad, normalize)
-        # YOLOS doesn't require pixel_mask unlike DETR
-        processed = self.processor(
-            image,
-            return_tensors="pt",
-            do_resize=True,
-            do_rescale=True,
-            do_normalize=True,
-            do_pad=True
-        )
-        
-        return processed.pixel_values.squeeze(0), adapted_target
-    
-    @staticmethod
-    def _xyxy_to_cxcwh(boxes_xyxy: torch.Tensor) -> torch.Tensor:
-        """Converts [x1, y1, x2, y2] to [center_x, center_y, width, height]"""
-        x1, y1, x2, y2 = boxes_xyxy.unbind(1)
-        b = [(x1 + x2) / 2, (y1 + y2) / 2, (x2 - x1), (y2 - y1)]
-        return torch.stack(b, dim=-1)
-
-class DETROutputAdapter:
-    """Adapter for DETR model outputs."""
-    
-    def __init__(self, model_name: str, image_size: int = 800):
-        self.image_size = image_size
-        self.processor = AutoImageProcessor.from_pretrained(
-            model_name,
-            size={"height": image_size, "width": image_size}
-        )
-    
-    def adapt_output(self, outputs: Dict[str, Any]) -> Dict[str, Any]:
-        """Adapt DETR outputs to standard format."""
+    def adapt_output(self, outputs: Any) -> Dict[str, Any]:
+        """Normalise model output to a standard dict."""
         loss = getattr(outputs, "loss", None)
         if loss is None and isinstance(outputs, dict):
             loss = outputs.get("loss")
-        
+
         return {
             "loss": loss,
-            "pred_boxes": outputs.pred_boxes,
-            "pred_logits": outputs.logits,
-            "loss_dict": getattr(outputs, "loss_dict", {})
+            "pred_boxes": getattr(outputs, self.family_cfg.output_boxes_attr),
+            "pred_logits": getattr(outputs, self.family_cfg.output_logits_attr),
+            "loss_dict": getattr(outputs, "loss_dict", {}),
         }
-    
-    def format_predictions(self, outputs: Dict[str, Any], batch: Optional[Dict[str, Any]] = None) -> List[Dict[str, torch.Tensor]]:
-        """Format DETR outputs for metric computation."""
-        detection_output = DetrObjectDetectionOutput(
+
+    def format_predictions(
+        self,
+        outputs: Dict[str, Any],
+        batch: Optional[Dict[str, Any]] = None,
+    ) -> List[Dict[str, torch.Tensor]]:
+        """Format model outputs for metric computation."""
+        # HF processors access .logits and .pred_boxes by attribute —
+        # a SimpleNamespace satisfies this without importing model-specific
+        # output classes.
+        container = SimpleNamespace(
             logits=outputs["pred_logits"],
-            pred_boxes=outputs["pred_boxes"]
+            pred_boxes=outputs["pred_boxes"],
         )
-        
-        # Get target sizes from the batch
-        target_sizes = []
-        if batch and "labels" in batch:
-            for target in batch["labels"]:
-                if "size" in target:
-                    target_sizes.append(target["size"].tolist())
-                else:
-                    target_sizes.append([self.image_size, self.image_size])
-        else:
-            # Fallback: use default size for all images
-            batch_size = outputs["pred_logits"].shape[0]
-            target_sizes = [[self.image_size, self.image_size]] * batch_size
-        
-        # Use processor's postprocessing
+
+        target_sizes = self._resolve_target_sizes(outputs, batch)
         processed_outputs = self.processor.post_process_object_detection(
-            detection_output,
-            threshold=0.7,
-            target_sizes=target_sizes
+            container, threshold=0.7, target_sizes=target_sizes,
         )
-        
+
         preds = []
-        for i, processed_output in enumerate(processed_outputs):
-            boxes = processed_output["boxes"]
-            scores = processed_output["scores"]
-            labels = processed_output["labels"]
-            
-            # Get image_id from batch if available
+        for i, po in enumerate(processed_outputs):
             image_id = torch.tensor([i])
             if batch and "labels" in batch and i < len(batch["labels"]):
-                image_id = batch["labels"][i].get("image_id", torch.tensor([i]))
-            
+                image_id = batch["labels"][i].get(
+                    "image_id", torch.tensor([i]),
+                )
+
             preds.append({
-                "boxes": boxes,  # Already in [x1, y1, x2, y2] format in absolute pixels
-                "scores": scores,
-                "labels": labels,
-                "image_id": image_id
+                "boxes": po["boxes"],
+                "scores": po["scores"],
+                "labels": po["labels"],
+                "image_id": image_id,
             })
-        
         return preds
 
-    def format_targets(self, targets: List[Dict[str, torch.Tensor]]) -> List[Dict[str, torch.Tensor]]:
-        """Format batch targets for metric computation.
-        
-        Converts targets from DETR format ([cx, cy, w, h] normalized) to metric format ([x1, y1, x2, y2] absolute pixels).
-        
-        Args:
-            targets: List of target dictionaries, each containing:
-                - boxes: Tensor of shape [N, 4] in [cx, cy, w, h] normalized format
-                - class_labels: Tensor of shape [N] containing class indices
-                - size: Tensor of shape [2] containing image size [h, w]
-                - image_id: Tensor containing image ID
-                
-        Returns:
-            List of target dictionaries for each image in the batch
-        """
-        formatted_targets = []
-        
+    def format_targets(
+        self, targets: List[Dict[str, torch.Tensor]],
+    ) -> List[Dict[str, torch.Tensor]]:
+        """Convert targets to [x1,y1,x2,y2] absolute pixels for metrics."""
+        if self.family_cfg.box_format == "xyxy_absolute":
+            return [
+                {
+                    "boxes": t["boxes"],
+                    "labels": t.get("class_labels", t.get("labels")),
+                    "image_id": t.get("image_id", torch.tensor([i])),
+                }
+                for i, t in enumerate(targets)
+            ]
+
+        formatted = []
         for i, target in enumerate(targets):
             boxes = target["boxes"]
             labels = target["class_labels"]
-            size = target["size"]
+            h, w = target["size"]
             image_id = target.get("image_id", torch.tensor([i]))
-            
-            # Convert from [cx, cy, w, h] normalized to [x1, y1, x2, y2] absolute pixels
-            h, w = size
+
             boxes_xyxy = torch.zeros_like(boxes)
             boxes_xyxy[:, 0] = (boxes[:, 0] - boxes[:, 2] / 2) * w  # x1
             boxes_xyxy[:, 1] = (boxes[:, 1] - boxes[:, 3] / 2) * h  # y1
             boxes_xyxy[:, 2] = (boxes[:, 0] + boxes[:, 2] / 2) * w  # x2
             boxes_xyxy[:, 3] = (boxes[:, 1] + boxes[:, 3] / 2) * h  # y2
-            
-            # Create target dictionary
-            formatted_target = {
-                "boxes": boxes_xyxy,  # Now in [x1, y1, x2, y2] format in absolute pixels
-                "labels": labels,
-                "image_id": image_id
-            }
-            
-            formatted_targets.append(formatted_target)
-        
-        return formatted_targets
 
-class YOLOSOutputAdapter:
-    """Adapter for YOLOS model outputs."""
-    
-    def __init__(self, model_name: str, image_size: int = 800):
-        self.image_size = image_size
-        self.processor = AutoImageProcessor.from_pretrained(
-            model_name,
-            size={"height": image_size, "width": image_size}
-        )
-    
-    def adapt_output(self, outputs: Dict[str, Any]) -> Dict[str, Any]:
-        """Adapt YOLOS outputs to standard format."""
-        loss = getattr(outputs, "loss", None)
-        if loss is None and isinstance(outputs, dict):
-            loss = outputs.get("loss")
-        
-        return {
-            "loss": loss,
-            "pred_boxes": outputs.pred_boxes,
-            "pred_logits": outputs.logits,
-            "loss_dict": getattr(outputs, "loss_dict", {})
-        }
-    
-    def format_predictions(self, outputs: Dict[str, Any], batch: Optional[Dict[str, Any]] = None) -> List[Dict[str, torch.Tensor]]:
-        """Format YOLOS outputs for metric computation."""
-        detection_output = YolosObjectDetectionOutput(
-            logits=outputs["pred_logits"],
-            pred_boxes=outputs["pred_boxes"]
-        )
-        
-        # Get target sizes from the batch
-        target_sizes = []
-        if batch and "labels" in batch:
-            for target in batch["labels"]:
-                if "size" in target:
-                    target_sizes.append(target["size"].tolist())
-                else:
-                    target_sizes.append([self.image_size, self.image_size])
-        else:
-            # Fallback: use default size for all images
-            batch_size = outputs["pred_logits"].shape[0]
-            target_sizes = [[self.image_size, self.image_size]] * batch_size
-        
-        # Use processor's postprocessing
-        processed_outputs = self.processor.post_process_object_detection(
-            detection_output,
-            threshold=0.7,
-            target_sizes=target_sizes
-        )
-        
-        preds = []
-        for i, processed_output in enumerate(processed_outputs):
-            boxes = processed_output["boxes"]
-            scores = processed_output["scores"]
-            labels = processed_output["labels"]
-            
-            # Get image_id from batch if available
-            image_id = torch.tensor([i])
-            if batch and "labels" in batch and i < len(batch["labels"]):
-                image_id = batch["labels"][i].get("image_id", torch.tensor([i]))
-            
-            preds.append({
-                "boxes": boxes,  # Already in [x1, y1, x2, y2] format in absolute pixels
-                "scores": scores,
+            formatted.append({
+                "boxes": boxes_xyxy,
                 "labels": labels,
-                "image_id": image_id
+                "image_id": image_id,
             })
-        
-        return preds
+        return formatted
 
-    def format_targets(self, targets: List[Dict[str, torch.Tensor]]) -> List[Dict[str, torch.Tensor]]:
-        """Format batch targets for metric computation.
-        
-        Converts targets from YOLOS format ([cx, cy, w, h] normalized) to metric format ([x1, y1, x2, y2] absolute pixels).
-        
-        Args:
-            targets: List of target dictionaries, each containing:
-                - boxes: Tensor of shape [N, 4] in [cx, cy, w, h] normalized format
-                - class_labels: Tensor of shape [N] containing class indices
-                - size: Tensor of shape [2] containing image size [h, w]
-                - image_id: Tensor containing image ID
-                
-        Returns:
-            List of target dictionaries for each image in the batch
-        """
-        formatted_targets = []
-        
-        for i, target in enumerate(targets):
-            boxes = target["boxes"]
-            labels = target["class_labels"]
-            size = target["size"]
-            image_id = target.get("image_id", torch.tensor([i]))
-            
-            # Convert from [cx, cy, w, h] normalized to [x1, y1, x2, y2] absolute pixels
-            h, w = size
-            boxes_xyxy = torch.zeros_like(boxes)
-            boxes_xyxy[:, 0] = (boxes[:, 0] - boxes[:, 2] / 2) * w  # x1
-            boxes_xyxy[:, 1] = (boxes[:, 1] - boxes[:, 3] / 2) * h  # y1
-            boxes_xyxy[:, 2] = (boxes[:, 0] + boxes[:, 2] / 2) * w  # x2
-            boxes_xyxy[:, 3] = (boxes[:, 1] + boxes[:, 3] / 2) * h  # y2
-            
-            # Create target dictionary
-            formatted_target = {
-                "boxes": boxes_xyxy,  # Now in [x1, y1, x2, y2] format in absolute pixels
-                "labels": labels,
-                "image_id": image_id
-            }
-            
-            formatted_targets.append(formatted_target)
-        
-        return formatted_targets
+    def _resolve_target_sizes(
+        self, outputs: Dict[str, Any], batch: Optional[Dict[str, Any]],
+    ) -> List[List[int]]:
+        if batch and "labels" in batch:
+            return [
+                t["size"].tolist()
+                if "size" in t
+                else [self.image_size, self.image_size]
+                for t in batch["labels"]
+            ]
+        batch_size = outputs["pred_logits"].shape[0]
+        return [[self.image_size, self.image_size]] * batch_size
 
-def get_input_adapter(model_name: str, image_size: int = 800) -> BaseAdapter:
+
+# ---------------------------------------------------------------------------
+# Utilities
+# ---------------------------------------------------------------------------
+
+def _xyxy_to_cxcywh(boxes_xyxy: torch.Tensor) -> torch.Tensor:
+    """Convert [x1, y1, x2, y2] to [center_x, center_y, width, height]."""
+    x1, y1, x2, y2 = boxes_xyxy.unbind(1)
+    return torch.stack(
+        [(x1 + x2) / 2, (y1 + y2) / 2, x2 - x1, y2 - y1], dim=-1,
+    )
+
+
+# ---------------------------------------------------------------------------
+# Public API — backward-compatible factory functions
+# ---------------------------------------------------------------------------
+
+def get_input_adapter(
+    model_name: str, image_size: int = 800,
+) -> DetectionInputAdapter:
     """Get the appropriate input adapter for a model."""
-    model_name_lower = model_name.lower()
-    
-    if "yolos" in model_name_lower:
-        return YOLOSInputAdapter(model_name=model_name, image_size=image_size)
-    elif "detr" in model_name_lower:
-        return DETRInputAdapter(model_name=model_name, image_size=image_size)
-    else:
-        return NoOpInputAdapter()
+    _, cfg = detect_detection_family(model_name)
+    return DetectionInputAdapter(model_name, image_size, cfg)
 
-def get_output_adapter(model_name: str, image_size: int = 800):
+
+def get_output_adapter(
+    model_name: str, image_size: int = 800,
+) -> DetectionOutputAdapter:
     """Get the appropriate output adapter for a model."""
-    model_name_lower = model_name.lower()
-    
-    if "yolos" in model_name_lower:
-        return YOLOSOutputAdapter(model_name=model_name, image_size=image_size)
-    elif "detr" in model_name_lower:
-        return DETROutputAdapter(model_name=model_name, image_size=image_size)
-    else:
-        # For other models, use DETR adapter as fallback
-        return DETROutputAdapter(model_name=model_name, image_size=image_size)
+    _, cfg = detect_detection_family(model_name)
+    return DetectionOutputAdapter(model_name, image_size, cfg)
 
-# Keep the old function for backward compatibility
-def get_adapter(model_name: str, image_size: int = 800) -> BaseAdapter:
-    """Get the appropriate adapter for a model."""
-    return get_input_adapter(model_name, image_size) 
+
+def get_adapter(
+    model_name: str, image_size: int = 800,
+) -> DetectionInputAdapter:
+    """Get the appropriate adapter for a model (backward compatibility)."""
+    return get_input_adapter(model_name, image_size)

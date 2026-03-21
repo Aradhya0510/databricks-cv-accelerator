@@ -1,0 +1,59 @@
+model:
+  model_name: microsoft/conditional-detr-resnet-50
+  task_type: detection
+  num_classes: 80
+  pretrained: true
+  confidence_threshold: 0.7
+  iou_threshold: 0.5
+  max_detections: 100
+  image_size: 800
+  learning_rate: 1e-4
+  weight_decay: 1e-4
+  scheduler: cosine
+data:
+  train_data_path: /Volumes/<catalog>/<schema>/<volume>/<path>/data/train2017/
+  train_annotation_file: /Volumes/<catalog>/<schema>/<volume>/<path>/data/instances_train2017.json
+  val_data_path: /Volumes/<catalog>/<schema>/<volume>/<path>/data/val2017/
+  val_annotation_file: /Volumes/<catalog>/<schema>/<volume>/<path>/data/instances_val2017.json
+  batch_size: 8
+  num_workers: 4
+  model_name: microsoft/conditional-detr-resnet-50
+  image_size:
+  - 800
+  - 800
+  augment: true
+  augmentations:
+    horizontal_flip: true
+    vertical_flip: false
+    rotation: 10
+    brightness_contrast: 0.2
+training:
+  max_epochs: 50
+  early_stopping_patience: 15
+  monitor_metric: val_map
+  monitor_mode: max
+  checkpoint_dir: /Volumes/<catalog>/<schema>/<volume>/<path>/checkpoints/conditional_detr
+  volume_checkpoint_dir: /Volumes/<catalog>/<schema>/<volume>/<path>/volume_checkpoints/conditional_detr
+  save_top_k: 3
+  log_every_n_steps: 50
+  use_gpu: true
+mlflow:
+  experiment_name: /Users/<your.email@databricks.com>/cv_detection_conditional_detr
+  run_name: conditional_detr_resnet50
+  log_model: true
+  tags:
+    framework: hf_trainer
+    model: conditional-detr
+    dataset: coco
+output:
+  results_dir: /Volumes/<catalog>/<schema>/<volume>/<path>/results/conditional_detr
+  save_predictions: true
+serving:
+  registered_model_name: <catalog>.<schema>.conditional_detr_detection
+  endpoint_name: conditional-detr-detection-endpoint
+  workload_size: Small
+  scale_to_zero: true
+monitoring:
+  drift_threshold: 0.1
+  error_rate_threshold: 0.05
+  latency_p95_threshold_ms: 500

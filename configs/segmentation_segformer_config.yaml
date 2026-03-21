@@ -1,0 +1,58 @@
+model:
+  model_name: nvidia/segformer-b3-finetuned-ade-512-512
+  task_type: segmentation
+  num_classes: 150
+  pretrained: true
+  image_size: 512
+  learning_rate: 6e-5
+  weight_decay: 1e-2
+  scheduler: cosine
+  epochs: 50
+  # Segmentation-specific
+  aux_loss_weight: 0.4
+  mask_threshold: 0.5
+data:
+  train_data_path: /Volumes/<catalog>/<schema>/<volume>/<path>/data/segmentation/train/
+  val_data_path: /Volumes/<catalog>/<schema>/<volume>/<path>/data/segmentation/val/
+  batch_size: 8
+  num_workers: 4
+  model_name: nvidia/segformer-b3-finetuned-ade-512-512
+  image_size:
+  - 512
+  - 512
+  augment: true
+  augmentations:
+    horizontal_flip: true
+    random_crop: true
+    color_jitter: 0.2
+training:
+  max_epochs: 50
+  early_stopping_patience: 10
+  monitor_metric: val_miou
+  monitor_mode: max
+  checkpoint_dir: /Volumes/<catalog>/<schema>/<volume>/<path>/checkpoints/segformer
+  volume_checkpoint_dir: /Volumes/<catalog>/<schema>/<volume>/<path>/volume_checkpoints/segformer
+  save_top_k: 3
+  log_every_n_steps: 50
+  use_gpu: true
+mlflow:
+  experiment_name: /Users/<your.email@databricks.com>/cv_segmentation_segformer
+  run_name: segformer_b3_ade20k
+  log_model: true
+  tags:
+    framework: hf_trainer
+    model: segformer
+    task: segmentation
+    dataset: ade20k
+output:
+  results_dir: /Volumes/<catalog>/<schema>/<volume>/<path>/results/segformer
+  save_predictions: true
+serving:
+  registered_model_name: <catalog>.<schema>.segformer_segmentation
+  endpoint_name: segformer-segmentation-endpoint
+  workload_size: Small
+  scale_to_zero: true
+monitoring:
+  drift_threshold: 0.1
+  error_rate_threshold: 0.05
+  latency_p95_threshold_ms: 500

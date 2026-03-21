@@ -1,0 +1,58 @@
+model:
+  model_name: jozhang97/deta-swin-large
+  task_type: detection
+  num_classes: 80
+  pretrained: true
+  confidence_threshold: 0.7
+  iou_threshold: 0.5
+  max_detections: 300
+  image_size: 800
+  learning_rate: 5e-5
+  weight_decay: 1e-4
+  scheduler: cosine
+  scheduler_params:
+    T_max: 300
+    eta_min: 1e-6
+  epochs: 2
+data:
+  train_data_path: /Volumes/users/aradhya_chouhan/cv_arch_test/coco2017_detection_dataset/val2017/
+  train_annotation_file: /Volumes/users/aradhya_chouhan/cv_arch_test/coco2017_detection_dataset/annotations/instances_val2017.json
+  val_data_path: /Volumes/users/aradhya_chouhan/cv_arch_test/coco2017_detection_dataset/val2017/
+  val_annotation_file: /Volumes/users/aradhya_chouhan/cv_arch_test/coco2017_detection_dataset/annotations/instances_val2017.json
+  batch_size: 2
+  num_workers: 4
+  model_name: jozhang97/deta-swin-large
+  image_size:
+  - 800
+  - 800
+  normalize_mean:
+  - 0.485
+  - 0.456
+  - 0.406
+  normalize_std:
+  - 0.229
+  - 0.224
+  - 0.225
+  augment: false
+training:
+  max_epochs: 2
+  early_stopping_patience: 5
+  monitor_metric: val_map
+  monitor_mode: max
+  checkpoint_dir: /tmp/checkpoints/sanity_deta
+  save_top_k: 1
+  log_every_n_steps: 10
+  use_gpu: true
+  volume_checkpoint_dir: /Volumes/users/aradhya_chouhan/cv_arch_test/checkpoints/sanity_deta
+mlflow:
+  experiment_name: /Users/aradhya.chouhan@databricks.com/CV_Accelerator
+  run_name: sanity_deta_swin_large
+  log_model: false
+  tags:
+    framework: hf_trainer
+    model: deta
+    dataset: coco_val
+    test_type: sanity_check
+output:
+  results_dir: /tmp/results/sanity_deta
+  save_predictions: false

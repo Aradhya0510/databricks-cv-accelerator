@@ -1,0 +1,58 @@
+model:
+  model_name: PekingU/rtdetr_r50vd
+  task_type: detection
+  num_classes: 80
+  pretrained: true
+  confidence_threshold: 0.7
+  iou_threshold: 0.5
+  max_detections: 300
+  image_size: 640
+  learning_rate: 1e-4
+  weight_decay: 1e-4
+  scheduler: cosine
+data:
+  train_data_path: /Volumes/<catalog>/<schema>/<volume>/<path>/data/train2017/
+  train_annotation_file: /Volumes/<catalog>/<schema>/<volume>/<path>/data/instances_train2017.json
+  val_data_path: /Volumes/<catalog>/<schema>/<volume>/<path>/data/val2017/
+  val_annotation_file: /Volumes/<catalog>/<schema>/<volume>/<path>/data/instances_val2017.json
+  batch_size: 8
+  num_workers: 4
+  model_name: PekingU/rtdetr_r50vd
+  image_size:
+  - 640
+  - 640
+  augment: true
+  augmentations:
+    horizontal_flip: true
+    vertical_flip: false
+    brightness_contrast: 0.2
+training:
+  max_epochs: 50
+  early_stopping_patience: 15
+  monitor_metric: val_map
+  monitor_mode: max
+  checkpoint_dir: /Volumes/<catalog>/<schema>/<volume>/<path>/checkpoints/rtdetr
+  volume_checkpoint_dir: /Volumes/<catalog>/<schema>/<volume>/<path>/volume_checkpoints/rtdetr
+  save_top_k: 3
+  log_every_n_steps: 50
+  use_gpu: true
+mlflow:
+  experiment_name: /Users/<your.email@databricks.com>/cv_detection_rtdetr
+  run_name: rtdetr_r50vd
+  log_model: true
+  tags:
+    framework: hf_trainer
+    model: rt-detr
+    dataset: coco
+output:
+  results_dir: /Volumes/<catalog>/<schema>/<volume>/<path>/results/rtdetr
+  save_predictions: true
+serving:
+  registered_model_name: <catalog>.<schema>.rtdetr_detection
+  endpoint_name: rtdetr-detection-endpoint
+  workload_size: Small
+  scale_to_zero: true
+monitoring:
+  drift_threshold: 0.1
+  error_rate_threshold: 0.05
+  latency_p95_threshold_ms: 300
