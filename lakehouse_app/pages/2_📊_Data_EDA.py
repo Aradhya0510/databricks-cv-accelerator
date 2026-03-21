@@ -6,7 +6,7 @@ Visualize images with annotations, class distributions, and data quality.
 import streamlit as st
 import random
 from collections import Counter
-from typing import Dict, List
+from typing import Dict
 
 from utils.state_manager import StateManager
 from utils.databricks_client import DatabricksJobClient
@@ -44,24 +44,33 @@ train_ann = data_cfg.get("train_annotation_file", "")
 val_ann = data_cfg.get("val_annotation_file", "")
 num_classes = config.get("model", {}).get("num_classes", 0)
 
-# ---------------------------------------------------------------------------
-# Tabs
-# ---------------------------------------------------------------------------
 tab_overview, tab_annotated, tab_dist, tab_quality = st.tabs(
     ["Overview", "Annotated Samples", "Class Distribution", "Data Quality"]
 )
 
-# ======================= TAB 1 — Overview ==================================
+# ========================= TAB 1 — Overview =================================
 with tab_overview:
     section_title("Dataset Paths")
     c1, c2 = st.columns(2)
     with c1:
-        st.markdown(f'<div class="glass-card"><strong>Training</strong><br/><code>{train_path}</code></div>', unsafe_allow_html=True)
+        st.markdown(
+            f'<div class="raised-card">'
+            f'<div style="font-family:IBM Plex Mono,monospace;font-size:10px;color:#4E566A;'
+            f'text-transform:uppercase;letter-spacing:0.08em;">TRAINING</div>'
+            f'<code style="font-size:12px;color:#EDF0F7;">{train_path}</code></div>',
+            unsafe_allow_html=True,
+        )
     with c2:
-        st.markdown(f'<div class="glass-card"><strong>Validation</strong><br/><code>{val_path}</code></div>', unsafe_allow_html=True)
+        st.markdown(
+            f'<div class="raised-card">'
+            f'<div style="font-family:IBM Plex Mono,monospace;font-size:10px;color:#4E566A;'
+            f'text-transform:uppercase;letter-spacing:0.08em;">VALIDATION</div>'
+            f'<code style="font-size:12px;color:#EDF0F7;">{val_path}</code></div>',
+            unsafe_allow_html=True,
+        )
 
     if st.button("Scan Dataset", type="primary"):
-        with st.spinner("Reading volumes..."):
+        with st.status("Reading volumes...", expanded=True) as status:
             def _count(dir_path):
                 return len(client.list_volume_files(dir_path, extensions=IMAGE_EXTS)) if dir_path else 0
 
@@ -69,30 +78,28 @@ with tab_overview:
                 data = client.download_volume_json(ann_file)
                 return len(data.get("annotations", [])) if data else 0
 
+            st.write("Counting training images...")
             train_imgs = _count(train_path)
+            st.write("Counting validation images...")
             val_imgs = _count(val_path)
             train_anns = _ann_count(train_ann) if train_ann else 0
             val_anns = _ann_count(val_ann) if val_ann else 0
             total = train_imgs + val_imgs
+            status.update(label="Scan complete", state="complete")
 
         st.markdown("")
-        cols = st.columns(4)
+        cols = st.columns(3)
         with cols[0]:
             metric_card("Train Images", f"{train_imgs:,}")
         with cols[1]:
             metric_card("Val Images", f"{val_imgs:,}")
         with cols[2]:
             metric_card("Total Annotations", f"{train_anns + val_anns:,}")
-        with cols[3]:
-            pct = f"{val_imgs / total * 100:.0f}%" if total else "—"
-            metric_card("Val Split", pct)
 
         st.markdown("")
         fig = VisualizationHelper.class_distribution_chart(
-            {"Train": train_imgs, "Val": val_imgs},
-            "Dataset Split",
+            {"Train": train_imgs, "Val": val_imgs}, "Dataset Split"
         )
-        fig.update_layout(template="plotly_dark", paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)")
         st.plotly_chart(fig, use_container_width=True)
 
         img_size = data_cfg.get("image_size", "N/A")
@@ -101,7 +108,7 @@ with tab_overview:
         st.info(f"Images will be resized to **{img_size}** during training")
 
 
-# ======================= TAB 2 — Annotated Samples =========================
+# ========================= TAB 2 — Annotated Samples =======================
 with tab_annotated:
     section_title("Images with Annotations")
 
@@ -115,14 +122,14 @@ with tab_annotated:
         if not split_path:
             st.warning("Path not configured for this split")
         else:
-            with st.spinner("Downloading images & annotations..."):
+            with st.status("Downloading images & annotations...", expanded=True) as status:
                 all_files = client.list_volume_files(split_path, extensions=IMAGE_EXTS)
                 if not all_files:
                     st.warning("No image files found")
                 else:
                     sample_files = random.sample(all_files, min(n_samples, len(all_files)))
                     coco_data = None
-                    if task == "detection" and ann_file:
+                    if task in ("detection", "segmentation") and ann_file:
                         coco_data = client.download_volume_json(ann_file)
 
                     cat_map = {}
@@ -141,7 +148,7 @@ with tab_annotated:
                         if img is None:
                             continue
 
-                        if task == "detection" and coco_data:
+                        if task in ("detection", "segmentation") and coco_data:
                             img_id = img_id_map.get(fname)
                             anns = ann_by_img.get(img_id, [])
                             if anns:
@@ -149,12 +156,11 @@ with tab_annotated:
                                 labels = [cat_map.get(a["category_id"], str(a["category_id"])) for a in anns]
                                 img = ImageViewer.draw_bounding_boxes(img, boxes, labels=labels, format="xywh")
                             captions.append(f"{fname}  ({len(anns)} annotations)")
-                        elif task == "classification":
-                            captions.append(fname)
                         else:
                             captions.append(fname)
 
                         images.append(img)
+                    status.update(label="Done", state="complete")
 
                     if images:
                         cols_per_row = min(len(images), 4)
@@ -170,16 +176,18 @@ with tab_annotated:
 
     if task == "classification":
         st.info("Classification uses an ImageFolder layout — class is inferred from directory name.")
+    elif task == "segmentation":
+        st.info("Segmentation uses COCO instances format (same annotation file as detection) or ADE20K-style image+mask pairs.")
 
 
-# ======================= TAB 3 — Class Distribution ========================
+# ========================= TAB 3 — Class Distribution ======================
 with tab_dist:
     section_title("Category Analysis")
 
     if st.button("Analyse Distribution", type="primary", key="analyse_dist"):
         class_counts: Dict[str, int] = {}
-        with st.spinner("Reading annotations..."):
-            if task == "detection" and train_ann:
+        with st.status("Reading annotations...", expanded=True) as status:
+            if task in ("detection", "segmentation") and train_ann:
                 coco_data = client.download_volume_json(train_ann)
                 if coco_data:
                     cat_map = {c["id"]: c["name"] for c in coco_data.get("categories", [])}
@@ -191,6 +199,7 @@ with tab_dist:
                     n = len(client.list_volume_files(train_path.rstrip("/") + "/" + d, extensions=IMAGE_EXTS))
                     if n > 0:
                         class_counts[d] = n
+            status.update(label="Done", state="complete")
 
         if not class_counts:
             st.info("Could not read real annotations. Using sample distribution.")
@@ -204,38 +213,42 @@ with tab_dist:
         min_cls, min_cnt = sorted_items[-1]
         ratio = max_cnt / min_cnt if min_cnt else float("inf")
 
-        # Metrics row
-        c1, c2, c3, c4 = st.columns(4)
-        with c1:
+        cols = st.columns(3)
+        with cols[0]:
             metric_card("Classes", str(len(class_counts)))
-        with c2:
+        with cols[1]:
             metric_card("Total Instances", f"{total:,}")
-        with c3:
-            metric_card("Most Common", f"{max_cls} ({max_cnt:,})")
-        with c4:
+        with cols[2]:
             metric_card("Imbalance Ratio", f"{ratio:.1f}x")
 
         st.markdown("")
 
-        # Bar chart
         import plotly.graph_objects as go
 
-        fig = go.Figure()
         names = [item[0] for item in sorted_items]
         counts = [item[1] for item in sorted_items]
-        colors = ["#FF6B6B" if c < mean_count * 0.5 else "#FFAA00" if c < mean_count * 0.8 else "#00D68F" for c in counts]
+        colors = [
+            "#F25C5C" if c < mean_count * 0.5
+            else "#F4A742" if c < mean_count * 0.8
+            else "#00C2A8"
+            for c in counts
+        ]
+        fig = go.Figure()
         fig.add_trace(go.Bar(x=names, y=counts, marker_color=colors, text=counts, textposition="outside"))
         fig.update_layout(
             title="Instance Count per Category",
             xaxis_title="Category", yaxis_title="Count",
             template="plotly_dark",
             paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)",
+            font=dict(family="Figtree, sans-serif", color="#8A91A8"),
+            title_font=dict(family="Syne, sans-serif", color="#EDF0F7"),
             xaxis_tickangle=-45,
+            xaxis=dict(gridcolor="rgba(255,255,255,0.04)"),
+            yaxis=dict(gridcolor="rgba(255,255,255,0.04)"),
             margin=dict(b=120),
         )
         st.plotly_chart(fig, use_container_width=True)
 
-        # Over / under represented analysis
         section_title("Representation Analysis")
         over = {k: v for k, v in class_counts.items() if v > mean_count * 1.5}
         under = {k: v for k, v in class_counts.items() if v < mean_count * 0.5}
@@ -243,9 +256,11 @@ with tab_dist:
         c1, c2 = st.columns(2)
         with c1:
             st.markdown(
-                f'<div class="glass-card">'
-                f'<strong style="color:#00D68F;">Over-represented ({len(over)})</strong>'
-                f'<p style="color:#8B949E;font-size:0.85rem;">Categories with &gt;1.5x the mean count</p>'
+                f'<div class="raised-card">'
+                f'<strong style="color:#00C2A8;font-family:Syne,sans-serif;font-size:14px;">'
+                f'Over-represented ({len(over)})</strong>'
+                f'<p style="color:#8A91A8;font-size:12px;font-family:Figtree,sans-serif;">'
+                f'Categories with &gt;1.5x the mean count</p>'
                 f'</div>',
                 unsafe_allow_html=True,
             )
@@ -255,11 +270,14 @@ with tab_dist:
                     st.markdown(f"**{name}** — {cnt:,} instances ({pct:.1f}%)")
             else:
                 st.success("No over-represented categories")
+
         with c2:
             st.markdown(
-                f'<div class="glass-card">'
-                f'<strong style="color:#FF6B6B;">Under-represented ({len(under)})</strong>'
-                f'<p style="color:#8B949E;font-size:0.85rem;">Categories with &lt;0.5x the mean count</p>'
+                f'<div class="raised-card">'
+                f'<strong style="color:#F25C5C;font-family:Syne,sans-serif;font-size:14px;">'
+                f'Under-represented ({len(under)})</strong>'
+                f'<p style="color:#8A91A8;font-size:12px;font-family:Figtree,sans-serif;">'
+                f'Categories with &lt;0.5x the mean count</p>'
                 f'</div>',
                 unsafe_allow_html=True,
             )
@@ -278,14 +296,13 @@ with tab_dist:
             st.success(f"Classes are relatively balanced (ratio {ratio:.1f}x).")
 
 
-# ======================= TAB 4 — Data Quality ==============================
+# ========================= TAB 4 — Data Quality ============================
 with tab_quality:
     section_title("Validation Checks")
 
     if st.button("Run Validation", type="primary", key="validate"):
         checks = []
-        with st.spinner("Validating..."):
-            # Path checks
+        with st.status("Validating...", expanded=True) as status:
             for label, path in [("Train images", train_path), ("Val images", val_path)]:
                 if path:
                     files = client.list_volume_files(path, extensions=IMAGE_EXTS)
@@ -293,7 +310,7 @@ with tab_quality:
                 else:
                     checks.append((label, False, "Path not set"))
 
-            if task == "detection":
+            if task in ("detection", "segmentation"):
                 for label, ann_path in [("Train annotations", train_ann), ("Val annotations", val_ann)]:
                     if ann_path:
                         data = client.download_volume_json(ann_path)
@@ -302,17 +319,26 @@ with tab_quality:
                         checks.append((label, ok, f"{count} annotations"))
                     else:
                         checks.append((label, False, "Not configured"))
+            status.update(label="Done", state="complete")
 
         passed = sum(1 for _, ok, _ in checks if ok)
-        total = len(checks)
+        total_checks = len(checks)
         st.markdown("")
         c1, c2 = st.columns([1, 3])
         with c1:
-            metric_card("Checks Passed", f"{passed}/{total}")
+            metric_card("Checks Passed", f"{passed}/{total_checks}")
         with c2:
             for label, ok, detail in checks:
-                icon = "✅" if ok else "❌"
-                st.markdown(f"{icon} **{label}** — {detail}")
+                color = "#00C2A8" if ok else "#F25C5C"
+                st.markdown(
+                    f'<div style="display:flex;align-items:center;gap:8px;margin-bottom:4px;">'
+                    f'<span style="width:6px;height:6px;border-radius:50%;background:{color};'
+                    f'display:inline-block;"></span>'
+                    f'<span style="font-family:Figtree,sans-serif;font-size:13px;color:#8A91A8;">'
+                    f'<strong style="color:#EDF0F7;">{label}</strong> — {detail}</span>'
+                    f'</div>',
+                    unsafe_allow_html=True,
+                )
 
         st.markdown("")
         section_title("Recommendations")
@@ -329,10 +355,10 @@ with tab_quality:
             st.info(r)
 
 
-# ======================= Sidebar ============================================
+# ========================= Sidebar =========================================
 with st.sidebar:
-    st.markdown(f"### Dataset Info")
-    st.markdown(f"**Task:** {task.replace('_',' ').title()}")
+    st.markdown("### Dataset Info")
+    st.markdown(f"**Task:** {task.replace('_', ' ').title()}")
     st.markdown(f"**Image Size:** {data_cfg.get('image_size', 'N/A')}")
     st.markdown(f"**Batch Size:** {data_cfg.get('batch_size', 'N/A')}")
     st.divider()

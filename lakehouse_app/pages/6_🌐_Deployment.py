@@ -8,7 +8,7 @@ from datetime import datetime
 
 from utils.state_manager import StateManager
 from utils.databricks_client import DatabricksJobClient
-from components.theme import inject_theme, page_header, metric_card, section_title, status_pill
+from components.theme import inject_theme, page_header, metric_card, section_title, status_badge
 
 inject_theme()
 StateManager.initialize()
@@ -20,7 +20,7 @@ client = DatabricksJobClient()
 tab_deploy, tab_endpoints, tab_batch = st.tabs(["Deploy Model", "Active Endpoints", "Batch Inference"])
 
 
-# =========================== TAB 1 — Deploy ================================
+# ========================= TAB 1 — Deploy ===================================
 with tab_deploy:
     deployment_model = StateManager.get("deployment_model")
 
@@ -28,9 +28,11 @@ with tab_deploy:
 
     if deployment_model:
         st.markdown(
-            f'<div class="glass-card">'
-            f'<strong style="color:#00D68F;">Selected:</strong> '
-            f'<code>{deployment_model.get("name", "—")}</code> v{deployment_model.get("version", "1")}'
+            f'<div class="raised-card">'
+            f'<div style="font-family:IBM Plex Mono,monospace;font-size:10px;color:#4E566A;'
+            f'text-transform:uppercase;letter-spacing:0.08em;">SELECTED MODEL</div>'
+            f'<code style="font-size:12px;color:#EDF0F7;">{deployment_model.get("name", "—")}</code>'
+            f' <span style="color:#8A91A8;font-size:12px;">v{deployment_model.get("version", "1")}</span>'
             f'</div>',
             unsafe_allow_html=True,
         )
@@ -76,12 +78,17 @@ with tab_deploy:
     st.markdown("")
     section_title("Review")
     st.markdown(
-        f'<div class="glass-card">'
-        f'<div class="detail-row"><span class="detail-label">Model</span><span class="detail-value"><code>{model_name}</code></span></div>'
-        f'<div class="detail-row"><span class="detail-label">Version</span><span class="detail-value">{model_version}</span></div>'
-        f'<div class="detail-row"><span class="detail-label">Endpoint</span><span class="detail-value"><code>{endpoint_name}</code></span></div>'
-        f'<div class="detail-row"><span class="detail-label">Size</span><span class="detail-value">{workload_size}</span></div>'
-        f'<div class="detail-row"><span class="detail-label">Scale-to-Zero</span><span class="detail-value">{"Yes" if scale_to_zero else "No"}</span></div>'
+        f'<div class="surface-card">'
+        f'<div class="detail-row"><span class="detail-label">Model</span>'
+        f'<span class="detail-value"><code>{model_name}</code></span></div>'
+        f'<div class="detail-row"><span class="detail-label">Version</span>'
+        f'<span class="detail-value">{model_version}</span></div>'
+        f'<div class="detail-row"><span class="detail-label">Endpoint</span>'
+        f'<span class="detail-value"><code>{endpoint_name}</code></span></div>'
+        f'<div class="detail-row"><span class="detail-label">Size</span>'
+        f'<span class="detail-value">{workload_size}</span></div>'
+        f'<div class="detail-row"><span class="detail-label">Scale-to-Zero</span>'
+        f'<span class="detail-value">{"Yes" if scale_to_zero else "No"}</span></div>'
         f'</div>',
         unsafe_allow_html=True,
     )
@@ -94,7 +101,7 @@ with tab_deploy:
             elif not endpoint_name:
                 st.error("Please enter an endpoint name.")
             else:
-                with st.spinner("Deploying..."):
+                with st.status("Deploying...", expanded=True) as dep_status:
                     result = client.create_model_serving_endpoint(
                         endpoint_name=endpoint_name,
                         model_name=model_name,
@@ -102,24 +109,26 @@ with tab_deploy:
                         workload_size=workload_size,
                         scale_to_zero=scale_to_zero,
                     )
-                if result.get("status") in ("created", "updated"):
-                    st.success(f"Endpoint **{endpoint_name}** {result['status']}.")
-                    StateManager.add_endpoint({
-                        "endpoint_name": endpoint_name,
-                        "model_name": model_name,
-                        "model_version": model_version,
-                        "workload_size": workload_size,
-                        "scale_to_zero": scale_to_zero,
-                        "created_at": datetime.now().isoformat(),
-                    })
-                else:
-                    st.error(f"Deployment failed: {result.get('error', 'Unknown')}")
+                    if result.get("status") in ("created", "updated"):
+                        dep_status.update(label="Deployment complete", state="complete")
+                        st.success(f"Endpoint **{endpoint_name}** {result['status']}.")
+                        StateManager.add_endpoint({
+                            "endpoint_name": endpoint_name,
+                            "model_name": model_name,
+                            "model_version": model_version,
+                            "workload_size": workload_size,
+                            "scale_to_zero": scale_to_zero,
+                            "created_at": datetime.now().isoformat(),
+                        })
+                    else:
+                        dep_status.update(label="Deployment failed", state="error")
+                        st.error(f"Deployment failed: {result.get('error', 'Unknown')}")
     with c2:
         if st.button("Save Config", use_container_width=True, key="dep_save"):
             st.info("Config saved")
 
 
-# =========================== TAB 2 — Active Endpoints =====================
+# ========================= TAB 2 — Active Endpoints ========================
 with tab_endpoints:
     section_title("Endpoints")
 
@@ -140,20 +149,19 @@ with tab_endpoints:
             size = ep.get("workload_size", "—")
             created = ep.get("created_at", "—")[:10]
 
-            # Fetch live status
             live = client.get_endpoint_status(ep_name)
             state_str = live.get("state", "UNKNOWN")
             ready_str = live.get("ready", "UNKNOWN")
             ep_url = live.get("endpoint_url", "")
 
             if state_str == "NOT_UPDATING" and ready_str == "READY":
-                pill = status_pill("READY")
+                pill = status_badge("READY")
             elif state_str == "UPDATING" or ready_str != "READY":
-                pill = status_pill("RUNNING")
+                pill = status_badge("RUNNING")
             elif state_str == "NOT_FOUND":
-                pill = status_pill("FAILED")
+                pill = status_badge("FAILED")
             else:
-                pill = status_pill(state_str)
+                pill = status_badge(state_str)
 
             st.markdown(
                 f'<div class="endpoint-card">'
@@ -161,24 +169,31 @@ with tab_endpoints:
                 f'<span class="endpoint-name">{ep_name}</span>'
                 f'{pill}'
                 f'</div>'
-                f'<div class="detail-row"><span class="detail-label">Model</span><span class="detail-value"><code>{model}</code></span></div>'
-                f'<div class="detail-row"><span class="detail-label">Version</span><span class="detail-value">{version}</span></div>'
-                f'<div class="detail-row"><span class="detail-label">Workload</span><span class="detail-value">{size}</span></div>'
-                f'<div class="detail-row"><span class="detail-label">Created</span><span class="detail-value">{created}</span></div>'
-                + (f'<div class="detail-row"><span class="detail-label">URL</span><span class="detail-value"><a href="{ep_url}" style="color:#6C63FF;" target="_blank">{ep_url}</a></span></div>' if ep_url else "")
+                f'<div class="detail-row"><span class="detail-label">Model</span>'
+                f'<span class="detail-value"><code>{model}</code></span></div>'
+                f'<div class="detail-row"><span class="detail-label">Version</span>'
+                f'<span class="detail-value">{version}</span></div>'
+                f'<div class="detail-row"><span class="detail-label">Workload</span>'
+                f'<span class="detail-value">{size}</span></div>'
+                f'<div class="detail-row"><span class="detail-label">Created</span>'
+                f'<span class="detail-value">{created}</span></div>'
+                + (
+                    f'<div class="detail-row"><span class="detail-label">URL</span>'
+                    f'<span class="detail-value"><a href="{ep_url}" style="color:#5B8AF5;" '
+                    f'target="_blank">{ep_url}</a></span></div>'
+                    if ep_url else ""
+                )
                 + f'</div>',
                 unsafe_allow_html=True,
             )
 
-            # Served models detail
             served = live.get("served_models", [])
             if served:
                 with st.expander(f"Served Entities — {ep_name}"):
                     for sm in served:
                         st.markdown(
                             f"**{sm.get('entity_name', '—')}** "
-                            f"v{sm.get('entity_version', '—')}  |  "
-                            f"Size: {sm.get('workload_size', '—')}"
+                            f"v{sm.get('entity_version', '—')}  |  Size: {sm.get('workload_size', '—')}"
                         )
 
             c1, c2, c3, c4 = st.columns(4)
@@ -202,7 +217,7 @@ with tab_endpoints:
             st.markdown("")
 
 
-# =========================== TAB 3 — Batch Inference ======================
+# ========================= TAB 3 — Batch Inference =========================
 with tab_batch:
     section_title("Batch Inference")
     st.info("Process large datasets offline via a Databricks job.")
@@ -225,10 +240,10 @@ with tab_batch:
         st.success("Batch job would be submitted here.")
 
 
-# =========================== Sidebar ========================================
+# ========================= Sidebar ==========================================
 with st.sidebar:
     st.markdown("### Deployment")
     n = len(StateManager.get("endpoints", []))
     st.metric("Endpoints", n)
     st.divider()
-    st.info("Test endpoints with the Inference page. Monitor health via Monitoring.")
+    st.info("Test endpoints from the Inference page. Monitor health via Monitoring.")

@@ -1,274 +1,473 @@
 """
-Global theme and CSS for the CV Pipeline App.
-Injects a futuristic dark design system via st.markdown.
+Global theme — ML Accelerator Design System v1.0
+Dark-first, data-native design language for the CV Pipeline App.
 """
 
 import streamlit as st
 
-ACCENT = "#6C63FF"
-ACCENT_LIGHT = "#A29BFE"
-SUCCESS = "#00D68F"
-WARNING = "#FFAA00"
-DANGER = "#FF6B6B"
-BG_CARD = "rgba(22, 27, 34, 0.8)"
-BORDER = "rgba(108, 99, 255, 0.25)"
-TEXT_DIM = "#8B949E"
+# --------------------------------------------------------------------------- #
+# Colour tokens
+# --------------------------------------------------------------------------- #
+
+# Background tiers (four levels of elevation)
+BG_BASE = "#0D0F12"
+BG_SURFACE = "#141720"
+BG_RAISED = "#1C2030"
+BG_OVERLAY = "#232840"
+
+# Semantic accents
+ACCENT = "#00C2A8"
+ACCENT_WARM = "#F4A742"
+ACCENT_ALERT = "#F25C5C"
+ACCENT_INFO = "#5B8AF5"
+
+# Text levels
+TEXT_PRIMARY = "#EDF0F7"
+TEXT_SECONDARY = "#8A91A8"
+TEXT_TERTIARY = "#4E566A"
+
+# Borders
+BORDER_SUBTLE = "rgba(255,255,255,0.06)"
+BORDER_ACCENT = f"rgba(0,194,168,0.3)"
+
+# --------------------------------------------------------------------------- #
+# Global CSS
+# --------------------------------------------------------------------------- #
 
 GLOBAL_CSS = f"""
 <style>
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
+  @import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=Syne:wght@400;500;600;700&family=Figtree:wght@300;400;500;600&display=swap');
 
-html, body, [class*="st-"] {{
-    font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
-}}
+  html, body, [class*="st-"] {{
+      font-family: 'Figtree', -apple-system, BlinkMacSystemFont, sans-serif;
+      color: {TEXT_SECONDARY};
+  }}
+  h1, h2, h3, h4 {{
+      font-family: 'Syne', sans-serif !important;
+      color: {TEXT_PRIMARY} !important;
+  }}
+  code, pre {{
+      font-family: 'IBM Plex Mono', monospace !important;
+  }}
 
-/* ---- sidebar ---- */
-section[data-testid="stSidebar"] {{
-    background: linear-gradient(180deg, #0D1117 0%, #161B22 100%);
-    border-right: 1px solid {BORDER};
-}}
-section[data-testid="stSidebar"] .stMarkdown h1,
-section[data-testid="stSidebar"] .stMarkdown h2,
-section[data-testid="stSidebar"] .stMarkdown h3 {{
-    color: {ACCENT_LIGHT};
-}}
+  /* ---- sidebar (200px, bg-base) ---- */
+  section[data-testid="stSidebar"] {{
+      width: 200px !important;
+      min-width: 200px !important;
+      max-width: 250px !important;
+      background: {BG_BASE};
+      border-right: 1px solid {BORDER_SUBTLE};
+  }}
+  section[data-testid="stSidebar"] [data-testid="stSidebarNav"] li[class*="active"] {{
+      background: rgba(0,194,168,0.08);
+      border-left: 2px solid {ACCENT};
+  }}
+  section[data-testid="stSidebar"] [data-testid="stSidebarNav"] li[class*="active"] span {{
+      color: {ACCENT} !important;
+  }}
+  section[data-testid="stSidebar"] .stMarkdown {{
+      font-family: 'Figtree', sans-serif;
+      font-size: 13px;
+  }}
+  section[data-testid="stSidebar"] .stMarkdown h1,
+  section[data-testid="stSidebar"] .stMarkdown h2,
+  section[data-testid="stSidebar"] .stMarkdown h3 {{
+      font-family: 'Syne', sans-serif !important;
+      color: {TEXT_PRIMARY} !important;
+  }}
 
-/* ---- glass card ---- */
-.glass-card {{
-    background: {BG_CARD};
-    backdrop-filter: blur(12px);
-    border: 1px solid {BORDER};
-    border-radius: 16px;
-    padding: 1.5rem;
-    margin-bottom: 1rem;
-    transition: transform 0.2s ease, box-shadow 0.2s ease;
-}}
-.glass-card:hover {{
-    transform: translateY(-2px);
-    box-shadow: 0 8px 32px rgba(108, 99, 255, 0.15);
-}}
+  /* ---- st.metric override ---- */
+  .stMetric label {{
+      font-family: 'IBM Plex Mono', monospace !important;
+      font-size: 10px !important;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      color: {TEXT_TERTIARY} !important;
+  }}
+  .stMetric [data-testid="stMetricValue"] {{
+      font-family: 'Syne', sans-serif !important;
+      font-weight: 700 !important;
+      font-size: 28px !important;
+      color: {TEXT_PRIMARY} !important;
+  }}
+  .stMetric [data-testid="stMetricDelta"] svg {{
+      display: none;
+  }}
 
-/* ---- metric card ---- */
-.metric-card {{
-    background: linear-gradient(135deg, rgba(108,99,255,0.15) 0%, rgba(162,155,254,0.08) 100%);
-    border: 1px solid {BORDER};
-    border-radius: 14px;
-    padding: 1.2rem 1.5rem;
-    text-align: center;
-}}
-.metric-card .metric-value {{
-    font-size: 2rem;
-    font-weight: 700;
-    color: #FFFFFF;
-    line-height: 1.2;
-}}
-.metric-card .metric-label {{
-    font-size: 0.8rem;
-    font-weight: 500;
-    color: {TEXT_DIM};
-    text-transform: uppercase;
-    letter-spacing: 0.05em;
-    margin-top: 0.4rem;
-}}
-.metric-card .metric-delta {{
-    font-size: 0.85rem;
-    margin-top: 0.25rem;
-}}
-.metric-delta.positive {{ color: {SUCCESS}; }}
-.metric-delta.negative {{ color: {DANGER}; }}
+  /* ---- metric card (custom) ---- */
+  .metric-card {{
+      background: {BG_RAISED};
+      border: 1px solid {BORDER_SUBTLE};
+      border-radius: 8px;
+      padding: 16px 20px;
+      text-align: center;
+  }}
+  .metric-card .metric-label {{
+      font-family: 'IBM Plex Mono', monospace;
+      font-size: 10px;
+      font-weight: 400;
+      color: {TEXT_TERTIARY};
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      margin-bottom: 4px;
+  }}
+  .metric-card .metric-value {{
+      font-family: 'Syne', sans-serif;
+      font-size: 28px;
+      font-weight: 700;
+      color: {TEXT_PRIMARY};
+      line-height: 1.1;
+  }}
+  .metric-card .metric-delta {{
+      font-family: 'IBM Plex Mono', monospace;
+      font-size: 11px;
+      margin-top: 4px;
+  }}
+  .metric-delta.positive {{ color: {ACCENT}; }}
+  .metric-delta.negative {{ color: {ACCENT_ALERT}; }}
 
-/* ---- status pill ---- */
-.status-pill {{
-    display: inline-block;
-    padding: 0.25rem 0.85rem;
-    border-radius: 999px;
-    font-size: 0.78rem;
-    font-weight: 600;
-    letter-spacing: 0.04em;
-}}
-.status-pill.ready   {{ background: rgba(0,214,143,0.15); color: {SUCCESS}; border: 1px solid rgba(0,214,143,0.3); }}
-.status-pill.running {{ background: rgba(255,170,0,0.15); color: {WARNING}; border: 1px solid rgba(255,170,0,0.3); }}
-.status-pill.failed  {{ background: rgba(255,107,107,0.15); color: {DANGER}; border: 1px solid rgba(255,107,107,0.3); }}
-.status-pill.pending {{ background: rgba(139,148,158,0.15); color: {TEXT_DIM}; border: 1px solid rgba(139,148,158,0.3); }}
+  /* ---- status badge ---- */
+  .status-badge {{
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+      padding: 4px 10px;
+      border-radius: 4px;
+      font-family: 'IBM Plex Mono', monospace;
+      font-size: 10px;
+      font-weight: 400;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+  }}
+  .status-badge .dot {{
+      width: 5px;
+      height: 5px;
+      border-radius: 50%;
+      display: inline-block;
+  }}
+  .status-badge.running  {{ background: rgba(0,194,168,0.10); color: {ACCENT}; }}
+  .status-badge.running .dot  {{ background: {ACCENT}; }}
+  .status-badge.queued   {{ background: rgba(244,167,66,0.10); color: {ACCENT_WARM}; }}
+  .status-badge.queued .dot   {{ background: {ACCENT_WARM}; }}
+  .status-badge.failed   {{ background: rgba(242,92,92,0.10); color: {ACCENT_ALERT}; }}
+  .status-badge.failed .dot   {{ background: {ACCENT_ALERT}; }}
+  .status-badge.registered {{ background: rgba(91,138,245,0.10); color: {ACCENT_INFO}; }}
+  .status-badge.registered .dot {{ background: {ACCENT_INFO}; }}
 
-/* ---- page header ---- */
-.page-header {{
-    padding: 1.5rem 0 1rem 0;
-    border-bottom: 1px solid {BORDER};
-    margin-bottom: 2rem;
-}}
-.page-header h1 {{
-    font-size: 1.8rem;
-    font-weight: 700;
-    background: linear-gradient(135deg, {ACCENT} 0%, {ACCENT_LIGHT} 100%);
-    -webkit-background-clip: text;
-    -webkit-text-fill-color: transparent;
-    margin: 0;
-}}
-.page-header p {{
-    color: {TEXT_DIM};
-    font-size: 0.95rem;
-    margin: 0.3rem 0 0 0;
-}}
+  /* ---- progress bar ---- */
+  .stProgress > div > div > div > div {{
+      background: {ACCENT} !important;
+      border-radius: 2px;
+  }}
+  .stProgress > div > div > div {{
+      background: {BG_OVERLAY};
+      height: 4px;
+      border-radius: 2px;
+  }}
 
-/* ---- section divider ---- */
-.section-title {{
-    font-size: 1.1rem;
-    font-weight: 600;
-    color: {ACCENT_LIGHT};
-    margin: 1.5rem 0 1rem 0;
-    padding-bottom: 0.5rem;
-    border-bottom: 1px solid rgba(108,99,255,0.15);
-}}
+  /* ---- code / config block ---- */
+  .config-block {{
+      background: {BG_RAISED};
+      border-left: 2px solid {ACCENT};
+      border-radius: 4px;
+      padding: 16px;
+      font-family: 'IBM Plex Mono', monospace;
+      font-size: 12px;
+      line-height: 1.7;
+  }}
 
-/* ---- tabs override ---- */
-.stTabs [data-baseweb="tab-list"] {{
-    gap: 0.5rem;
-    background: transparent;
-}}
-.stTabs [data-baseweb="tab"] {{
-    background: {BG_CARD};
-    border: 1px solid {BORDER};
-    border-radius: 10px;
-    padding: 0.5rem 1.2rem;
-    color: {TEXT_DIM};
-    font-weight: 500;
-}}
-.stTabs [aria-selected="true"] {{
-    background: linear-gradient(135deg, rgba(108,99,255,0.25) 0%, rgba(162,155,254,0.12) 100%) !important;
-    border-color: {ACCENT} !important;
-    color: #FFFFFF !important;
-}}
+  /* ---- surface card ---- */
+  .surface-card {{
+      background: {BG_SURFACE};
+      border: 1px solid {BORDER_SUBTLE};
+      border-radius: 8px;
+      padding: 24px;
+      margin-bottom: 16px;
+  }}
 
-/* ---- buttons ---- */
-.stButton > button[kind="primary"],
-.stButton > button[data-testid="stBaseButton-primary"] {{
-    background: linear-gradient(135deg, {ACCENT} 0%, #5A52D5 100%);
-    border: none;
-    border-radius: 10px;
-    color: white;
-    font-weight: 600;
-    transition: all 0.2s ease;
-}}
-.stButton > button[kind="primary"]:hover,
-.stButton > button[data-testid="stBaseButton-primary"]:hover {{
-    box-shadow: 0 4px 20px rgba(108,99,255,0.35);
-    transform: translateY(-1px);
-}}
+  /* ---- raised card (inner panels) ---- */
+  .raised-card {{
+      background: {BG_RAISED};
+      border: 1px solid {BORDER_SUBTLE};
+      border-radius: 8px;
+      padding: 16px;
+      margin-bottom: 8px;
+  }}
 
-/* ---- dataframes ---- */
-.stDataFrame {{
-    border: 1px solid {BORDER};
-    border-radius: 12px;
-    overflow: hidden;
-}}
+  /* ---- page header (topbar) ---- */
+  .page-header {{
+      padding: 32px 0 16px 0;
+      border-bottom: 1px solid {BORDER_SUBTLE};
+      margin-bottom: 32px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+  }}
+  .page-header .ph-left h1 {{
+      font-family: 'Syne', sans-serif !important;
+      font-size: 28px !important;
+      font-weight: 700 !important;
+      color: {TEXT_PRIMARY} !important;
+      margin: 0 !important;
+      line-height: 1.1;
+  }}
+  .page-header .ph-left p {{
+      font-family: 'Figtree', sans-serif;
+      color: {TEXT_SECONDARY};
+      font-size: 14px;
+      margin: 6px 0 0 0;
+  }}
 
-/* ---- expander ---- */
-details {{
-    border: 1px solid {BORDER} !important;
-    border-radius: 12px !important;
-    background: {BG_CARD} !important;
-}}
+  /* ---- section heading ---- */
+  .section-title {{
+      font-family: 'Syne', sans-serif;
+      font-size: 18px;
+      font-weight: 600;
+      color: {TEXT_PRIMARY};
+      margin: 32px 0 16px 0;
+      padding-bottom: 8px;
+      border-bottom: 1px solid {BORDER_SUBTLE};
+  }}
 
-/* ---- hero banner ---- */
-.hero-banner {{
-    background: linear-gradient(135deg, rgba(108,99,255,0.2) 0%, rgba(162,155,254,0.05) 60%, rgba(0,214,143,0.08) 100%);
-    border: 1px solid {BORDER};
-    border-radius: 20px;
-    padding: 2.5rem 2rem;
-    text-align: center;
-    margin-bottom: 2rem;
-}}
-.hero-banner h1 {{
-    font-size: 2.2rem;
-    font-weight: 700;
-    background: linear-gradient(135deg, #FFFFFF 0%, {ACCENT_LIGHT} 100%);
-    -webkit-background-clip: text;
-    -webkit-text-fill-color: transparent;
-    margin: 0 0 0.5rem 0;
-}}
-.hero-banner p {{
-    color: {TEXT_DIM};
-    font-size: 1.05rem;
-    max-width: 640px;
-    margin: 0 auto;
-}}
+  /* ---- tabs ---- */
+  .stTabs [data-baseweb="tab-list"] {{
+      gap: 8px;
+      background: transparent;
+      border-bottom: 1px solid {BORDER_SUBTLE};
+  }}
+  .stTabs [data-baseweb="tab"] {{
+      background: transparent;
+      border: none;
+      border-bottom: 2px solid transparent;
+      border-radius: 0;
+      padding: 8px 16px;
+      color: {TEXT_SECONDARY};
+      font-family: 'Figtree', sans-serif;
+      font-weight: 500;
+      font-size: 13px;
+  }}
+  .stTabs [aria-selected="true"] {{
+      background: transparent !important;
+      border-bottom: 2px solid {ACCENT} !important;
+      color: {TEXT_PRIMARY} !important;
+  }}
 
-/* ---- nav card ---- */
-.nav-card {{
-    background: {BG_CARD};
-    border: 1px solid {BORDER};
-    border-radius: 16px;
-    padding: 1.5rem;
-    cursor: pointer;
-    transition: all 0.25s ease;
-    height: 100%;
-}}
-.nav-card:hover {{
-    border-color: {ACCENT};
-    box-shadow: 0 8px 32px rgba(108,99,255,0.12);
-    transform: translateY(-3px);
-}}
-.nav-card .nav-icon {{
-    font-size: 1.6rem;
-    margin-bottom: 0.6rem;
-}}
-.nav-card h3 {{
-    font-size: 1rem;
-    font-weight: 600;
-    color: #E6EDF3;
-    margin: 0 0 0.4rem 0;
-}}
-.nav-card p {{
-    font-size: 0.82rem;
-    color: {TEXT_DIM};
-    margin: 0;
-    line-height: 1.5;
-}}
+  /* ---- buttons ---- */
+  .stButton > button {{
+      font-family: 'Figtree', sans-serif !important;
+      font-weight: 500;
+      font-size: 13px;
+      border-radius: 8px;
+      padding: 8px 16px;
+      transition: all 0.15s ease;
+  }}
+  .stButton > button[kind="primary"],
+  .stButton > button[data-testid="stBaseButton-primary"] {{
+      background: {ACCENT} !important;
+      border: none !important;
+      color: {BG_BASE} !important;
+      font-weight: 600;
+  }}
+  .stButton > button[kind="primary"]:hover,
+  .stButton > button[data-testid="stBaseButton-primary"]:hover {{
+      opacity: 0.9;
+      box-shadow: 0 2px 12px rgba(0,194,168,0.25);
+  }}
+  .stButton > button[kind="secondary"],
+  .stButton > button[data-testid="stBaseButton-secondary"] {{
+      background: {BG_RAISED} !important;
+      border: 1px solid {BORDER_SUBTLE} !important;
+      color: {TEXT_SECONDARY} !important;
+  }}
 
-/* ---- endpoint card ---- */
-.endpoint-card {{
-    background: {BG_CARD};
-    border: 1px solid {BORDER};
-    border-radius: 16px;
-    padding: 1.5rem;
-    margin-bottom: 1rem;
-}}
-.endpoint-card .endpoint-header {{
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    margin-bottom: 1rem;
-}}
-.endpoint-card .endpoint-name {{
-    font-size: 1.1rem;
-    font-weight: 600;
-    color: #E6EDF3;
-}}
-.endpoint-card .detail-row {{
-    display: flex;
-    justify-content: space-between;
-    padding: 0.4rem 0;
-    border-bottom: 1px solid rgba(139,148,158,0.1);
-    font-size: 0.88rem;
-}}
-.endpoint-card .detail-label {{ color: {TEXT_DIM}; }}
-.endpoint-card .detail-value {{ color: #E6EDF3; font-weight: 500; }}
+  /* ---- data tables ---- */
+  .stDataFrame {{
+      border: 1px solid {BORDER_SUBTLE} !important;
+      border-radius: 8px;
+      overflow: hidden;
+  }}
+  .stDataFrame th {{
+      font-family: 'IBM Plex Mono', monospace !important;
+      font-size: 10px !important;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      color: {TEXT_TERTIARY} !important;
+  }}
+  .stDataFrame td {{
+      font-family: 'Figtree', sans-serif;
+      font-size: 12px;
+      color: {TEXT_SECONDARY};
+      border-bottom: 1px solid {BORDER_SUBTLE};
+  }}
 
-/* ---- image grid ---- */
-.img-annotated {{
-    border-radius: 12px;
-    overflow: hidden;
-    border: 1px solid {BORDER};
-}}
+  /* ---- expander ---- */
+  details {{
+      border: 1px solid {BORDER_SUBTLE} !important;
+      border-radius: 8px !important;
+      background: {BG_SURFACE} !important;
+  }}
+  details summary {{
+      font-family: 'Figtree', sans-serif;
+      font-size: 14px;
+      color: {TEXT_SECONDARY};
+  }}
 
-/* ---- progress ring ---- */
-.progress-container {{
-    display: flex;
-    align-items: center;
-    gap: 1rem;
-    padding: 1rem 0;
-}}
+  /* ---- text input ---- */
+  .stTextInput > div > div > input,
+  .stSelectbox > div > div,
+  .stNumberInput > div > div > input,
+  .stTextArea > div > div > textarea {{
+      background: {BG_RAISED} !important;
+      border: 1px solid {BORDER_SUBTLE} !important;
+      color: {TEXT_PRIMARY} !important;
+      font-family: 'Figtree', sans-serif;
+      border-radius: 8px;
+  }}
+  .stTextInput > div > div > input:focus,
+  .stTextArea > div > div > textarea:focus {{
+      border-color: {ACCENT} !important;
+      box-shadow: 0 0 0 2px rgba(0,194,168,0.15) !important;
+  }}
+
+  /* ---- nav card ---- */
+  .nav-card {{
+      background: {BG_SURFACE};
+      border: 1px solid {BORDER_SUBTLE};
+      border-radius: 8px;
+      padding: 24px;
+      cursor: pointer;
+      transition: all 0.2s ease;
+      height: 100%;
+  }}
+  .nav-card:hover {{
+      border-color: {ACCENT};
+      box-shadow: 0 4px 16px rgba(0,194,168,0.08);
+  }}
+  .nav-card .nav-icon {{
+      font-size: 1.4rem;
+      margin-bottom: 8px;
+  }}
+  .nav-card h3 {{
+      font-family: 'Syne', sans-serif !important;
+      font-size: 14px !important;
+      font-weight: 500 !important;
+      color: {TEXT_PRIMARY} !important;
+      margin: 0 0 8px 0 !important;
+  }}
+  .nav-card p {{
+      font-family: 'Figtree', sans-serif;
+      font-size: 12px;
+      color: {TEXT_SECONDARY};
+      margin: 0;
+      line-height: 1.6;
+  }}
+
+  /* ---- endpoint card ---- */
+  .endpoint-card {{
+      background: {BG_SURFACE};
+      border: 1px solid {BORDER_SUBTLE};
+      border-radius: 8px;
+      padding: 24px;
+      margin-bottom: 16px;
+  }}
+  .endpoint-card .endpoint-header {{
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 16px;
+  }}
+  .endpoint-card .endpoint-name {{
+      font-family: 'Syne', sans-serif;
+      font-size: 16px;
+      font-weight: 600;
+      color: {TEXT_PRIMARY};
+  }}
+  .endpoint-card .detail-row {{
+      display: flex;
+      justify-content: space-between;
+      padding: 8px 0;
+      border-bottom: 1px solid {BORDER_SUBTLE};
+      font-size: 12px;
+  }}
+  .endpoint-card .detail-label {{
+      font-family: 'IBM Plex Mono', monospace;
+      font-size: 11px;
+      color: {TEXT_TERTIARY};
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+  }}
+  .endpoint-card .detail-value {{
+      font-family: 'Figtree', sans-serif;
+      color: {TEXT_PRIMARY};
+      font-weight: 500;
+  }}
+
+  /* ---- hero banner ---- */
+  .hero-banner {{
+      background: {BG_SURFACE};
+      border: 1px solid {BORDER_SUBTLE};
+      border-radius: 8px;
+      padding: 48px 32px;
+      text-align: center;
+      margin-bottom: 32px;
+  }}
+  .hero-banner h1 {{
+      font-family: 'Syne', sans-serif !important;
+      font-size: 28px !important;
+      font-weight: 700 !important;
+      color: {TEXT_PRIMARY} !important;
+      margin: 0 0 8px 0 !important;
+      line-height: 1.1;
+  }}
+  .hero-banner p {{
+      font-family: 'Figtree', sans-serif;
+      color: {TEXT_SECONDARY};
+      font-size: 14px;
+      max-width: 640px;
+      margin: 0 auto;
+      line-height: 1.6;
+  }}
+
+  /* ---- image annotation ---- */
+  .img-annotated {{
+      border-radius: 8px;
+      overflow: hidden;
+      border: 1px solid {BORDER_SUBTLE};
+  }}
+
+  /* ---- live training pulse ---- */
+  @keyframes pulse {{
+      0%,100% {{ opacity: 1; }}
+      50% {{ opacity: 0.3; }}
+  }}
+
+  /* ---- info / warning / error overrides ---- */
+  .stAlert {{
+      border-radius: 8px !important;
+      font-family: 'Figtree', sans-serif;
+      font-size: 13px;
+  }}
+
+  /* ---- review summary card ---- */
+  .detail-row {{
+      display: flex;
+      justify-content: space-between;
+      padding: 8px 0;
+      border-bottom: 1px solid {BORDER_SUBTLE};
+      font-size: 12px;
+  }}
+  .detail-label {{
+      font-family: 'IBM Plex Mono', monospace;
+      font-size: 11px;
+      color: {TEXT_TERTIARY};
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+  }}
+  .detail-value {{
+      font-family: 'Figtree', sans-serif;
+      color: {TEXT_PRIMARY};
+      font-weight: 500;
+  }}
 </style>
 """
 
@@ -278,40 +477,59 @@ def inject_theme():
     st.markdown(GLOBAL_CSS, unsafe_allow_html=True)
 
 
-def page_header(title: str, subtitle: str = ""):
-    """Render a styled page header."""
+def page_header(title: str, subtitle: str = "", status: str = ""):
+    """Render a styled page header with optional status badge on the right."""
     sub = f"<p>{subtitle}</p>" if subtitle else ""
-    st.markdown(f'<div class="page-header"><h1>{title}</h1>{sub}</div>', unsafe_allow_html=True)
+    badge = status_badge(status) if status else ""
+    st.markdown(
+        f'<div class="page-header">'
+        f'<div class="ph-left"><h1>{title}</h1>{sub}</div>'
+        f'<div class="ph-right">{badge}</div>'
+        f'</div>',
+        unsafe_allow_html=True,
+    )
 
 
 def metric_card(label: str, value, delta: str = "", delta_positive: bool = True):
-    """Render a single metric card."""
+    """Render a single metric card following the design system."""
     delta_html = ""
     if delta:
         cls = "positive" if delta_positive else "negative"
         delta_html = f'<div class="metric-delta {cls}">{delta}</div>'
     st.markdown(
         f'<div class="metric-card">'
-        f'<div class="metric-value">{value}</div>'
         f'<div class="metric-label">{label}</div>'
+        f'<div class="metric-value">{value}</div>'
         f'{delta_html}'
         f'</div>',
         unsafe_allow_html=True,
     )
 
 
-def status_pill(status: str):
-    """Return HTML for a status pill."""
+def status_badge(status: str) -> str:
+    """Return HTML for a status badge with dot indicator + text label."""
     status_upper = status.upper()
     mapping = {
-        "READY": "ready", "NOT_UPDATING": "ready", "SUCCESS": "ready", "FINISHED": "ready",
-        "RUNNING": "running", "PENDING": "running", "UPDATING": "running",
-        "FAILED": "failed", "ERROR": "failed", "CANCELLED": "failed", "TERMINATED": "failed",
+        "READY": "running", "NOT_UPDATING": "running", "SUCCESS": "running",
+        "FINISHED": "running",
+        "RUNNING": "queued", "PENDING": "queued", "UPDATING": "queued",
+        "QUEUED": "queued",
+        "FAILED": "failed", "ERROR": "failed", "CANCELLED": "failed",
+        "TERMINATED": "failed",
+        "REGISTERED": "registered",
     }
-    cls = mapping.get(status_upper, "pending")
-    return f'<span class="status-pill {cls}">{status}</span>'
+    cls = mapping.get(status_upper, "queued")
+    return (
+        f'<span class="status-badge {cls}">'
+        f'<span class="dot"></span>{status}'
+        f'</span>'
+    )
+
+
+# Keep backward compat for pages that call status_pill
+status_pill = status_badge
 
 
 def section_title(text: str):
-    """Render a styled section title."""
+    """Render a styled section heading (Syne 600, 18px)."""
     st.markdown(f'<div class="section-title">{text}</div>', unsafe_allow_html=True)
