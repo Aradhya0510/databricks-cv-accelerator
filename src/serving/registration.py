@@ -81,6 +81,13 @@ def register_model(
         from transformers import AutoModelForImageClassification
 
         model = AutoModelForImageClassification.from_pretrained(artifact_path)
+    elif task_type == "segmentation":
+        try:
+            from transformers import AutoModelForUniversalSegmentation
+            model = AutoModelForUniversalSegmentation.from_pretrained(artifact_path)
+        except Exception:
+            from transformers import AutoModelForSemanticSegmentation
+            model = AutoModelForSemanticSegmentation.from_pretrained(artifact_path)
     else:
         from transformers import AutoModelForObjectDetection
 
@@ -109,6 +116,19 @@ def register_model(
                 }
             }
         ]
+    elif task_type == "segmentation":
+        output_example = [
+            {
+                "predictions": {
+                    "segmentation_map": [[0, 1], [1, 0]],
+                    "unique_classes": [0, 1],
+                    "num_classes": 2,
+                    "height": 2,
+                    "width": 2,
+                    "status": "success",
+                }
+            }
+        ]
     else:
         output_example = [
             {
@@ -130,6 +150,11 @@ def register_model(
 
         pyfunc_model = ClassificationPyFuncModel()
         artifact_name = "classification_pyfunc"
+    elif task_type == "segmentation":
+        from .pyfunc import SegmentationPyFuncModel
+
+        pyfunc_model = SegmentationPyFuncModel()
+        artifact_name = "segmentation_pyfunc"
     else:
         from .pyfunc import DetectionPyFuncModel
 

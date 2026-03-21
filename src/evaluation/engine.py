@@ -23,6 +23,7 @@ class EvaluationEngine:
         # Ensure tasks are registered
         import src.tasks.detection  # noqa: F401
         import src.tasks.classification  # noqa: F401
+        import src.tasks.segmentation  # noqa: F401
 
         self.task = TaskRegistry.get(config.model.task_type)
 
@@ -73,6 +74,16 @@ class EvaluationEngine:
                 from transformers import AutoModelForImageClassification
 
                 model = AutoModelForImageClassification.from_pretrained(model_path)
+            elif task_type == "segmentation":
+                from src.tasks.segmentation.adapters import detect_segmentation_family
+
+                _, family_cfg = detect_segmentation_family(self.config.model.model_name)
+                if family_cfg.model_type == "universal":
+                    from transformers import AutoModelForUniversalSegmentation
+                    model = AutoModelForUniversalSegmentation.from_pretrained(model_path)
+                else:
+                    from transformers import AutoModelForSemanticSegmentation
+                    model = AutoModelForSemanticSegmentation.from_pretrained(model_path)
             else:
                 model = self.task.get_model(self.config.model)
             return model
@@ -146,6 +157,11 @@ class EvaluationEngine:
         task_type = self.config.model.task_type
         if task_type == "classification":
             return self._error_analysis_classification(model_path, run_id, max_batches, model_uri=model_uri)
+        if task_type == "segmentation":
+            # Segmentation error analysis reuses evaluate() — mIoU is the
+            # primary diagnostic.  Per-class IoU in the metrics dict reveals
+            # which classes the model struggles with.
+            return self.evaluate(model_path, run_id, model_uri=model_uri, max_batches=max_batches)
         return self._error_analysis_detection(model_path, run_id, max_batches, model_uri=model_uri)
 
     def _error_analysis_classification(

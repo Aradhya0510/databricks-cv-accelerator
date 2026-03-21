@@ -86,6 +86,7 @@ class DatabricksJobClient:
             ),
             libraries=[
                 compute.Library(pypi=compute.PythonPyPiLibrary(package="pycocotools>=2.0.6")),
+                compute.Library(pypi=compute.PythonPyPiLibrary(package="timm")),
             ],
             timeout_seconds=0,  # No timeout
         )
@@ -485,6 +486,7 @@ class DatabricksJobClient:
             new_cluster=compute.ClusterSpec(**cluster_config),
             libraries=[
                 compute.Library(pypi=compute.PythonPyPiLibrary(package="pycocotools>=2.0.6")),
+                compute.Library(pypi=compute.PythonPyPiLibrary(package="timm")),
             ],
         )
 

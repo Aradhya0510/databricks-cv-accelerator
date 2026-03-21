@@ -76,6 +76,7 @@ class TrainingEngine:
         # --- task registry ---
         import src.tasks.detection  # noqa: F401  (triggers @register)
         import src.tasks.classification  # noqa: F401
+        import src.tasks.segmentation  # noqa: F401
 
         task = TaskRegistry.get(config.model.task_type)
 
@@ -176,14 +177,22 @@ class TrainingEngine:
             metrics = trainer.evaluate()
 
             # --- log final model (rank 0, inside the same run) ---
-            if is_rank0:
-                model_info = mlflow.transformers.log_model(
-                    transformers_model=model,
-                    name="model",
-                )
+            if is_rank0 and config.mlflow.log_model:
+                import inspect
+                sig = inspect.signature(mlflow.transformers.log_model)
+                if "name" in sig.parameters:
+                    model_info = mlflow.transformers.log_model(
+                        transformers_model=model,
+                        name="model",
+                    )
+                else:
+                    model_info = mlflow.transformers.log_model(
+                        transformers_model=model,
+                        artifact_path="model",
+                    )
                 mlflow.log_param("logged_model_uri", model_info.model_uri)
-                if config.training.volume_checkpoint_dir:
-                    mlflow.log_param("checkpoint_dir", config.training.volume_checkpoint_dir)
+            if is_rank0 and config.training.volume_checkpoint_dir:
+                mlflow.log_param("checkpoint_dir", config.training.volume_checkpoint_dir)
 
         finally:
             if run_ctx is not None:

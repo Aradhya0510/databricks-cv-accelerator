@@ -4,3 +4,4 @@
 # Keep this minimal — only add packages that cause ImportError on the cluster.
 
 pycocotools>=2.0.6  # COCO dataset handling (detection task)
+timm                # Required by Conditional DETR, DETA, and other timm-backed backbones

@@ -176,6 +176,85 @@ class DetectionPyFuncModel(_BaseCVPyFuncModel):
 # Classification
 # ======================================================================
 
+# ======================================================================
+# Segmentation
+# ======================================================================
+
+class SegmentationPyFuncModel(_BaseCVPyFuncModel):
+    """Wraps a HuggingFace segmentation model for Databricks Model Serving.
+
+    Returns per-pixel class maps as nested lists (JSON-serialisable).
+    """
+
+    def load_context(self, context: mlflow.pyfunc.PythonModelContext) -> None:
+        from transformers import AutoImageProcessor
+
+        model_dir = context.artifacts["model_dir"]
+        self.processor = AutoImageProcessor.from_pretrained(model_dir)
+
+        # Determine model type by trying universal first, then semantic
+        try:
+            from transformers import AutoModelForUniversalSegmentation
+            self.model = AutoModelForUniversalSegmentation.from_pretrained(model_dir)
+            self.model_type = "universal"
+        except Exception:
+            from transformers import AutoModelForSemanticSegmentation
+            self.model = AutoModelForSemanticSegmentation.from_pretrained(model_dir)
+            self.model_type = "semantic"
+
+        self.model.eval()
+
+    def predict(
+        self,
+        context: mlflow.pyfunc.PythonModelContext,
+        model_input: Any,
+        params: Optional[Dict[str, Any]] = None,
+    ) -> List[Dict[str, Any]]:
+        records = self._normalize_input(model_input)
+        results = []
+        for record in records:
+            try:
+                pred = self._predict_single(record)
+                results.append({"predictions": {**pred, "status": "success"}})
+            except Exception as e:
+                results.append({"predictions": {"status": "error", "error": str(e)}})
+        return results
+
+    def _predict_single(self, record: Any) -> Dict[str, Any]:
+        image = self._load_image(record)
+        inputs = self.processor(images=image, return_tensors="pt")
+
+        with torch.no_grad():
+            outputs = self.model(**inputs)
+
+        target_sizes = [image.size[::-1]]  # (H, W)
+
+        if self.model_type == "universal":
+            seg_maps = self.processor.post_process_semantic_segmentation(
+                outputs, target_sizes=target_sizes,
+            )
+            seg_map = seg_maps[0].numpy()
+        else:
+            logits = outputs.logits
+            upsampled = torch.nn.functional.interpolate(
+                logits, size=target_sizes[0], mode="bilinear", align_corners=False,
+            )
+            seg_map = upsampled.argmax(dim=1)[0].numpy()
+
+        unique_classes = np.unique(seg_map).tolist()
+        return {
+            "segmentation_map": seg_map.tolist(),
+            "unique_classes": unique_classes,
+            "num_classes": len(unique_classes),
+            "height": seg_map.shape[0],
+            "width": seg_map.shape[1],
+        }
+
+
+# ======================================================================
+# Classification
+# ======================================================================
+
 class ClassificationPyFuncModel(_BaseCVPyFuncModel):
     """Wraps a HuggingFace image classification model for Databricks Model Serving."""
 
