@@ -21,6 +21,9 @@ class DatabricksJobClient:
         """Initialize Databricks client."""
         self.workspace_client = WorkspaceClient()
         mlflow.set_tracking_uri("databricks")
+        # Three-level catalog.schema.model names are only valid against the
+        # Unity Catalog registry; the workspace default may not be UC.
+        mlflow.set_registry_uri("databricks-uc")
         self.mlflow_client = MlflowClient(tracking_uri="databricks")
     
     def create_training_job(

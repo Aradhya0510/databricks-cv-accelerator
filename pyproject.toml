@@ -33,26 +33,17 @@ dev = [
     "numpy>=1.24",
 ]
 
+# Deliberately not installed as a distribution package. The importable name
+# here is literally ``src``, which is far too generic to claim globally --
+# installing this repo and the SLM accelerator into one environment would have
+# them shadow each other. Code runs from a repo checkout instead: the job
+# entry points put the project root on sys.path, and pytest does the same via
+# the pythonpath setting below.
 [tool.setuptools]
-# The importable package is literally ``src`` — this matches every existing
-# import (``from src.config.schema import ...``) and the notebooks/app, so it
-# stays as-is.  Installing the project makes those imports work without any
-# sys.path manipulation.
-packages = [
-    "src",
-    "src.config",
-    "src.engine",
-    "src.evaluation",
-    "src.monitoring",
-    "src.serving",
-    "src.tasks",
-    "src.tasks.classification",
-    "src.tasks.detection",
-    "src.tasks.segmentation",
-    "src.utils",
-]
+packages = []
 
 [tool.pytest.ini_options]
+pythonpath = ["."]
 testpaths = ["tests"]
 addopts = "-q --strict-markers"
 markers = [

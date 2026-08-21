@@ -102,7 +102,15 @@ def test_classification_rejects_class_names_with_no_directory(classification_dir
 
 
 def test_classification_augmentation_changes_pixels(classification_dir):
+    """Augmentation must actually reach the pixels the dataset returns.
+
+    Transforms fire probabilistically (brightness_contrast is p=0.5), so this
+    draws repeatedly and asserts that at least one draw differs — checking
+    that the pipeline is wired in, without depending on any single draw.
+    """
     pytest.importorskip("albumentations")
+    import random
+
     from src.tasks.augmentation import build_augmentations
 
     plain = ImageFolderClassificationDataset(str(classification_dir))
@@ -112,8 +120,18 @@ def test_classification_augmentation_changes_pixels(classification_dir):
             True, {"brightness_contrast": 0.9}, task_type="classification",
         ),
     )
-    # Same sample index, same label; pixels should differ under augmentation.
+
     plain_px, plain_label = plain[0]
-    aug_px, aug_label = augmented[0]
-    assert plain_label == aug_label
-    assert not np.array_equal(np.asarray(plain_px), np.asarray(aug_px))
+    plain_arr = np.asarray(plain_px)
+
+    random.seed(0)
+    np.random.seed(0)
+    differed = False
+    for _ in range(20):
+        aug_px, aug_label = augmented[0]
+        assert aug_label == plain_label
+        if not np.array_equal(plain_arr, np.asarray(aug_px)):
+            differed = True
+            break
+
+    assert differed, "augmentation never altered the image in 20 draws"
