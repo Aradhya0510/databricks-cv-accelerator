@@ -3,38 +3,51 @@
 from __future__ import annotations
 
 import os
+import shutil
 import tempfile
 from typing import Any, Dict, List, Optional
 
 import mlflow
 from mlflow.models import infer_signature
 
+from .artifacts import resolve_model_dir
 
-def _resolve_model_artifacts(
-    run_id: str,
-    model_uri: Optional[str] = None,
-) -> str:
-    """Download the HF model artifacts logged during training.
 
-    In MLflow 3.x, model artifacts live under a dedicated LoggedModel rather
-    than as run artifacts.  When *model_uri* is provided (preferred) we use
-    it directly.  Otherwise we search for a LoggedModel linked to *run_id*,
-    falling back to the deprecated ``runs:/`` URI scheme.
+def _set_uc_registry() -> None:
+    """Point the MLflow registry at Unity Catalog.
+
+    Three-level ``catalog.schema.model`` names are only valid against the UC
+    registry.  Relying on the workspace default meant registration failed with
+    an opaque name-format error anywhere that default was not already UC.
     """
-    if model_uri:
-        return mlflow.artifacts.download_artifacts(artifact_uri=model_uri)
+    try:
+        if mlflow.get_registry_uri() != "databricks-uc":
+            mlflow.set_registry_uri("databricks-uc")
+    except Exception as exc:  # noqa: BLE001 - non-Databricks tracking backends
+        print(f"Note: could not set the Unity Catalog registry URI ({exc}).")
 
-    client = mlflow.MlflowClient()
 
-    # Prefer the model_uri stored as a run param by the training engine
-    run = client.get_run(run_id)
-    stored_uri = run.data.params.get("logged_model_uri")
-    if stored_uri:
-        return mlflow.artifacts.download_artifacts(artifact_uri=stored_uri)
+_PROCESSOR_FILES = (
+    "preprocessor_config.json",
+    "image_processor_config.json",
+    "processor_config.json",
+)
 
-    # Fallback: runs:/ URI (deprecated in MLflow 3 but still functional)
-    return mlflow.artifacts.download_artifacts(
-        artifact_uri=f"runs:/{run_id}/model",
+
+def _assert_processor_present(model_dir: str) -> None:
+    """Fail loudly when the artifact has no preprocessing config.
+
+    Serving an image model without the processor it was trained with silently
+    changes resize and normalisation, so this is worth catching at
+    registration rather than discovering from degraded predictions.
+    """
+    if any(os.path.isfile(os.path.join(model_dir, f)) for f in _PROCESSOR_FILES):
+        return
+    raise RuntimeError(
+        f"No image processor config found in {model_dir}. The training run did "
+        f"not log the processor alongside the model, so the served model would "
+        f"preprocess differently than it was trained. Contents: "
+        f"{sorted(os.listdir(model_dir))}"
     )
 
 
@@ -65,37 +78,21 @@ def register_model(
     Returns:
         Dict with model_uri, model_version, and registered_model_name.
     """
-    from transformers import AutoImageProcessor
-
     aliases = aliases or ["champion", "latest"]
     tags = tags or {}
 
-    # 1. Download model artifact
-    artifact_path = _resolve_model_artifacts(run_id, model_uri)
+    _set_uc_registry()
 
-    # 2. Save model + processor to a clean temp directory
+    # 1. Resolve a flat local directory holding both the model and its
+    #    processor.  The artifact contract guarantees both are present, so
+    #    there is no need to reload and re-save them here.
+    artifact_path = resolve_model_dir(run_id=run_id, model_uri=model_uri)
+    _assert_processor_present(artifact_path)
+
+    # 2. Copy into a clean directory that becomes the PyFunc's artifact.
     tmpdir = tempfile.mkdtemp(prefix="cv_pyfunc_")
     model_dir = os.path.join(tmpdir, "model_artifacts")
-
-    if task_type == "classification":
-        from transformers import AutoModelForImageClassification
-
-        model = AutoModelForImageClassification.from_pretrained(artifact_path)
-    elif task_type == "segmentation":
-        try:
-            from transformers import AutoModelForUniversalSegmentation
-            model = AutoModelForUniversalSegmentation.from_pretrained(artifact_path)
-        except Exception:
-            from transformers import AutoModelForSemanticSegmentation
-            model = AutoModelForSemanticSegmentation.from_pretrained(artifact_path)
-    else:
-        from transformers import AutoModelForObjectDetection
-
-        model = AutoModelForObjectDetection.from_pretrained(artifact_path)
-
-    processor = AutoImageProcessor.from_pretrained(artifact_path)
-    model.save_pretrained(model_dir)
-    processor.save_pretrained(model_dir)
+    shutil.copytree(artifact_path, model_dir)
 
     # 3. Build input/output signature (task-specific)
     import pandas as pd

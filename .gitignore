@@ -95,3 +95,5 @@ site/
 
 # Internal documentation (audit traces, analysis, backups, etc.)
 docs/internal/ 
+# Packaging
+*.egg-info/

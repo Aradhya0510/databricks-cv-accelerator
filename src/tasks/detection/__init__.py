@@ -13,6 +13,7 @@ from transformers.trainer_utils import EvalLoopOutput
 
 from ...config.schema import PipelineConfig, ModelConfig
 from ...registry import TaskRegistry
+from ...utils.labels import apply_label_names
 from .adapters import get_input_adapter, get_output_adapter
 from .collate import detection_collate_fn
 from .data import COCODetectionDataset
@@ -38,7 +39,16 @@ class DetectionTask:
         model.config.confidence_threshold = model_cfg.confidence_threshold
         model.config.iou_threshold = model_cfg.iou_threshold
         model.config.max_detections = model_cfg.max_detections
+        apply_label_names(model, model_cfg.class_names, model_cfg.num_classes)
         return model
+
+    def get_processor(self, model_cfg: ModelConfig):
+        """The image processor that must be logged alongside the model.
+
+        Serving has to preprocess exactly the way training did, so this is the
+        same processor the input adapter builds.
+        """
+        return self.get_input_adapter(model_cfg).processor
 
     # ------------------------------------------------------------------
     # Datasets
@@ -65,8 +75,18 @@ class DetectionTask:
     def get_input_adapter(self, model_cfg: ModelConfig):
         return get_input_adapter(model_cfg.model_name, image_size=model_cfg.image_size_scalar)
 
-    def get_output_adapter(self, model_cfg: ModelConfig):
-        return get_output_adapter(model_cfg.model_name, image_size=model_cfg.image_size_scalar)
+    def get_output_adapter(self, model_cfg: ModelConfig, score_threshold: float = 0.0):
+        """Output adapter for this model.
+
+        Defaults to an unfiltered score threshold because that is what mAP
+        needs; callers doing inference should pass
+        ``model_cfg.confidence_threshold``.
+        """
+        return get_output_adapter(
+            model_cfg.model_name,
+            image_size=model_cfg.image_size_scalar,
+            score_threshold=score_threshold,
+        )
 
     # ------------------------------------------------------------------
     # Collate
@@ -156,8 +176,13 @@ class DetectionTask:
         ) -> EvalLoopOutput:
             from torchmetrics.detection import MeanAveragePrecision
 
+            # sync_on_compute=False is the supported way to keep this CPU-side
+            # metric from attempting a distributed all-gather.  The previous
+            # approach reassigned torch.distributed.is_initialized globally,
+            # which is unsafe under any concurrency.
             metric = MeanAveragePrecision(
                 box_format="xyxy", iou_type="bbox", class_metrics=True,
+                sync_on_compute=False,
             )
             device = args.device
 
@@ -193,14 +218,7 @@ class DetectionTask:
                 ]
                 metric.update(preds=preds_cpu, target=targets_cpu)
 
-            # Temporarily disable distributed sync for torchmetrics —
-            # metric lives on CPU and there is no CPU distributed backend.
-            _orig_is_init = torch.distributed.is_initialized
-            torch.distributed.is_initialized = lambda: False
-            try:
-                map_metrics = metric.compute()
-            finally:
-                torch.distributed.is_initialized = _orig_is_init
+            map_metrics = metric.compute()
 
             metrics: Dict[str, float] = {}
             metrics[f"{metric_key_prefix}_loss"] = total_loss / max(num_batches, 1)

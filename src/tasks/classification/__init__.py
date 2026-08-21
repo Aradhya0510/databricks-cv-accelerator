@@ -13,6 +13,7 @@ from transformers.trainer_utils import EvalLoopOutput
 
 from ...config.schema import PipelineConfig, ModelConfig
 from ...registry import TaskRegistry
+from ...utils.labels import apply_label_names
 from .data import ImageFolderClassificationDataset
 from .collate import classification_collate_fn
 
@@ -40,7 +41,12 @@ class ClassificationTask:
             config=hf_config,
             ignore_mismatched_sizes=True,
         )
+        apply_label_names(model, model_cfg.class_names, model_cfg.num_classes)
         return model
+
+    def get_processor(self, model_cfg: ModelConfig) -> AutoImageProcessor:
+        """The image processor that must be logged alongside the model."""
+        return self._get_processor(model_cfg)
 
     # ------------------------------------------------------------------
     # Datasets

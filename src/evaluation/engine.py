@@ -13,6 +13,7 @@ from torch.utils.data import DataLoader
 
 from ..config.schema import PipelineConfig
 from ..registry import TaskRegistry
+from .matching import box_iou as _box_iou, match_predictions
 
 
 class EvaluationEngine:
@@ -250,7 +251,10 @@ class EvaluationEngine:
         model = model.to(device).eval()
 
         dataloader = self._get_val_dataloader()
-        output_adapter = self.task.get_output_adapter(self.config.model)
+        output_adapter = self.task.get_output_adapter(
+            self.config.model,
+            score_threshold=self.config.model.confidence_threshold,
+        )
 
         iou_threshold = self.config.model.iou_threshold
         stats: Dict[str, int] = {
@@ -285,36 +289,24 @@ class EvaluationEngine:
             for pred, target in zip(preds, targets):
                 pred_boxes = pred["boxes"].cpu()
                 pred_labels = pred["labels"].cpu()
+                pred_scores = pred.get("scores")
+                if pred_scores is not None:
+                    pred_scores = pred_scores.cpu()
                 gt_boxes = target["boxes"].cpu()
                 gt_labels = target["labels"].cpu()
 
                 stats["total_predictions"] += len(pred_boxes)
                 stats["total_ground_truths"] += len(gt_boxes)
 
-                matched_gt = set()
-
-                for pi in range(len(pred_boxes)):
-                    if len(gt_boxes) == 0:
-                        stats["false_positives_background"] += 1
-                        continue
-
-                    ious = _box_iou(pred_boxes[pi].unsqueeze(0), gt_boxes).squeeze(0)
-                    best_iou, best_idx = ious.max(0) if ious.numel() > 0 else (torch.tensor(0.0), torch.tensor(0))
-                    best_idx = int(best_idx)
-
-                    if best_iou >= iou_threshold and best_idx not in matched_gt:
-                        if pred_labels[pi] == gt_labels[best_idx]:
-                            stats["true_positives"] += 1
-                            matched_gt.add(best_idx)
-                        else:
-                            stats["false_positives_confusion"] += 1
-                            _inc(per_class_errors, int(gt_labels[best_idx]), "confusion")
-                    elif best_iou >= 0.1:
-                        stats["false_positives_localisation"] += 1
-                    else:
-                        stats["false_positives_background"] += 1
-
-                stats["false_negatives"] += len(gt_boxes) - len(matched_gt)
+                counts, confusions = match_predictions(
+                    pred_boxes, pred_labels, pred_scores,
+                    gt_boxes, gt_labels,
+                    iou_threshold=iou_threshold,
+                )
+                for key, value in counts.items():
+                    stats[key] += value
+                for class_id, error_type in confusions:
+                    _inc(per_class_errors, class_id, error_type)
 
         result = {
             "summary": stats,
@@ -442,21 +434,6 @@ def _limit_dataloader(dataloader: DataLoader, max_batches: int):
                 yield batch
 
     return _Limited(dataloader, max_batches)
-
-
-def _box_iou(boxes1: torch.Tensor, boxes2: torch.Tensor) -> torch.Tensor:
-    """Compute IoU between two sets of boxes in xyxy format."""
-    area1 = (boxes1[:, 2] - boxes1[:, 0]) * (boxes1[:, 3] - boxes1[:, 1])
-    area2 = (boxes2[:, 2] - boxes2[:, 0]) * (boxes2[:, 3] - boxes2[:, 1])
-
-    inter_x1 = torch.max(boxes1[:, None, 0], boxes2[:, 0])
-    inter_y1 = torch.max(boxes1[:, None, 1], boxes2[:, 1])
-    inter_x2 = torch.min(boxes1[:, None, 2], boxes2[:, 2])
-    inter_y2 = torch.min(boxes1[:, None, 3], boxes2[:, 3])
-
-    inter = (inter_x2 - inter_x1).clamp(min=0) * (inter_y2 - inter_y1).clamp(min=0)
-    union = area1[:, None] + area2 - inter
-    return inter / union.clamp(min=1e-6)
 
 
 def _inc(d: dict, class_id: int, error_type: str) -> None:

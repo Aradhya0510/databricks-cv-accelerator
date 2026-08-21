@@ -13,6 +13,7 @@ from transformers.trainer_utils import EvalLoopOutput
 
 from ...config.schema import PipelineConfig, ModelConfig
 from ...registry import TaskRegistry
+from ...utils.labels import apply_label_names
 from ...utils.coco import COCOAnnotationType, detect_annotation_type
 from .adapters import (
     detect_segmentation_family,
@@ -20,6 +21,7 @@ from .adapters import (
     postprocess_semantic,
 )
 from .collate import segmentation_collate_fn
+from .metrics import SegmentationMetrics
 from .data import (
     COCOInstanceSegmentationDataset,
     COCOPanopticSegmentationDataset,
@@ -66,7 +68,14 @@ class SegmentationTask:
                 config=hf_config,
                 ignore_mismatched_sizes=True,
             )
+        apply_label_names(model, model_cfg.class_names, model_cfg.num_classes)
         return model
+
+    def get_processor(self, model_cfg: ModelConfig) -> AutoImageProcessor:
+        """The image processor that must be logged alongside the model."""
+        return get_input_adapter(
+            model_cfg.model_name, image_size=model_cfg.image_size_scalar,
+        ).processor
 
     # ------------------------------------------------------------------
     # Datasets
@@ -223,10 +232,8 @@ class SegmentationTask:
 
             total_loss = 0.0
             num_batches = 0
-
-            # Per-class intersection and union accumulators
-            intersection = torch.zeros(num_classes, dtype=torch.long)
-            union = torch.zeros(num_classes, dtype=torch.long)
+            num_images = 0
+            accumulator = SegmentationMetrics(num_classes)
 
             for inputs in dataloader:
                 pixel_values = inputs["pixel_values"].to(device)
@@ -249,6 +256,7 @@ class SegmentationTask:
                 if outputs.loss is not None:
                     total_loss += outputs.loss.item()
                 num_batches += 1
+                num_images += pixel_values.shape[0]
 
                 # Produce per-pixel predictions
                 if family_cfg.model_type == "universal":
@@ -281,51 +289,18 @@ class SegmentationTask:
                     continue
 
                 for pred, gt in zip(pred_maps, gt_list):
-                    pred_flat = pred.long().flatten()
-                    gt_flat = gt.long().flatten()
-                    valid = gt_flat < num_classes
-                    pred_flat = pred_flat[valid]
-                    gt_flat = gt_flat[valid]
+                    accumulator.update(pred, gt)
 
-                    for cls in range(num_classes):
-                        pred_mask = pred_flat == cls
-                        gt_mask = gt_flat == cls
-                        intersection[cls] += (pred_mask & gt_mask).sum().item()
-                        union[cls] += (pred_mask | gt_mask).sum().item()
-
-            # Compute IoU per class
-            iou_per_class = torch.zeros(num_classes)
-            active_classes = 0
-            for cls in range(num_classes):
-                if union[cls] > 0:
-                    iou_per_class[cls] = intersection[cls].float() / union[cls].float()
-                    active_classes += 1
-
-            mean_iou = iou_per_class.sum().item() / max(active_classes, 1)
-
-            metrics: Dict[str, float] = {}
-            metrics[f"{metric_key_prefix}_loss"] = total_loss / max(num_batches, 1)
-            metrics[f"{metric_key_prefix}_miou"] = mean_iou
-
-            # Per-class IoU
-            for cls in range(num_classes):
-                if union[cls] > 0:
-                    metrics[f"{metric_key_prefix}_iou_class_{cls}"] = float(
-                        iou_per_class[cls].item()
-                    )
-
-            # Pixel accuracy
-            total_correct = intersection.sum().item()
-            total_pixels = union.sum().item()
-            if total_pixels > 0:
-                pixel_acc = total_correct / total_pixels
-                metrics[f"{metric_key_prefix}_pixel_accuracy"] = pixel_acc
+            metrics: Dict[str, float] = {
+                f"{metric_key_prefix}_loss": total_loss / max(num_batches, 1),
+            }
+            metrics.update(accumulator.compute(prefix=metric_key_prefix))
 
             return EvalLoopOutput(
                 predictions=None,
                 label_ids=None,
                 metrics=metrics,
-                num_samples=num_batches * (dataloader.batch_size or 1),
+                num_samples=num_images,
             )
 
         return _eval_fn

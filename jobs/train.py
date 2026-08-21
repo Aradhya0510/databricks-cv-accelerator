@@ -15,30 +15,26 @@ import os
 import sys
 from pathlib import Path
 
-# Ensure src/ is importable.
-# On Databricks, spark_python_task runs via exec() where __file__ is not defined.
-# Fall back to inspecting the script path from sys.argv or the config_path parent.
+# Support running this file straight from a repo checkout (Databricks Repos,
+# ``python jobs/train.py``) as well as from an installed package.  Only the
+# project root goes on the path — adding ``src/`` too would make both
+# ``import config`` and ``import src.config`` resolve, to two different module
+# objects.  Runtime dependencies are installed from main(), not at import time.
 try:
     _this_file = Path(__file__).resolve()
-except NameError:
-    # Databricks exec() context — derive project root from the python_file path
-    # that Spark passes as the first positional element before argparse runs.
+except NameError:  # Databricks spark_python_task exec() context
     _this_file = Path(sys.argv[0]).resolve() if sys.argv else Path(os.getcwd())
 
-_project_root = _this_file.parent.parent
-sys.path.insert(0, str(_project_root / "src"))
-sys.path.insert(0, str(_project_root))
-
-_runtime_reqs = _project_root / "requirements_runtime.txt"
-if _runtime_reqs.exists():
-    import subprocess
-    subprocess.check_call(
-        [sys.executable, "-m", "pip", "install", "-q", "-r", str(_runtime_reqs)],
-        stdout=subprocess.DEVNULL,
-    )
+_PROJECT_ROOT = _this_file.parent.parent
+if str(_PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(_PROJECT_ROOT))
 
 
 def main():
+    from src.utils.environment import ensure_runtime_requirements
+
+    ensure_runtime_requirements(_PROJECT_ROOT / "requirements_runtime.txt")
+
     parser = argparse.ArgumentParser(description="Train a CV model with HF Trainer")
     parser.add_argument("--config_path", type=str, required=True, help="Path to YAML config file")
     parser.add_argument("--num_gpus", type=int, default=None, help="Number of GPUs (auto-detected if omitted)")

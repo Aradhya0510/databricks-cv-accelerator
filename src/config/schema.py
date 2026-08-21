@@ -74,6 +74,31 @@ class ModelConfig(BaseModel):
             return v.lower() in ("true", "1", "yes")
         return bool(v)
 
+    @field_validator("task_type")
+    @classmethod
+    def _validate_task_type(cls, v: str) -> str:
+        allowed = {"detection", "classification", "segmentation"}
+        if v not in allowed:
+            raise ValueError(
+                f"task_type must be one of {sorted(allowed)}, got '{v}'"
+            )
+        return v
+
+    @model_validator(mode="after")
+    def _check_class_names_length(self) -> "ModelConfig":
+        """``class_names`` must line up with ``num_classes``.
+
+        These were previously independent, so a mismatch surfaced either as a
+        silently oversized model head or as an index error deep inside the loss.
+        """
+        if self.class_names is not None and len(self.class_names) != self.num_classes:
+            raise ValueError(
+                f"class_names has {len(self.class_names)} entries but "
+                f"num_classes is {self.num_classes} — they must match. "
+                f"class_names={self.class_names}"
+            )
+        return self
+
     @property
     def image_size_scalar(self) -> int:
         """Return image size as a single int (takes first element if list)."""
@@ -120,7 +145,30 @@ class TrainingConfig(BaseModel):
     log_every_n_steps: int = 50
     use_gpu: bool = True
 
+    # Reproducibility: seeds torch, numpy and the dataloaders, and is used for
+    # any dataset splitting.  Logged as an MLflow param so a run can be repeated.
+    seed: int = 42
+
+    # Mixed precision.  ``auto`` picks bf16 when the GPU supports it, else fp16,
+    # else fp32 — V100 and T4 do not support bf16 and used to fail outright.
+    precision: str = "auto"
+
     model_config = {"extra": "allow"}
+
+    @field_validator("monitor_mode")
+    @classmethod
+    def _validate_monitor_mode(cls, v: str) -> str:
+        if v not in {"min", "max"}:
+            raise ValueError(f"monitor_mode must be 'min' or 'max', got '{v}'")
+        return v
+
+    @field_validator("precision")
+    @classmethod
+    def _validate_precision(cls, v: str) -> str:
+        allowed = {"auto", "bf16", "fp16", "fp32"}
+        if v not in allowed:
+            raise ValueError(f"precision must be one of {sorted(allowed)}, got '{v}'")
+        return v
 
     @field_validator("max_epochs", "early_stopping_patience", "save_top_k", "log_every_n_steps", mode="before")
     @classmethod
