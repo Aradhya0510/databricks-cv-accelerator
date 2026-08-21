@@ -53,8 +53,29 @@ class SegmentationMetrics:
             self.intersection[cls] += int((pred_mask & target_mask).sum().item())
             self.union[cls] += int((pred_mask | target_mask).sum().item())
 
+    def reduce_across_ranks(self) -> None:
+        """Sum the accumulators over every rank.
+
+        Under DDP each rank sees a shard of the validation set, so without
+        this the reported mIoU covers only ~1/world_size of the data.
+        """
+        from ...utils.distributed import all_reduce_sum, is_distributed
+
+        if not is_distributed():
+            return
+
+        self.intersection = all_reduce_sum(self.intersection)
+        self.union = all_reduce_sum(self.union)
+
+        counts = torch.tensor([self.correct_pixels, self.total_pixels], dtype=torch.long)
+        counts = all_reduce_sum(counts)
+        self.correct_pixels = int(counts[0].item())
+        self.total_pixels = int(counts[1].item())
+
     def compute(self, prefix: str = "eval") -> Dict[str, float]:
         """Return mIoU, per-class IoU, and pixel accuracy."""
+        self.reduce_across_ranks()
+
         metrics: Dict[str, float] = {}
 
         iou_sum = 0.0

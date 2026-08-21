@@ -14,6 +14,7 @@ from transformers.trainer_utils import EvalLoopOutput
 from ...config.schema import PipelineConfig, ModelConfig
 from ...registry import TaskRegistry
 from ..augmentation import build_augmentations
+from ...utils.distributed import all_gather_tensor
 from ...utils.labels import apply_label_names
 from .data import ImageFolderClassificationDataset
 from .collate import classification_collate_fn
@@ -188,6 +189,13 @@ class ClassificationTask:
 
             all_preds = torch.cat(all_preds)
             all_labels = torch.cat(all_labels)
+
+            # Under DDP each rank holds a shard of the validation set; without
+            # gathering, the reported accuracy covers only ~1/world_size of it
+            # and rank 0's partial number drives early stopping.
+            all_preds = all_gather_tensor(all_preds)
+            all_labels = all_gather_tensor(all_labels)
+
             num_samples = len(all_preds)
 
             # Accuracy

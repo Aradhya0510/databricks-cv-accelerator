@@ -14,6 +14,7 @@ from transformers.trainer_utils import EvalLoopOutput
 from ...config.schema import PipelineConfig, ModelConfig
 from ...registry import TaskRegistry
 from ..augmentation import build_augmentations
+from ...utils.distributed import all_gather_objects
 from ...utils.labels import apply_label_names
 from .adapters import get_input_adapter, get_output_adapter
 from .collate import detection_collate_fn
@@ -225,7 +226,16 @@ class DetectionTask:
                     {k: v.detach().cpu() if isinstance(v, torch.Tensor) else v for k, v in t.items()}
                     for t in targets
                 ]
-                metric.update(preds=preds_cpu, target=targets_cpu)
+                # Under DDP each rank holds a shard of the validation set, so
+                # predictions are gathered before the metric sees them --
+                # otherwise mAP would cover only ~1/world_size of the data.
+                gathered_preds = [
+                    p for chunk in all_gather_objects(preds_cpu) for p in chunk
+                ]
+                gathered_targets = [
+                    t for chunk in all_gather_objects(targets_cpu) for t in chunk
+                ]
+                metric.update(preds=gathered_preds, target=gathered_targets)
 
             map_metrics = metric.compute()
 
