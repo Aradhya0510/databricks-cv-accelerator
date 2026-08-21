@@ -4,15 +4,25 @@ from __future__ import annotations
 
 import json
 import os
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any, Dict, Optional
 
 
 class EndpointMonitor:
     """Observability for a deployed Databricks Model Serving endpoint."""
 
-    def __init__(self, endpoint_name: str):
+    def __init__(self, endpoint_name: str, thresholds: Optional[Any] = None):
+        """
+        Args:
+            endpoint_name: Serving endpoint to observe.
+            thresholds: A ``MonitoringConfig`` (or anything exposing the same
+                attributes).  When given, :meth:`generate_report` evaluates the
+                collected metrics against it and lists any breaches, so a
+                scheduled job can actually fail on a bad endpoint instead of
+                just printing numbers.
+        """
         self.endpoint_name = endpoint_name
+        self.thresholds = thresholds
         self._init_client()
 
     def _init_client(self) -> None:
@@ -45,15 +55,43 @@ class EndpointMonitor:
             "ready": getattr(state, "ready", None),
             "config_update": getattr(state, "config_update", None),
             "served_models": served_models,
-            "checked_at": datetime.utcnow().isoformat(),
+            "checked_at": datetime.now(timezone.utc).isoformat(),
         }
+
+
+    # ------------------------------------------------------------------
+    # Query execution
+    # ------------------------------------------------------------------
+    def _execute(self, sql: str, parameters: Optional[list] = None):
+        """Run a statement with bound parameters.
+
+        Interpolating the endpoint name into SQL made this injectable from
+        anywhere the name reaches — the CLI, and the Streamlit monitoring form.
+        The statement runs under the caller's identity against a SQL warehouse,
+        so the blast radius was everything that principal can read in Unity
+        Catalog.  Values are bound, never formatted in.
+        """
+        from databricks.sdk.service.sql import StatementParameterListItem
+
+        params = None
+        if parameters:
+            params = [
+                StatementParameterListItem(name=name, value=str(value), type=sql_type)
+                for name, value, sql_type in parameters
+            ]
+
+        return self.w.statement_execution.execute_statement(
+            warehouse_id=self._get_warehouse_id(),
+            statement=sql,
+            parameters=params,
+        )
 
     # ------------------------------------------------------------------
     # Request metrics (via system.serving tables)
     # ------------------------------------------------------------------
     def get_request_metrics(self, hours: int = 24) -> dict:
         """Query system.serving.served_model_requests for request-level metrics."""
-        sql = f"""
+        sql = """
         SELECT
             COUNT(*) AS total_requests,
             SUM(CASE WHEN status_code >= 400 THEN 1 ELSE 0 END) AS error_count,
@@ -62,17 +100,17 @@ class EndpointMonitor:
             PERCENTILE(execution_time_ms, 0.95) AS p95_latency_ms,
             PERCENTILE(execution_time_ms, 0.99) AS p99_latency_ms
         FROM system.serving.served_model_requests
-        WHERE served_entity_name = '{self.endpoint_name}'
-          AND request_time >= CURRENT_TIMESTAMP - INTERVAL {hours} HOURS
+        WHERE served_entity_name = :endpoint_name
+          AND request_time >= CURRENT_TIMESTAMP - make_interval(0, 0, 0, 0, :hours, 0, 0)
         """
 
         try:
             from databricks.sdk.service.sql import StatementState
 
-            result = self.w.statement_execution.execute_statement(
-                warehouse_id=self._get_warehouse_id(),
-                statement=sql,
-            )
+            result = self._execute(sql, [
+                ("endpoint_name", self.endpoint_name, "STRING"),
+                ("hours", int(hours), "INT"),
+            ])
 
             if result.status and result.status.state == StatementState.SUCCEEDED:
                 rows = result.result.data_array if result.result else []
@@ -99,23 +137,23 @@ class EndpointMonitor:
     # ------------------------------------------------------------------
     def get_prediction_distribution(self, hours: int = 24) -> dict:
         """Approximate class distribution and confidence stats from request logs."""
-        sql = f"""
+        sql = """
         SELECT
             response,
             request_time
         FROM system.serving.served_model_requests
-        WHERE served_entity_name = '{self.endpoint_name}'
+        WHERE served_entity_name = :endpoint_name
           AND status_code = 200
-          AND request_time >= CURRENT_TIMESTAMP - INTERVAL {hours} HOURS
+          AND request_time >= CURRENT_TIMESTAMP - make_interval(0, 0, 0, 0, :hours, 0, 0)
         ORDER BY request_time DESC
         LIMIT 1000
         """
 
         try:
-            result = self.w.statement_execution.execute_statement(
-                warehouse_id=self._get_warehouse_id(),
-                statement=sql,
-            )
+            result = self._execute(sql, [
+                ("endpoint_name", self.endpoint_name, "STRING"),
+                ("hours", int(hours), "INT"),
+            ])
 
             class_counts: Dict[int, int] = {}
             all_scores: list = []
@@ -147,14 +185,52 @@ class EndpointMonitor:
     # ------------------------------------------------------------------
     # Report
     # ------------------------------------------------------------------
+    def evaluate_thresholds(self, metrics: dict) -> list:
+        """Compare collected metrics against the configured thresholds.
+
+        Returns a list of breach dicts.  Without this the thresholds in
+        MonitoringConfig were pure decoration: nothing ever compared a
+        measurement to them, so a scheduled monitor job could never report
+        that anything was wrong.
+        """
+        if self.thresholds is None:
+            return []
+
+        breaches = []
+
+        error_rate = metrics.get("error_rate")
+        limit = getattr(self.thresholds, "error_rate_threshold", None)
+        if error_rate is not None and limit is not None and error_rate > limit:
+            breaches.append({
+                "metric": "error_rate",
+                "value": error_rate,
+                "threshold": limit,
+            })
+
+        p95 = metrics.get("p95_latency_ms")
+        limit = getattr(self.thresholds, "latency_p95_threshold_ms", None)
+        if p95 is not None and limit is not None and p95 > limit:
+            breaches.append({
+                "metric": "p95_latency_ms",
+                "value": p95,
+                "threshold": limit,
+            })
+
+        return breaches
+
     def generate_report(self, output_path: Optional[str] = None) -> dict:
         """Generate a combined monitoring report."""
+        request_metrics = self.get_request_metrics(hours=24)
+        breaches = self.evaluate_thresholds(request_metrics)
+
         report = {
             "endpoint_name": self.endpoint_name,
-            "generated_at": datetime.utcnow().isoformat(),
+            "generated_at": datetime.now(timezone.utc).isoformat(),
             "health": self.get_health(),
-            "request_metrics_24h": self.get_request_metrics(hours=24),
+            "request_metrics_24h": request_metrics,
             "prediction_distribution_24h": self.get_prediction_distribution(hours=24),
+            "threshold_breaches": breaches,
+            "status": "BREACH" if breaches else "OK",
         }
 
         if output_path:

@@ -11,7 +11,7 @@ Fine-tuning CV models on Databricks involves gluing together data loading, Huggi
 - **Model adapters as config, not class hierarchies.** Each model family's quirks — pixel mask requirements, box format, output attributes, model API type — are captured in a lightweight dataclass (`DetectionFamilyConfig`, `SegmentationFamilyConfig`). A `detect_*_family()` function selects the right config by substring matching on the model name. Adding a new architecture means adding a dict entry — no new class, no inheritance.
 - **Task-agnostic.** Detection, classification, and segmentation work today. Add new tasks by implementing a single class. The engine, evaluation, serving, and monitoring layers all adapt automatically.
 - **Databricks-native.** Unity Catalog Volumes for data, MLflow for tracking, Model Serving for deployment, system tables for monitoring. Everything wired together.
-- **Multi-GPU out of the box.** HF Trainer handles DDP natively. Pass `--num_gpus 4` and it works. No Spark orchestration overhead for single-node.
+- **Multi-GPU out of the box.** Pass `--num_gpus 4` and training runs one process per GPU under real DDP, launched via `TorchDistributor` in local mode — no manual `torchrun`.
 - **Full lifecycle.** Train, evaluate (mAP/accuracy + error analysis + latency benchmarks), register to Unity Catalog, deploy to Model Serving, and monitor — all from the same framework.
 
 ## What You Can Do
@@ -254,16 +254,43 @@ All three formats work with all segmentation models. The framework auto-detects 
 
 ## Multi-GPU
 
-- **Single-node (default):** HF Trainer handles DDP natively. Pass `--num_gpus N` or auto-detect.
-- **Multi-node (opt-in):** Pass `--distributed torchd` to use TorchDistributor across Spark workers.
+Real DDP needs **one process per GPU**. Running the training script as a plain
+`python` process and letting HF Trainer see several GPUs gives you
+`nn.DataParallel` instead — a single process driving every GPU, which is
+slower and interprets `per_device_train_batch_size` as the *total* batch rather
+than the per-GPU batch. So multi-GPU always goes through `TorchDistributor`:
+
+| `--distributed` | What it does | When |
+|---|---|---|
+| `auto` (default) | One process per visible GPU on this node | Normal use |
+| `single` | Forces one process, pinned to one GPU | Debugging |
+| `local` | Single-node multi-process DDP | Explicit form of `auto` |
+| `multinode` | Spreads processes across Spark workers | Cluster has workers |
 
 ```bash
-# 4x A10G on a single node
+# 4x A10G on a single node — one process per GPU
 python jobs/train.py --config_path configs/my_config.yaml --num_gpus 4
 
-# Multi-node via TorchDistributor (only when needed)
-python jobs/train.py --config_path configs/my_config.yaml --distributed torchd
+# Single process, for debugging
+python jobs/train.py --config_path configs/my_config.yaml --distributed single
+
+# Multi-node, across Spark workers
+python jobs/train.py --config_path configs/my_config.yaml --distributed multinode
 ```
+
+Note that `multinode` requires a cluster that actually has worker nodes; on a
+single-node GPU cluster it has nothing to distribute to.
+
+## Testing
+
+```bash
+pip install -e ".[dev]"
+pytest
+```
+
+The suite is offline and CPU-only by design — models are built from configs in
+code rather than downloaded — so it runs anywhere and cannot be broken by a
+HuggingFace Hub outage.
 
 ## Lakehouse App
 

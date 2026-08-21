@@ -13,6 +13,9 @@ from transformers.trainer_utils import EvalLoopOutput
 
 from ...config.schema import PipelineConfig, ModelConfig
 from ...registry import TaskRegistry
+from ..augmentation import build_augmentations
+from ...utils.distributed import all_gather_tensor
+from ...utils.labels import apply_label_names
 from .data import ImageFolderClassificationDataset
 from .collate import classification_collate_fn
 
@@ -40,7 +43,12 @@ class ClassificationTask:
             config=hf_config,
             ignore_mismatched_sizes=True,
         )
+        apply_label_names(model, model_cfg.class_names, model_cfg.num_classes)
         return model
+
+    def get_processor(self, model_cfg: ModelConfig) -> AutoImageProcessor:
+        """The image processor that must be logged alongside the model."""
+        return self._get_processor(model_cfg)
 
     # ------------------------------------------------------------------
     # Datasets
@@ -51,6 +59,12 @@ class ClassificationTask:
             root_dir=config.data.train_data_path,
             processor=processor,
             class_names=config.model.class_names,
+            augmentations=build_augmentations(
+                config.data.augment,
+                config.data.augmentations,
+                task_type="classification",
+                image_size=config.model.image_size_scalar,
+            ),
         )
 
     def get_val_dataset(self, config: PipelineConfig) -> ImageFolderClassificationDataset:
@@ -175,6 +189,13 @@ class ClassificationTask:
 
             all_preds = torch.cat(all_preds)
             all_labels = torch.cat(all_labels)
+
+            # Under DDP each rank holds a shard of the validation set; without
+            # gathering, the reported accuracy covers only ~1/world_size of it
+            # and rank 0's partial number drives early stopping.
+            all_preds = all_gather_tensor(all_preds)
+            all_labels = all_gather_tensor(all_labels)
+
             num_samples = len(all_preds)
 
             # Accuracy

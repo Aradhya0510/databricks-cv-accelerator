@@ -30,7 +30,9 @@ training:
   early_stopping_patience: 10
   monitor_metric: val_miou
   monitor_mode: max
-  checkpoint_dir: /Volumes/<catalog>/<schema>/<volume>/<path>/checkpoints/segformer
+  # Fast local disk: HF Trainer writes checkpoints here, and
+  # volume_checkpoint_dir below mirrors them to the Volume.
+  checkpoint_dir: /local_disk0/checkpoints/segformer
   volume_checkpoint_dir: /Volumes/<catalog>/<schema>/<volume>/<path>/volume_checkpoints/segformer
   save_top_k: 3
   log_every_n_steps: 50

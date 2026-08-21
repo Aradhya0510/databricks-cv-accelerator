@@ -150,6 +150,10 @@ with tab1:
                     try:
                         import mlflow
                         mlflow.set_tracking_uri("databricks")
+                        # Three-level catalog.schema.model names are only
+                        # valid against the Unity Catalog registry; the
+                        # workspace default may not be UC.
+                        mlflow.set_registry_uri("databricks-uc")
 
                         if eff_model_uri:
                             model_uri = eff_model_uri

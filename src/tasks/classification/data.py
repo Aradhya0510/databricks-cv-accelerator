@@ -33,9 +33,12 @@ class ImageFolderClassificationDataset(torch.utils.data.Dataset):
         root_dir: str,
         processor: Optional[AutoImageProcessor] = None,
         class_names: Optional[List[str]] = None,
+        augmentations: Optional[Any] = None,
     ):
         self.root_dir = Path(root_dir)
         self.processor = processor
+        # Applied to the raw image before the processor. Training split only.
+        self.augmentations = augmentations
 
         # Discover classes from subdirectories
         subdirs = sorted(
@@ -49,6 +52,18 @@ class ImageFolderClassificationDataset(torch.utils.data.Dataset):
         else:
             self.class_names = [d.name for d in subdirs]
             self.class_to_idx = {d.name: idx for idx, d in enumerate(subdirs)}
+
+        # A configured class with no corresponding directory means the data
+        # does not match the config; that used to silently yield zero samples
+        # for that class.
+        if class_names:
+            missing = set(class_names) - {d.name for d in subdirs}
+            if missing:
+                raise ValueError(
+                    f"class_names lists {sorted(missing)}, but {self.root_dir} "
+                    f"has no such subdirectories. Found: "
+                    f"{sorted(d.name for d in subdirs)}"
+                )
 
         # Collect all image paths and their labels
         self.samples: List[Tuple[Path, int]] = []
@@ -67,6 +82,13 @@ class ImageFolderClassificationDataset(torch.utils.data.Dataset):
     def __getitem__(self, idx: int) -> Tuple[Any, int]:
         img_path, label = self.samples[idx]
         image = Image.open(img_path).convert("RGB")
+
+        if self.augmentations is not None:
+            import numpy as np
+
+            image = Image.fromarray(
+                self.augmentations(image=np.array(image))["image"]
+            )
 
         if self.processor is not None:
             processed = self.processor(image, return_tensors="pt")

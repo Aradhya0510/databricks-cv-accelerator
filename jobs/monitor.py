@@ -12,22 +12,19 @@ import os
 import sys
 from pathlib import Path
 
+# Support running this file straight from a repo checkout (Databricks Repos,
+# ``python jobs/monitor.py``) as well as from an installed package.  Only the
+# project root goes on the path — adding ``src/`` too would make both
+# ``import config`` and ``import src.config`` resolve, to two different module
+# objects.  Runtime dependencies are installed from main(), not at import time.
 try:
     _this_file = Path(__file__).resolve()
-except NameError:
+except NameError:  # Databricks spark_python_task exec() context
     _this_file = Path(sys.argv[0]).resolve() if sys.argv else Path(os.getcwd())
 
-_project_root = _this_file.parent.parent
-sys.path.insert(0, str(_project_root / "src"))
-sys.path.insert(0, str(_project_root))
-
-_runtime_reqs = _project_root / "requirements_runtime.txt"
-if _runtime_reqs.exists():
-    import subprocess
-    subprocess.check_call(
-        [sys.executable, "-m", "pip", "install", "-q", "-r", str(_runtime_reqs)],
-        stdout=subprocess.DEVNULL,
-    )
+_PROJECT_ROOT = _this_file.parent.parent
+if str(_PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(_PROJECT_ROOT))
 
 
 def main():
@@ -35,11 +32,22 @@ def main():
     parser.add_argument("--endpoint_name", type=str, required=True, help="Serving endpoint name")
     parser.add_argument("--hours", type=int, default=24, help="Lookback window in hours")
     parser.add_argument("--output_dir", type=str, default="/tmp/monitoring", help="Report output directory")
+    parser.add_argument("--config_path", type=str, default=None,
+                        help="Pipeline config supplying the monitoring thresholds")
+    parser.add_argument("--fail_on_breach", action="store_true",
+                        help="Exit non-zero when a threshold is breached, so a "
+                             "scheduled job alerts instead of silently passing")
     args = parser.parse_args()
 
     from src.monitoring import EndpointMonitor
 
-    monitor = EndpointMonitor(args.endpoint_name)
+    thresholds = None
+    if args.config_path:
+        from src.config.schema import load_config
+
+        thresholds = load_config(args.config_path).monitoring
+
+    monitor = EndpointMonitor(args.endpoint_name, thresholds=thresholds)
 
     # 1. Health check
     print("\n" + "=" * 60)
@@ -83,10 +91,21 @@ def main():
     # 4. Full report
     os.makedirs(args.output_dir, exist_ok=True)
     report_path = os.path.join(args.output_dir, f"monitoring_report_{args.endpoint_name}.json")
-    monitor.generate_report(output_path=report_path)
+    report = monitor.generate_report(output_path=report_path)
 
     print(f"\nFull report saved to: {report_path}")
 
+    breaches = report.get("threshold_breaches", [])
+    if breaches:
+        print("\n" + "=" * 60)
+        print("THRESHOLD BREACHES")
+        print("=" * 60)
+        for b in breaches:
+            print(f"  {b['metric']}: {b['value']} exceeds {b['threshold']}")
+        if args.fail_on_breach:
+            return 1
+    return 0
+
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main())

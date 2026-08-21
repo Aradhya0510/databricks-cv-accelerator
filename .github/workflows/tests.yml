@@ -1,0 +1,53 @@
+name: tests
+
+on:
+  push:
+    branches: ["main"]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install
+        run: |
+          python -m pip install --upgrade pip
+          # CPU-only torch keeps the CI image small; the suite needs no GPU.
+          pip install torch torchvision --index-url https://download.pytorch.org/whl/cpu
+          pip install -e ".[dev]"
+
+      - name: Run tests
+        # The suite is offline by design: models are built from configs in
+        # code rather than downloaded, so no HF Hub token is needed and a
+        # hub outage cannot turn CI red.
+        env:
+          HF_HUB_OFFLINE: "1"
+          MLFLOW_ALLOW_FILE_STORE: "true"
+        run: pytest -v --cov=src --cov-report=term-missing
+
+      - name: Check job entry points have no import side effects
+        # Importing a job module must not shell out to pip or touch the network.
+        run: |
+          for f in jobs/*.py; do
+            python -c "
+          import ast, sys
+          tree = ast.parse(open('$f').read())
+          for node in tree.body:
+              if isinstance(node, (ast.Expr, ast.If)) and 'check_call' in ast.dump(node):
+                  sys.exit('$f installs packages at import time')
+          "
+          done

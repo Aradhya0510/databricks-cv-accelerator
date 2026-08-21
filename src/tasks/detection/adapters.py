@@ -191,9 +191,16 @@ class DetectionOutputAdapter:
         model_name: str,
         image_size: int,
         family_cfg: DetectionFamilyConfig,
+        score_threshold: float = 0.0,
     ):
         self.family_cfg = family_cfg
         self.image_size = image_size
+        # mAP integrates precision over the full recall curve, so predictions
+        # must reach the metric essentially unfiltered.  This used to be
+        # hardcoded to 0.7, which truncated the curve and made the reported
+        # mAP incomparable to any published baseline.  Inference and
+        # visualisation apply the configured confidence threshold instead.
+        self.score_threshold = score_threshold
         self.processor = AutoImageProcessor.from_pretrained(
             model_name,
             size={"height": image_size, "width": image_size},
@@ -228,7 +235,7 @@ class DetectionOutputAdapter:
 
         target_sizes = self._resolve_target_sizes(outputs, batch)
         processed_outputs = self.processor.post_process_object_detection(
-            container, threshold=0.7, target_sizes=target_sizes,
+            container, threshold=self.score_threshold, target_sizes=target_sizes,
         )
 
         preds = []
@@ -320,11 +327,17 @@ def get_input_adapter(
 
 
 def get_output_adapter(
-    model_name: str, image_size: int = 800,
+    model_name: str,
+    image_size: int = 800,
+    score_threshold: float = 0.0,
 ) -> DetectionOutputAdapter:
-    """Get the appropriate output adapter for a model."""
+    """Get the appropriate output adapter for a model.
+
+    ``score_threshold`` defaults to 0.0 so metric computation sees the full
+    prediction set; pass the configured confidence threshold for inference.
+    """
     _, cfg = detect_detection_family(model_name)
-    return DetectionOutputAdapter(model_name, image_size, cfg)
+    return DetectionOutputAdapter(model_name, image_size, cfg, score_threshold)
 
 
 def get_adapter(

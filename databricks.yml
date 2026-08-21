@@ -1,0 +1,152 @@
+# Databricks Asset Bundle for the CV accelerator.
+#
+# Deploy:   databricks bundle deploy --target dev
+# Run:      databricks bundle run cv_training_pipeline --target dev
+#
+# The four jobs/ entry points become one task graph: train -> evaluate ->
+# register+deploy, with monitoring on its own schedule. Cluster specs live
+# here rather than being rebuilt by hand in the UI for every run.
+
+bundle:
+  name: databricks-cv-accelerator
+
+variables:
+  config_path:
+    description: Pipeline config, relative to the deployed bundle root.
+    default: configs/detection_detr_config.yaml
+  catalog:
+    description: Unity Catalog catalog for the registered model.
+    default: main
+  schema:
+    description: Unity Catalog schema for the registered model.
+    default: cv
+  model_name:
+    description: Registered model name (joined as catalog.schema.model_name).
+    default: detr_detection
+  endpoint_name:
+    description: Model Serving endpoint name.
+    default: detr-detection-endpoint
+  gpu_node_type:
+    description: GPU instance type for training. g5.12xlarge gives 4x A10G.
+    default: g5.12xlarge
+  num_gpus:
+    description: GPUs available on the driver; one training process per GPU.
+    default: 4
+  monitoring_pause_status:
+    description: Whether the monitoring schedule is active (PAUSED|UNPAUSED).
+    default: PAUSED
+
+# Reused by every task so the runtime and libraries stay in one place.
+# Single-node with several GPUs: TorchDistributor(local_mode=True) launches
+# one process per GPU on the driver, so no workers are needed.
+resources:
+  jobs:
+    cv_training_pipeline:
+      name: "[${bundle.target}] CV training pipeline"
+
+      job_clusters:
+        - job_cluster_key: gpu_cluster
+          new_cluster:
+            spark_version: "16.4.x-gpu-ml-scala2.12"
+            node_type_id: ${var.gpu_node_type}
+            num_workers: 0
+            data_security_mode: SINGLE_USER
+            custom_tags:
+              ResourceClass: SingleNode
+            spark_conf:
+              spark.master: "local[*, 4]"
+              spark.databricks.cluster.profile: singleNode
+
+      tasks:
+        - task_key: train
+          job_cluster_key: gpu_cluster
+          spark_python_task:
+            python_file: jobs/train.py
+            parameters:
+              - "--config_path"
+              - "${var.config_path}"
+              - "--num_gpus"
+              - "${var.num_gpus}"
+          libraries:
+            - requirements: requirements_runtime.txt
+
+        - task_key: evaluate
+          depends_on:
+            - task_key: train
+          job_cluster_key: gpu_cluster
+          spark_python_task:
+            python_file: jobs/evaluate.py
+            parameters:
+              - "--config_path"
+              - "${var.config_path}"
+          libraries:
+            - requirements: requirements_runtime.txt
+
+        - task_key: register_and_deploy
+          depends_on:
+            - task_key: evaluate
+          job_cluster_key: gpu_cluster
+          spark_python_task:
+            python_file: jobs/deploy.py
+            parameters:
+              - "--config_path"
+              - "${var.config_path}"
+              - "--model_name"
+              - "${var.catalog}.${var.schema}.${var.model_name}"
+              - "--endpoint_name"
+              - "${var.endpoint_name}"
+          libraries:
+            - requirements: requirements_runtime.txt
+
+    cv_endpoint_monitoring:
+      name: "[${bundle.target}] CV endpoint monitoring"
+
+      # Monitoring only queries system tables and the serving API, so it runs
+      # on a small serverless-friendly cluster rather than the GPU one.
+      schedule:
+        quartz_cron_expression: "0 0 * * * ?"
+        timezone_id: UTC
+        pause_status: ${var.monitoring_pause_status}
+
+      tasks:
+        - task_key: monitor
+          new_cluster:
+            spark_version: "16.4.x-cpu-ml-scala2.12"
+            node_type_id: i3.xlarge
+            num_workers: 0
+            data_security_mode: SINGLE_USER
+            custom_tags:
+              ResourceClass: SingleNode
+            spark_conf:
+              spark.master: "local[*]"
+              spark.databricks.cluster.profile: singleNode
+          spark_python_task:
+            python_file: jobs/monitor.py
+            parameters:
+              - "--endpoint_name"
+              - "${var.endpoint_name}"
+              - "--config_path"
+              - "${var.config_path}"
+              # Exit non-zero on a threshold breach so the job's failure
+              # notification is the alert.
+              - "--fail_on_breach"
+
+targets:
+  dev:
+    mode: development
+    default: true
+    variables:
+      monitoring_pause_status: PAUSED
+      num_gpus: 1
+      gpu_node_type: g5.xlarge
+
+  staging:
+    mode: production
+    variables:
+      monitoring_pause_status: UNPAUSED
+      schema: cv_staging
+
+  prod:
+    mode: production
+    variables:
+      monitoring_pause_status: UNPAUSED
