@@ -7,3 +7,4 @@
 pycocotools>=2.0.6  # COCO dataset handling (detection + segmentation tasks)
 timm                # Required by Conditional DETR, DETA, and other timm-backed backbones
 torchmetrics>=1.0   # MeanAveragePrecision for detection evaluation
+albumentations>=1.4  # data augmentation (co-transforms boxes and masks)

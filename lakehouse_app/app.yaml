@@ -7,7 +7,10 @@ env:
     value: "false"
   - name: STREAMLIT_SERVER_FILE_WATCHER_TYPE
     value: "none"
+  # XSRF protection stays ON: this app launches training jobs, registers
+  # models and creates serving endpoints, so it performs privileged state
+  # changes on behalf of the signed-in user.
   - name: STREAMLIT_SERVER_ENABLE_XSRF_PROTECTION
-    value: "false"
+    value: "true"
   - name: STREAMLIT_SERVER_ENABLE_CORS
     value: "false"

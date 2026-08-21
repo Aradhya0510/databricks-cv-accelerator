@@ -53,6 +53,19 @@ _IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".bmp", ".tiff", ".tif", ".webp"}
 # COCO instances dataset (preferred path)
 # ---------------------------------------------------------------------------
 
+def _augment_image_and_map(augmentations, image, label_map):
+    """Co-transform an image and an integer label map.
+
+    The mask is passed through albumentations' ``mask`` target so geometric
+    transforms stay aligned with the image and label values are preserved
+    (nearest-neighbour, no interpolation across class ids).
+    """
+    import numpy as np
+
+    result = augmentations(image=np.array(image), mask=np.asarray(label_map))
+    return Image.fromarray(result["image"]), result["mask"]
+
+
 class COCOInstanceSegmentationDataset(torch.utils.data.Dataset):
     """Segmentation dataset backed by a COCO ``instances_*.json``.
 
@@ -72,10 +85,12 @@ class COCOInstanceSegmentationDataset(torch.utils.data.Dataset):
         image_dir: str,
         annotation_file: str,
         transform: Optional[Any] = None,
+        augmentations: Optional[Any] = None,
     ):
         self.image_dir = Path(image_dir)
         self.source = COCODataSource(annotation_file)
         self.transform = transform
+        self.augmentations = augmentations
 
     def __len__(self) -> int:
         return len(self.source)
@@ -89,6 +104,11 @@ class COCOInstanceSegmentationDataset(torch.utils.data.Dataset):
         panoptic_map, segments_info = self.source.get_panoptic_from_instances(
             image_id
         )
+
+        if self.augmentations is not None:
+            image, panoptic_map = _augment_image_and_map(
+                self.augmentations, image, panoptic_map,
+            )
 
         if self.transform:
             return self.transform(image, panoptic_map, segments_info)
@@ -113,9 +133,11 @@ class SemanticSegmentationDataset(torch.utils.data.Dataset):
         transform: Optional[Any] = None,
         image_subdir: str = "images",
         mask_subdir: str = "masks",
+        augmentations: Optional[Any] = None,
     ):
         self.root_dir = Path(root_dir)
         self.transform = transform
+        self.augmentations = augmentations
 
         image_dir = self.root_dir / image_subdir
         mask_dir = self.root_dir / mask_subdir
@@ -148,6 +170,12 @@ class SemanticSegmentationDataset(torch.utils.data.Dataset):
         img_path, mask_path = self.samples[idx]
         image = Image.open(img_path).convert("RGB")
         mask = Image.open(mask_path)
+
+        if self.augmentations is not None:
+            image, mask_array = _augment_image_and_map(
+                self.augmentations, image, mask,
+            )
+            mask = Image.fromarray(mask_array)
 
         if self.transform:
             return self.transform(image, mask)
@@ -182,10 +210,12 @@ class COCOPanopticSegmentationDataset(torch.utils.data.Dataset):
         annotation_file: str,
         transform: Optional[Any] = None,
         panoptic_dir: Optional[str] = None,
+        augmentations: Optional[Any] = None,
     ):
         self.image_dir = Path(image_dir)
         self.annotation_file = Path(annotation_file)
         self.transform = transform
+        self.augmentations = augmentations
 
         if panoptic_dir is not None:
             self.panoptic_dir = Path(panoptic_dir)
@@ -242,6 +272,11 @@ class COCOPanopticSegmentationDataset(torch.utils.data.Dataset):
 
         panoptic_map = _decode_panoptic_png(panoptic_png)
         segments_info = sample["segments_info"]
+
+        if self.augmentations is not None:
+            image, panoptic_map = _augment_image_and_map(
+                self.augmentations, image, panoptic_map,
+            )
 
         if self.transform:
             return self.transform(image, panoptic_map, segments_info)

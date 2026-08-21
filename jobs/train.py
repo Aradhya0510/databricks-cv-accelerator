@@ -1,11 +1,19 @@
-"""Clean entry point for HF Trainer-based training.
+"""Entry point for HF Trainer-based training.
 
-Usage (single-node, native DDP — recommended):
+Usage (auto — one process per visible GPU on this node):
     python jobs/train.py --config_path configs/detection_yolos_config.yaml
     python jobs/train.py --config_path configs/detection_yolos_config.yaml --num_gpus 4
 
-Usage (multi-node via TorchDistributor — only when scaling across Spark workers):
-    python jobs/train.py --config_path configs/detection_yolos_config.yaml --distributed torchd
+Usage (force a single process, e.g. for debugging):
+    python jobs/train.py --config_path configs/... --distributed single
+
+Usage (multi-node, spreading processes over Spark workers):
+    python jobs/train.py --config_path configs/... --distributed multinode
+
+Note: real DDP needs one process per GPU. Running this script without a
+launcher and letting HF Trainer see several GPUs would give DataParallel
+instead — slower, and with different effective-batch semantics than the
+config implies — so multi-GPU always goes through TorchDistributor.
 """
 
 from __future__ import annotations
@@ -39,9 +47,12 @@ def main():
     parser.add_argument("--config_path", type=str, required=True, help="Path to YAML config file")
     parser.add_argument("--num_gpus", type=int, default=None, help="Number of GPUs (auto-detected if omitted)")
     parser.add_argument(
-        "--distributed", type=str, default="native", choices=["native", "torchd"],
-        help="'native' (default): HF Trainer handles DDP directly. "
-             "'torchd': use TorchDistributor for multi-node Spark distribution.",
+        "--distributed", type=str, default="auto",
+        choices=["auto", "single", "local", "multinode"],
+        help="'auto' (default): one process per visible GPU on this node. "
+             "'single': force one process. "
+             "'local': single-node multi-process DDP. "
+             "'multinode': distribute processes across Spark workers.",
     )
     args = parser.parse_args()
 

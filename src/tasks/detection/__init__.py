@@ -13,6 +13,7 @@ from transformers.trainer_utils import EvalLoopOutput
 
 from ...config.schema import PipelineConfig, ModelConfig
 from ...registry import TaskRegistry
+from ..augmentation import build_augmentations
 from ...utils.labels import apply_label_names
 from .adapters import get_input_adapter, get_output_adapter
 from .collate import detection_collate_fn
@@ -59,6 +60,14 @@ class DetectionTask:
             root_dir=config.data.train_data_path,
             annotation_file=config.data.train_annotation_file,
             transform=adapter,
+            # Augmentation applies to the training split only — the validation
+            # set must stay fixed for metrics to be comparable across epochs.
+            augmentations=build_augmentations(
+                config.data.augment,
+                config.data.augmentations,
+                task_type="detection",
+                image_size=config.model.image_size_scalar,
+            ),
         )
 
     def get_val_dataset(self, config: PipelineConfig) -> COCODetectionDataset:

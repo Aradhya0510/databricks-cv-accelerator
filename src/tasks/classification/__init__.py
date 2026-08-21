@@ -13,6 +13,7 @@ from transformers.trainer_utils import EvalLoopOutput
 
 from ...config.schema import PipelineConfig, ModelConfig
 from ...registry import TaskRegistry
+from ..augmentation import build_augmentations
 from ...utils.labels import apply_label_names
 from .data import ImageFolderClassificationDataset
 from .collate import classification_collate_fn
@@ -57,6 +58,12 @@ class ClassificationTask:
             root_dir=config.data.train_data_path,
             processor=processor,
             class_names=config.model.class_names,
+            augmentations=build_augmentations(
+                config.data.augment,
+                config.data.augmentations,
+                task_type="classification",
+                image_size=config.model.image_size_scalar,
+            ),
         )
 
     def get_val_dataset(self, config: PipelineConfig) -> ImageFolderClassificationDataset:

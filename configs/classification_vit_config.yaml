@@ -33,7 +33,9 @@ training:
   early_stopping_patience: 5
   monitor_metric: val_accuracy
   monitor_mode: max
-  checkpoint_dir: /Volumes/<catalog>/<schema>/<volume>/<path>/checkpoints/classification
+  # Fast local disk: HF Trainer writes checkpoints here, and
+  # volume_checkpoint_dir below mirrors them to the Volume.
+  checkpoint_dir: /local_disk0/checkpoints/classification
   volume_checkpoint_dir: /Volumes/<catalog>/<schema>/<volume>/<path>/volume_checkpoints/classification
   save_top_k: 3
   log_every_n_steps: 50

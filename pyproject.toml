@@ -19,6 +19,7 @@ dependencies = [
     "pycocotools>=2.0.6",
     "torchmetrics>=1.0",
     "timm",
+    "albumentations>=1.4",
 ]
 
 [project.optional-dependencies]

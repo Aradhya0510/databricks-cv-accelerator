@@ -47,46 +47,58 @@ class _BaseCVPyFuncModel(mlflow.pyfunc.PythonModel):
 
     @staticmethod
     def _load_image(record: Any) -> Image.Image:
-        """Load an image from base64, URL, numpy array, or raw dict."""
+        """Load an image from base64 or raw bytes.
+
+        Deliberately narrow.  This runs inside a serving container on input
+        that anyone who can call the endpoint controls, so two earlier
+        behaviours are gone:
+
+        * A string that failed base64 decoding was passed to ``Image.open``,
+          which treats it as a filesystem path — an arbitrary file-read
+          primitive.
+        * A ``{"url": ...}`` record was fetched server-side — an SSRF
+          primitive, reachable against cloud instance metadata.
+
+        Callers send image bytes; they do not name things for the server to
+        go and fetch.
+        """
         if isinstance(record, Image.Image):
             return record.convert("RGB")
 
         if isinstance(record, np.ndarray):
             return Image.fromarray(record).convert("RGB")
 
-        if isinstance(record, dict):
-            if "image" in record:
-                return _BaseCVPyFuncModel._decode_image(record["image"])
-            if "b64" in record:
-                return _BaseCVPyFuncModel._decode_image(record["b64"])
-            if "url" in record:
-                return _BaseCVPyFuncModel._load_from_url(record["url"])
-            if "data" in record:
-                return _BaseCVPyFuncModel._decode_image(record["data"])
-
-        if isinstance(record, str):
-            try:
-                return _BaseCVPyFuncModel._decode_image(record)
-            except Exception:
-                pass
-            return Image.open(record).convert("RGB")
-
         if isinstance(record, bytes):
             return Image.open(io.BytesIO(record)).convert("RGB")
+
+        if isinstance(record, dict):
+            for key in ("image", "b64", "data"):
+                if key in record and record[key] is not None:
+                    return _BaseCVPyFuncModel._load_image(record[key])
+            if "url" in record:
+                raise ValueError(
+                    "URL inputs are not supported: the endpoint does not fetch "
+                    "remote resources. Send the image as base64 instead."
+                )
+            raise ValueError(
+                f"No image field in record. Expected one of 'image', 'b64', "
+                f"'data'; got {sorted(record.keys())}"
+            )
+
+        if isinstance(record, str):
+            return _BaseCVPyFuncModel._decode_image(record)
 
         raise ValueError(f"Cannot load image from input type: {type(record)}")
 
     @staticmethod
     def _decode_image(b64_string: str) -> Image.Image:
-        image_bytes = base64.b64decode(b64_string)
-        return Image.open(io.BytesIO(image_bytes)).convert("RGB")
-
-    @staticmethod
-    def _load_from_url(url: str) -> Image.Image:
-        import urllib.request
-
-        with urllib.request.urlopen(url) as resp:
-            image_bytes = resp.read()
+        """Decode a base64 image, rejecting anything that is not one."""
+        try:
+            image_bytes = base64.b64decode(b64_string, validate=True)
+        except Exception as exc:
+            raise ValueError(
+                "Image input must be valid base64-encoded image bytes."
+            ) from exc
         return Image.open(io.BytesIO(image_bytes)).convert("RGB")
 
 

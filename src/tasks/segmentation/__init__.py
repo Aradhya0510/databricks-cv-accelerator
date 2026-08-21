@@ -13,6 +13,7 @@ from transformers.trainer_utils import EvalLoopOutput
 
 from ...config.schema import PipelineConfig, ModelConfig
 from ...registry import TaskRegistry
+from ..augmentation import build_augmentations
 from ...utils.labels import apply_label_names
 from ...utils.coco import COCOAnnotationType, detect_annotation_type
 from .adapters import (
@@ -86,6 +87,14 @@ class SegmentationTask:
             annotation_file=config.data.train_annotation_file,
             model_name=config.model.model_name,
             image_size=config.model.image_size_scalar,
+            # Training split only: the validation set must stay fixed for
+            # mIoU to be comparable across epochs.
+            augmentations=build_augmentations(
+                config.data.augment,
+                config.data.augmentations,
+                task_type="segmentation",
+                image_size=config.model.image_size_scalar,
+            ),
         )
 
     def get_val_dataset(self, config: PipelineConfig):
@@ -102,6 +111,7 @@ class SegmentationTask:
         annotation_file: Optional[str],
         model_name: str,
         image_size: int,
+        augmentations: Optional[Any] = None,
     ):
         """Select dataset format by auto-detecting the annotation type.
 
@@ -123,17 +133,20 @@ class SegmentationTask:
                     image_dir=data_path,
                     annotation_file=annotation_file,
                     transform=adapter,
+                    augmentations=augmentations,
                 )
             else:
                 return COCOPanopticSegmentationDataset(
                     image_dir=data_path,
                     annotation_file=annotation_file,
                     transform=adapter,
+                    augmentations=augmentations,
                 )
 
         return SemanticSegmentationDataset(
             root_dir=data_path,
             transform=adapter,
+            augmentations=augmentations,
         )
 
     # ------------------------------------------------------------------
