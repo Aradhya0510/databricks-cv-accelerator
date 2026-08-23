@@ -52,6 +52,14 @@ def main():
 
     config = load_config(args.config_path)
 
+    # Registration logs the PyFunc wrapper as a new MLflow model, which has to
+    # land in an experiment.  A notebook has one implicitly, a job task does not,
+    # so without this registration fails from a job with the unhelpful
+    # "Missing required field: experiment_id".
+    import mlflow
+
+    mlflow.set_experiment(config.mlflow.experiment_name)
+
     model_name = args.model_name or config.serving.registered_model_name
     endpoint_name = args.endpoint_name or config.serving.endpoint_name
     workload_size = args.workload_size or config.serving.workload_size
@@ -69,7 +77,10 @@ def main():
         registered_model_name=model_name,
         task_type=config.model.task_type,
         model_uri=args.model_uri,
-        aliases=["champion", "latest"],
+        # "latest" is a reserved alias in Unity Catalog — requesting it makes
+        # registration fail *after* the version is created, leaving a version
+        # with no alias.  The newest version is addressable without an alias.
+        aliases=["champion"],
         tags={"framework": "hf_trainer", "task": config.model.task_type},
         validate=True,
         test_image_path=args.test_image,

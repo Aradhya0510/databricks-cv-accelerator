@@ -28,7 +28,6 @@ class ConfigGenerator:
             {"name": "hustvl/yolos-base", "display": "YOLOS-Base (HUST-VL)", "size": "Large"},
             {"name": "PekingU/rtdetr_r50vd", "display": "RT-DETR R50 (PekingU)", "size": "Medium"},
             {"name": "microsoft/conditional-detr-resnet-50", "display": "Conditional DETR R50 (Microsoft)", "size": "Medium"},
-            {"name": "jozhang97/deta-swin-large", "display": "DETA Swin-Large", "size": "Large"},
         ],
         "segmentation": [
             {"name": "nvidia/segformer-b3-finetuned-ade-512-512", "display": "SegFormer-B3 (ADE20K)", "size": "Medium"},
@@ -40,7 +39,6 @@ class ConfigGenerator:
     DEFAULT_IMAGE_SIZES = {
         "detr": 800,
         "conditional-detr": 800,
-        "deta": 800,
         "rtdetr": 640,
         "yolos": 512,
         "segformer": 512,

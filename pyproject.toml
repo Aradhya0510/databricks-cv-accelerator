@@ -10,9 +10,10 @@ readme = "README.md"
 requires-python = ">=3.10"
 license = { text = "Apache-2.0" }
 
-# Runtime dependencies are intentionally minimal: torch, transformers, mlflow
-# and friends ship with Databricks Runtime ML.  Only packages that are NOT on
-# DBR ML are listed here, mirroring requirements_runtime.txt.
+# Runtime dependencies are intentionally minimal: torch, mlflow and friends
+# ship with Databricks Runtime ML.  Only packages that are NOT on DBR ML — or,
+# in the case of transformers, whose DBR version is too old — are listed here,
+# mirroring requirements_runtime.txt.
 dependencies = [
     "pydantic>=2.0",
     "pyyaml>=6.0",
@@ -20,6 +21,10 @@ dependencies = [
     "torchmetrics>=1.0",
     "timm",
     "albumentations>=1.4",
+    # DBR ML ships 4.x; this framework targets the v5 APIs. See
+    # requirements_runtime.txt for why the override is deliberate.
+    "transformers>=5.0",
+    "huggingface_hub>=1.0",
 ]
 
 [project.optional-dependencies]
@@ -27,8 +32,11 @@ dev = [
     "pytest>=7.3.1",
     "pytest-cov>=4.1.0",
     "torch>=2.0",
-    "transformers>=4.44,<5",
+    "transformers>=5.0",
     "mlflow>=2.9",
+    # The artifact-contract tests back MLflow with a throwaway sqlite store, and
+    # MLflow runs its schema migrations through alembic. DBR ML does not ship it.
+    "alembic",
     "pillow>=9.0",
     "numpy>=1.24",
 ]

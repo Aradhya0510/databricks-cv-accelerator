@@ -63,28 +63,38 @@ class EvaluationEngine:
             return mlflow.transformers.load_model(f"runs:/{run_id}/model")
 
         if model_path is not None:
+            from src.utils.hf import MODEL_DTYPE
+
             task_type = self.config.model.task_type
             if task_type == "detection":
                 from transformers import AutoModelForObjectDetection
 
-                model = AutoModelForObjectDetection.from_pretrained(model_path)
+                model = AutoModelForObjectDetection.from_pretrained(
+                    model_path, dtype=MODEL_DTYPE,
+                )
                 model.config.confidence_threshold = self.config.model.confidence_threshold
                 model.config.iou_threshold = self.config.model.iou_threshold
                 model.config.max_detections = self.config.model.max_detections
             elif task_type == "classification":
                 from transformers import AutoModelForImageClassification
 
-                model = AutoModelForImageClassification.from_pretrained(model_path)
+                model = AutoModelForImageClassification.from_pretrained(
+                    model_path, dtype=MODEL_DTYPE,
+                )
             elif task_type == "segmentation":
                 from src.tasks.segmentation.adapters import detect_segmentation_family
 
                 _, family_cfg = detect_segmentation_family(self.config.model.model_name)
                 if family_cfg.model_type == "universal":
                     from transformers import AutoModelForUniversalSegmentation
-                    model = AutoModelForUniversalSegmentation.from_pretrained(model_path)
+                    model = AutoModelForUniversalSegmentation.from_pretrained(
+                        model_path, dtype=MODEL_DTYPE,
+                    )
                 else:
                     from transformers import AutoModelForSemanticSegmentation
-                    model = AutoModelForSemanticSegmentation.from_pretrained(model_path)
+                    model = AutoModelForSemanticSegmentation.from_pretrained(
+                        model_path, dtype=MODEL_DTYPE,
+                    )
             else:
                 model = self.task.get_model(self.config.model)
             return model

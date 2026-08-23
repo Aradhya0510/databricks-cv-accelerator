@@ -21,6 +21,8 @@ torch = pytest.importorskip("torch")
 from src.serving.artifacts import (  # noqa: E402
     ARTIFACT_LAYOUT_TAG,
     LOGGED_MODEL_PARAM,
+    _FLAVOR_PIP_REQUIREMENTS,
+    _log_transformers_flavor,
     log_model_artifacts,
     resolve_model_dir,
 )
@@ -121,6 +123,42 @@ def test_label_names_survive_the_round_trip():
     reloaded = AutoModelForImageClassification.from_pretrained(resolved)
     assert reloaded.config.id2label[0] == "cat"
     assert reloaded.config.id2label[1] == "dog"
+
+
+def test_the_flavor_does_not_ask_serving_for_tensorflow():
+    """MLflow infers a transformers model's requirements by probing for framework
+    base classes.  Its probe for ``FlaxPreTrainedModel`` raises under v5 (Flax is
+    gone), and MLflow then hedges by requiring both PyTorch *and* TensorFlow.  We
+    declare the requirements instead, so assert the declaration stays sane."""
+    joined = " ".join(_FLAVOR_PIP_REQUIREMENTS).lower()
+    assert "tensorflow" not in joined
+    assert "transformers>=5" in joined
+    # The pinned processor backend is torchvision, so serving needs it present.
+    assert "torchvision" in joined
+
+
+def test_the_flavor_requirements_are_actually_forwarded(monkeypatch, tiny_classifier):
+    """A declaration that never reaches log_model would silently re-enable
+    MLflow's inference, so pin the wiring, not just the list."""
+    model, processor = tiny_classifier
+    captured = {}
+
+    # Keep ``name`` in the signature: _log_transformers_flavor inspects it to
+    # tell MLflow 3 (``name``) from MLflow 2 (``artifact_path``).
+    def fake_log_model(
+        *, transformers_model=None, task=None, name=None, pip_requirements=None,
+    ):
+        captured.update(
+            transformers_model=transformers_model, task=task, name=name,
+            pip_requirements=pip_requirements,
+        )
+        return type("Info", (), {"model_uri": "models:/fake"})()
+
+    monkeypatch.setattr(mlflow.transformers, "log_model", fake_log_model)
+
+    _log_transformers_flavor(model, processor, "image-classification", "model")
+
+    assert captured["pip_requirements"] == _FLAVOR_PIP_REQUIREMENTS
 
 
 def test_registration_rejects_an_artifact_with_no_processor(tmp_path):

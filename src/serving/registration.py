@@ -5,12 +5,22 @@ from __future__ import annotations
 import os
 import shutil
 import tempfile
+from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 import mlflow
 from mlflow.models import infer_signature
 
 from .artifacts import resolve_model_dir
+
+# The PyFunc wrappers are classes defined in this repo, and cloudpickle stores
+# them by reference rather than by value.  Model Serving therefore has to import
+# ``src.serving.pyfunc`` just to unpickle the model, and ``load_context`` then
+# imports ``src.utils.hf`` for the pinned dtype and processor backend.  Neither
+# is installable from PyPI, so the package has to be logged alongside the model;
+# ``pip_requirements`` cannot express it.  Resolved from ``__file__`` because job
+# entry points do not run from the repo root.
+_SRC_ROOT = Path(__file__).resolve().parents[1]
 
 
 def _set_uc_registry() -> None:
@@ -70,7 +80,8 @@ def register_model(
         task_type: "detection" or "classification" — selects PyFunc wrapper.
         model_uri: Direct model URI from log_model (preferred in MLflow 3).
                    When omitted, resolved automatically from the run.
-        aliases: Aliases to set on the new version (e.g. ["champion", "latest"]).
+        aliases: Aliases to set on the new version (e.g. ["champion"]). Unity
+                 Catalog reserves "latest", so it cannot be used here.
         tags: Tags to attach to the model version.
         validate: If True, run a local prediction test before registering.
         test_image_path: Optional path to a real image for validation.
@@ -78,7 +89,9 @@ def register_model(
     Returns:
         Dict with model_uri, model_version, and registered_model_name.
     """
-    aliases = aliases or ["champion", "latest"]
+    # Not "latest": Unity Catalog reserves that alias, and asking for it fails
+    # after the model version already exists.
+    aliases = aliases or ["champion"]
     tags = tags or {}
 
     _set_uc_registry()
@@ -158,10 +171,17 @@ def register_model(
         pyfunc_model = DetectionPyFuncModel()
         artifact_name = "detection_pyfunc"
 
+    # The PyFunc wrappers call v5-only APIs (the ``backend`` argument to
+    # AutoImageProcessor), and a v5-written processor config is laid out
+    # differently from a v4 one, so the endpoint has to resolve v5 as well.
+    # torchvision is explicit because the pinned processor backend needs it;
+    # without it transformers silently falls back to PIL, which would preprocess
+    # differently at serving time than during training.
     pip_requirements = [
         "mlflow>=3.1",
         "torch>=2.0",
-        "transformers>=4.36",
+        "torchvision>=0.15",
+        "transformers>=5.0",
         "Pillow>=9.0",
         "numpy>=1.24",
     ]
@@ -171,6 +191,7 @@ def register_model(
         python_model=pyfunc_model,
         artifacts={"model_dir": model_dir},
         pip_requirements=pip_requirements,
+        code_paths=[str(_SRC_ROOT)],
         signature=signature,
         input_example=input_example,
     )

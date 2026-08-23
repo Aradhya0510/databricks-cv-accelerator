@@ -15,6 +15,7 @@ from ...config.schema import PipelineConfig, ModelConfig
 from ...registry import TaskRegistry
 from ..augmentation import build_augmentations
 from ...utils.distributed import all_gather_objects
+from ...utils.hf import MODEL_DTYPE
 from ...utils.labels import apply_label_names
 from .adapters import get_input_adapter, get_output_adapter
 from .collate import detection_collate_fn
@@ -37,6 +38,7 @@ class DetectionTask:
             model_cfg.model_name,
             config=hf_config,
             ignore_mismatched_sizes=True,
+            dtype=MODEL_DTYPE,
         )
         model.config.confidence_threshold = model_cfg.confidence_threshold
         model.config.iou_threshold = model_cfg.iou_threshold

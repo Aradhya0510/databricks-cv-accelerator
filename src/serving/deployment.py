@@ -71,7 +71,12 @@ def wait_for_ready(
         endpoint = w.serving_endpoints.get(endpoint_name)
         state = endpoint.state
 
-        if state and state.ready == "READY":
+        # ``state.ready`` is an ``EndpointStateReady`` enum, so comparing it to a
+        # bare string is always False and the loop runs to the timeout even once
+        # the endpoint is serving.  Unwrap ``.value`` but tolerate a plain string
+        # in case the SDK stops wrapping it.
+        ready = getattr(state, "ready", None) if state else None
+        if ready is not None and getattr(ready, "value", ready) == "READY":
             print(f"Endpoint '{endpoint_name}' is READY.")
             return {"endpoint_name": endpoint_name, "state": "READY"}
 

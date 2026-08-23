@@ -5,6 +5,18 @@
 # Keep this minimal — only add packages that cause ImportError on the cluster.
 
 pycocotools>=2.0.6  # COCO dataset handling (detection + segmentation tasks)
-timm                # Required by Conditional DETR, DETA, and other timm-backed backbones
+timm                # Required by Conditional DETR and other timm-backed backbones
 torchmetrics>=1.0   # MeanAveragePrecision for detection evaluation
 albumentations>=1.4  # data augmentation (co-transforms boxes and masks)
+
+# transformers is the one entry here that DBR ML *does* ship (4.51.3 as of DBR
+# 17.3 LTS ML) and that we deliberately override. This framework targets the v5
+# APIs — named image-processor backends and the explicit `dtype` argument — so
+# the runtime's 4.x is too old. src/utils/hf.py asserts the major version at
+# import to keep a missing install from surfacing as an obscure TypeError.
+#
+# transformers 5 requires huggingface_hub >= 1.0, which switches the HTTP
+# backend from requests to httpx; it is pinned explicitly so the upgrade is
+# visible here rather than resolved silently as a transitive dependency.
+transformers>=5.0
+huggingface_hub>=1.0

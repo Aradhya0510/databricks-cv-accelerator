@@ -18,7 +18,7 @@ Fine-tuning CV models on Databricks involves gluing together data loading, Huggi
 
 | Task | Models | Data Format | Eval Metric |
 |---|---|---|---|
-| Object Detection | DETR, Conditional DETR, RT-DETR, DETA, YOLOS, any `AutoModelForObjectDetection` | COCO instances JSON | mAP |
+| Object Detection | DETR, Conditional DETR, RT-DETR, YOLOS, any `AutoModelForObjectDetection` | COCO instances JSON | mAP |
 | Image Classification | ViT, ResNet, any `AutoModelForImageClassification` | ImageFolder (class_name/image.jpg) | Accuracy, F1 |
 | Segmentation | SegFormer, Mask2Former, OneFormer, MaskFormer, UperNet, BEiT, DPT | COCO instances, COCO panoptic, or ADE20K masks | mIoU |
 
@@ -230,8 +230,9 @@ All three formats work with all segmentation models. The framework auto-detects 
 | DETR | `facebook/detr-resnet-50` | `detection_detr_config.yaml` |
 | Conditional DETR | `microsoft/conditional-detr-resnet-50` | `detection_conditional_detr_config.yaml` |
 | RT-DETR | `PekingU/rtdetr_r50vd` | `detection_rtdetr_config.yaml` |
-| DETA | `jozhang97/deta-swin-large` | `detection_deta_config.yaml` |
 | YOLOS | `hustvl/yolos-base` | `detection_yolos_config.yaml` |
+
+DETA is not supported: it was deprecated upstream and removed in transformers v5.
 
 ### Classification
 

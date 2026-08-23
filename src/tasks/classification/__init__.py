@@ -8,13 +8,14 @@ import torch
 from torch.optim import AdamW
 from torch.optim.lr_scheduler import CosineAnnealingLR, LinearLR, SequentialLR
 from torch.utils.data import DataLoader
-from transformers import AutoConfig, AutoModelForImageClassification, AutoImageProcessor
+from transformers import AutoConfig, AutoModelForImageClassification
 from transformers.trainer_utils import EvalLoopOutput
 
 from ...config.schema import PipelineConfig, ModelConfig
 from ...registry import TaskRegistry
 from ..augmentation import build_augmentations
 from ...utils.distributed import all_gather_tensor
+from ...utils.hf import MODEL_DTYPE, load_image_processor
 from ...utils.labels import apply_label_names
 from .data import ImageFolderClassificationDataset
 from .collate import classification_collate_fn
@@ -42,11 +43,12 @@ class ClassificationTask:
             model_cfg.model_name,
             config=hf_config,
             ignore_mismatched_sizes=True,
+            dtype=MODEL_DTYPE,
         )
         apply_label_names(model, model_cfg.class_names, model_cfg.num_classes)
         return model
 
-    def get_processor(self, model_cfg: ModelConfig) -> AutoImageProcessor:
+    def get_processor(self, model_cfg: ModelConfig) -> Any:
         """The image processor that must be logged alongside the model."""
         return self._get_processor(model_cfg)
 
@@ -78,9 +80,9 @@ class ClassificationTask:
     # ------------------------------------------------------------------
     # Processor
     # ------------------------------------------------------------------
-    def _get_processor(self, model_cfg: ModelConfig) -> AutoImageProcessor:
+    def _get_processor(self, model_cfg: ModelConfig) -> Any:
         image_size = model_cfg.image_size_scalar
-        return AutoImageProcessor.from_pretrained(
+        return load_image_processor(
             model_cfg.model_name,
             size={"height": image_size, "width": image_size},
             do_resize=True,

@@ -113,11 +113,15 @@ class DetectionPyFuncModel(_BaseCVPyFuncModel):
     DEFAULT_MAX_DETECTIONS = 100
 
     def load_context(self, context: mlflow.pyfunc.PythonModelContext) -> None:
-        from transformers import AutoImageProcessor, AutoModelForObjectDetection
+        from transformers import AutoModelForObjectDetection
+
+        from ..utils.hf import MODEL_DTYPE, load_image_processor
 
         model_dir = context.artifacts["model_dir"]
-        self.model = AutoModelForObjectDetection.from_pretrained(model_dir)
-        self.processor = AutoImageProcessor.from_pretrained(model_dir)
+        self.model = AutoModelForObjectDetection.from_pretrained(
+            model_dir, dtype=MODEL_DTYPE,
+        )
+        self.processor = load_image_processor(model_dir)
         self.model.eval()
 
     def predict(
@@ -199,19 +203,23 @@ class SegmentationPyFuncModel(_BaseCVPyFuncModel):
     """
 
     def load_context(self, context: mlflow.pyfunc.PythonModelContext) -> None:
-        from transformers import AutoImageProcessor
+        from ..utils.hf import MODEL_DTYPE, load_image_processor
 
         model_dir = context.artifacts["model_dir"]
-        self.processor = AutoImageProcessor.from_pretrained(model_dir)
+        self.processor = load_image_processor(model_dir)
 
         # Determine model type by trying universal first, then semantic
         try:
             from transformers import AutoModelForUniversalSegmentation
-            self.model = AutoModelForUniversalSegmentation.from_pretrained(model_dir)
+            self.model = AutoModelForUniversalSegmentation.from_pretrained(
+                model_dir, dtype=MODEL_DTYPE,
+            )
             self.model_type = "universal"
         except Exception:
             from transformers import AutoModelForSemanticSegmentation
-            self.model = AutoModelForSemanticSegmentation.from_pretrained(model_dir)
+            self.model = AutoModelForSemanticSegmentation.from_pretrained(
+                model_dir, dtype=MODEL_DTYPE,
+            )
             self.model_type = "semantic"
 
         self.model.eval()
@@ -273,11 +281,15 @@ class ClassificationPyFuncModel(_BaseCVPyFuncModel):
     DEFAULT_TOP_K = 5
 
     def load_context(self, context: mlflow.pyfunc.PythonModelContext) -> None:
-        from transformers import AutoImageProcessor, AutoModelForImageClassification
+        from transformers import AutoModelForImageClassification
+
+        from ..utils.hf import MODEL_DTYPE, load_image_processor
 
         model_dir = context.artifacts["model_dir"]
-        self.model = AutoModelForImageClassification.from_pretrained(model_dir)
-        self.processor = AutoImageProcessor.from_pretrained(model_dir)
+        self.model = AutoModelForImageClassification.from_pretrained(
+            model_dir, dtype=MODEL_DTYPE,
+        )
+        self.processor = load_image_processor(model_dir)
         self.model.eval()
 
         # Load id2label mapping if available
