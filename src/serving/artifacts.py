@@ -49,6 +49,20 @@ _PIPELINE_TASKS = {
     "segmentation": "image-segmentation",
 }
 
+# Declared rather than inferred.  MLflow works out a transformers model's
+# requirements by probing for framework base classes, and its probe for
+# ``FlaxPreTrainedModel`` raises on transformers v5 because Flax was removed.
+# MLflow treats that as "engine unknown" and hedges by requiring *both* PyTorch
+# and TensorFlow, so the logged model asks its serving image to install
+# tensorflow — slow to build and wrong about what the model needs.
+_FLAVOR_PIP_REQUIREMENTS = [
+    "torch>=2.0",
+    # The pinned image-processor backend needs torchvision; without it
+    # transformers silently falls back to PIL, which preprocesses differently.
+    "torchvision>=0.15",
+    "transformers>=5.0",
+]
+
 
 def log_model_artifacts(
     model: Any,
@@ -97,7 +111,11 @@ def _log_transformers_flavor(model, processor, pipeline_task: str, artifact_name
     import inspect
 
     payload = {"model": model, "image_processor": processor}
-    kwargs = {"transformers_model": payload, "task": pipeline_task}
+    kwargs = {
+        "transformers_model": payload,
+        "task": pipeline_task,
+        "pip_requirements": _FLAVOR_PIP_REQUIREMENTS,
+    }
 
     # MLflow 3 renamed ``artifact_path`` to ``name``.
     if "name" in inspect.signature(mlflow.transformers.log_model).parameters:

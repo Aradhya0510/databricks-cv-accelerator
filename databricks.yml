@@ -47,7 +47,7 @@ resources:
       job_clusters:
         - job_cluster_key: gpu_cluster
           new_cluster:
-            spark_version: "16.4.x-gpu-ml-scala2.12"
+            spark_version: "17.3.x-gpu-ml-scala2.13"
             node_type_id: ${var.gpu_node_type}
             num_workers: 0
             data_security_mode: SINGLE_USER
@@ -111,7 +111,7 @@ resources:
       tasks:
         - task_key: monitor
           new_cluster:
-            spark_version: "16.4.x-cpu-ml-scala2.12"
+            spark_version: "17.3.x-cpu-ml-scala2.13"
             node_type_id: i3.xlarge
             num_workers: 0
             data_security_mode: SINGLE_USER

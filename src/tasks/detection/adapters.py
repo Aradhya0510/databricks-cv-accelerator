@@ -19,7 +19,8 @@ from typing import Any, Dict, List, Optional, Tuple
 import torch
 import torchvision.transforms.functional as F
 from PIL import Image
-from transformers import AutoImageProcessor
+
+from ...utils.hf import load_image_processor
 
 
 # ---------------------------------------------------------------------------
@@ -51,12 +52,6 @@ _FAMILY_CONFIGS: Dict[str, DetectionFamilyConfig] = {
     # fall through to the generic DETR entry.
     "yolos": DetectionFamilyConfig(
         requires_pixel_mask=False,
-        box_format="cxcywh_normalized",
-        output_logits_attr="logits",
-        output_boxes_attr="pred_boxes",
-    ),
-    "deta": DetectionFamilyConfig(
-        requires_pixel_mask=True,
         box_format="cxcywh_normalized",
         output_logits_attr="logits",
         output_boxes_attr="pred_boxes",
@@ -123,10 +118,10 @@ class DetectionInputAdapter:
     ):
         self.family_cfg = family_cfg
         self.image_size = image_size
-        self.processor: Optional[AutoImageProcessor] = None
+        self.processor: Optional[Any] = None
 
         if family_cfg.box_format == "cxcywh_normalized":
-            self.processor = AutoImageProcessor.from_pretrained(
+            self.processor = load_image_processor(
                 model_name,
                 size={"height": image_size, "width": image_size},
                 do_resize=True,
@@ -201,7 +196,7 @@ class DetectionOutputAdapter:
         # mAP incomparable to any published baseline.  Inference and
         # visualisation apply the configured confidence threshold instead.
         self.score_threshold = score_threshold
-        self.processor = AutoImageProcessor.from_pretrained(
+        self.processor = load_image_processor(
             model_name,
             size={"height": image_size, "width": image_size},
         )

@@ -17,7 +17,8 @@ from typing import Any, Dict, List, Optional, Tuple
 import numpy as np
 import torch
 from PIL import Image
-from transformers import AutoImageProcessor
+
+from ...utils.hf import load_image_processor
 
 
 # ---------------------------------------------------------------------------
@@ -132,7 +133,7 @@ class SegmentationInputAdapter:
         family_cfg: SegmentationFamilyConfig,
     ):
         self.family_cfg = family_cfg
-        self.processor = AutoImageProcessor.from_pretrained(
+        self.processor = load_image_processor(
             model_name,
             size={"height": image_size, "width": image_size},
             do_resize=True,

@@ -15,10 +15,21 @@ This guide walks through setting up the Databricks CV Accelerator — from data 
 
 ### Python Dependencies
 
-On Databricks ML Runtime, most dependencies are pre-installed. If running locally:
+On Databricks ML Runtime, most dependencies are pre-installed. The exception is
+`transformers`: this framework targets v5, and DBR ML still ships 4.x, so the
+cluster upgrades it from `requirements_runtime.txt` (declare that file as a
+cluster library on job clusters, or let the `jobs/*.py` entry points install it).
+
+If running locally:
 
 ```bash
-pip install torch torchvision transformers datasets mlflow
+pip install -e ".[dev]"
+```
+
+Or, to install the pieces by hand:
+
+```bash
+pip install torch torchvision "transformers>=5.0" datasets mlflow
 pip install pycocotools torchmetrics  # for detection
 pip install pydantic pyyaml pillow numpy
 ```

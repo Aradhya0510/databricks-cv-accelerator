@@ -41,6 +41,27 @@ def test_loads_a_minimal_config(tmp_path):
     assert cfg.mlflow.experiment_name
 
 
+@pytest.mark.parametrize(
+    "contents, expected",
+    [
+        ("", "an empty file"),
+        ("# only a comment\n", "an empty file"),
+        ("- model\n- data\n", "a list"),
+    ],
+)
+def test_a_config_that_is_not_a_mapping_says_so(tmp_path, contents, expected):
+    """These used to surface as 'argument after ** must be a mapping', which
+    named neither the file nor the reason."""
+    p = tmp_path / "broken.yaml"
+    p.write_text(contents)
+
+    with pytest.raises(ValueError, match="not a YAML mapping") as exc:
+        load_config(p)
+
+    assert expected in str(exc.value)
+    assert "broken.yaml" in str(exc.value)
+
+
 def test_string_numbers_are_coerced(tmp_path):
     cfg = load_config(_write(tmp_path, model={"learning_rate": "1e-4", "epochs": "10"}))
     assert isinstance(cfg.model.learning_rate, float)

@@ -60,7 +60,8 @@ print(f"Endpoint:  {ENDPOINT_NAME}")
 # COMMAND ----------
 
 from src.serving.pyfunc import DetectionPyFuncModel
-from transformers import AutoModelForObjectDetection, AutoImageProcessor
+from src.utils.hf import MODEL_DTYPE, load_image_processor
+from transformers import AutoModelForObjectDetection
 from PIL import Image
 import mlflow
 import tempfile
@@ -74,8 +75,8 @@ _download_uri = _stored_uri if _stored_uri else f"runs:/{RUN_ID}/model"
 artifact_path = mlflow.artifacts.download_artifacts(artifact_uri=_download_uri)
 
 tmpdir = tempfile.mkdtemp()
-model = AutoModelForObjectDetection.from_pretrained(artifact_path)
-processor = AutoImageProcessor.from_pretrained(artifact_path)
+model = AutoModelForObjectDetection.from_pretrained(artifact_path, dtype=MODEL_DTYPE)
+processor = load_image_processor(artifact_path)
 model.save_pretrained(tmpdir)
 processor.save_pretrained(tmpdir)
 

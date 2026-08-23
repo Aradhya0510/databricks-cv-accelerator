@@ -254,6 +254,18 @@ class PipelineConfig(BaseModel):
     def from_yaml(cls, path: Union[str, Path]) -> "PipelineConfig":
         with open(path, "r") as f:
             raw = yaml.safe_load(f)
+
+        # An empty or truncated file parses to None, and a bare list parses to
+        # a list; both reach ``cls(**raw)`` as "argument after ** must be a
+        # mapping", which says nothing about which file or why.
+        if not isinstance(raw, dict):
+            found = "an empty file" if raw is None else f"a {type(raw).__name__}"
+            raise ValueError(
+                f"{path} is not a YAML mapping — parsed as {found}. A config "
+                f"must be a mapping with model/data/training sections; an empty "
+                f"file usually means it was truncated in transit."
+            )
+
         return cls(**raw)
 
     def to_dict(self) -> Dict[str, Any]:

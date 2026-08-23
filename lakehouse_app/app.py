@@ -105,7 +105,7 @@ def main():
             '<div class="raised-card">'
             f'<strong style="color:#EDF0F7;font-family:Syne,sans-serif;font-size:14px;">Object Detection</strong>'
             f'<p style="color:#8A91A8;font-size:12px;font-family:Figtree,sans-serif;margin:6px 0 0 0;line-height:1.6;">'
-            "DETR, YOLOS, Conditional DETR, RT-DETR, DETA — COCO-format, mAP evaluation</p>"
+            "DETR, YOLOS, Conditional DETR, RT-DETR — COCO-format, mAP evaluation</p>"
             "</div>",
             unsafe_allow_html=True,
         )

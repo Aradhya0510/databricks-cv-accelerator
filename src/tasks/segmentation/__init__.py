@@ -8,12 +8,13 @@ import torch
 from torch.optim import AdamW
 from torch.optim.lr_scheduler import CosineAnnealingLR, LinearLR, SequentialLR
 from torch.utils.data import DataLoader
-from transformers import AutoConfig, AutoImageProcessor
+from transformers import AutoConfig
 from transformers.trainer_utils import EvalLoopOutput
 
 from ...config.schema import PipelineConfig, ModelConfig
 from ...registry import TaskRegistry
 from ..augmentation import build_augmentations
+from ...utils.hf import MODEL_DTYPE, load_image_processor
 from ...utils.labels import apply_label_names
 from ...utils.coco import COCOAnnotationType, detect_annotation_type
 from .adapters import (
@@ -60,6 +61,7 @@ class SegmentationTask:
                 model_cfg.model_name,
                 config=hf_config,
                 ignore_mismatched_sizes=True,
+                dtype=MODEL_DTYPE,
             )
         else:
             from transformers import AutoModelForSemanticSegmentation
@@ -68,11 +70,12 @@ class SegmentationTask:
                 model_cfg.model_name,
                 config=hf_config,
                 ignore_mismatched_sizes=True,
+                dtype=MODEL_DTYPE,
             )
         apply_label_names(model, model_cfg.class_names, model_cfg.num_classes)
         return model
 
-    def get_processor(self, model_cfg: ModelConfig) -> AutoImageProcessor:
+    def get_processor(self, model_cfg: ModelConfig) -> Any:
         """The image processor that must be logged alongside the model."""
         return get_input_adapter(
             model_cfg.model_name, image_size=model_cfg.image_size_scalar,
@@ -231,7 +234,7 @@ class SegmentationTask:
     def get_eval_fn(self, model_cfg: ModelConfig) -> Callable:
         """Return a closure that computes mIoU metrics."""
         _, family_cfg = detect_segmentation_family(model_cfg.model_name)
-        processor = AutoImageProcessor.from_pretrained(model_cfg.model_name)
+        processor = load_image_processor(model_cfg.model_name)
 
         def _eval_fn(
             *,
