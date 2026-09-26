@@ -44,10 +44,23 @@ if REPO_ROOT not in sys.path:
 
 from src.monitoring import EndpointMonitor
 
-ENDPOINT_NAME = "yolos-detection-endpoint"  # Your endpoint name
-LOOKBACK_HOURS = 24
+dbutils.widgets.text("endpoint_name", "", "Serving endpoint")
+dbutils.widgets.text("config_path", "", "Config YAML (optional: alert thresholds)")
+dbutils.widgets.text("lookback_hours", "24", "Lookback (hours)")
 
-monitor = EndpointMonitor(ENDPOINT_NAME)
+ENDPOINT_NAME = dbutils.widgets.get("endpoint_name")
+if not ENDPOINT_NAME:
+    raise ValueError("Set the endpoint_name widget.")
+LOOKBACK_HOURS = int(dbutils.widgets.get("lookback_hours"))
+
+thresholds = None
+if dbutils.widgets.get("config_path"):
+    from src.config.schema import load_config
+
+    _cfg_path = dbutils.widgets.get("config_path")
+    thresholds = load_config(_cfg_path if os.path.isabs(_cfg_path) else os.path.join(REPO_ROOT, _cfg_path)).monitoring
+
+monitor = EndpointMonitor(ENDPOINT_NAME, thresholds=thresholds)
 print(f"Monitoring endpoint: {ENDPOINT_NAME}")
 
 # COMMAND ----------

@@ -42,14 +42,13 @@ if REPO_ROOT not in sys.path:
 
 from src.config.schema import load_config
 
-# --- Paths (customise for your workspace) ---
-CATALOG = "your_catalog"
-SCHEMA = "your_schema"
-VOLUME = "your_volume"
-PROJECT_PATH = "cv_detr_training"
-
-BASE_VOLUME_PATH = f"/Volumes/{CATALOG}/{SCHEMA}/{VOLUME}/{PROJECT_PATH}"
-CONFIG_PATH = f"{BASE_VOLUME_PATH}/configs/detection_yolos_config.yaml"
+# Pipeline config: a Volume path, or a path relative to the repo root.
+dbutils.widgets.text("config_path", "", "Config YAML")
+CONFIG_PATH = dbutils.widgets.get("config_path")
+if not CONFIG_PATH:
+    raise ValueError("Set the config_path widget to your pipeline config YAML.")
+if not os.path.isabs(CONFIG_PATH):
+    CONFIG_PATH = os.path.join(REPO_ROOT, CONFIG_PATH)
 
 config = load_config(CONFIG_PATH)
 
