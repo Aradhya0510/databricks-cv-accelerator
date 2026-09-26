@@ -175,6 +175,31 @@ def test_registration_rejects_an_artifact_with_no_processor(tmp_path):
         _assert_processor_present(str(model_dir))
 
 
+def test_the_registered_pyfunc_is_logged_in_the_training_run():
+    """UC lineage comes from the run the PyFunc is logged in.
+
+    The training run lives in another experiment than the active one, as with
+    AI Runtime, which MLflow refuses to resume across unless handled.
+    """
+    from src.serving.registration import _training_run
+
+    class Echo(mlflow.pyfunc.PythonModel):
+        def predict(self, context, model_input):
+            return model_input
+
+    mlflow.set_experiment("platform-owned-training")
+    with mlflow.start_run() as training:
+        pass
+    mlflow.set_experiment("artifact-contract-tests")
+
+    with _training_run(training.info.run_id):
+        info = mlflow.pyfunc.log_model(name="pyfunc", python_model=Echo())
+
+    assert mlflow.get_logged_model(info.model_id).source_run_id == training.info.run_id
+    assert mlflow.active_run() is None
+    assert mlflow.get_run(training.info.run_id).info.status == "FINISHED"
+
+
 def test_classification_pyfunc_serves_the_resolved_artifact(tiny_classifier):
     """End to end: log -> resolve -> PyFunc predict on a real base64 image."""
     from PIL import Image

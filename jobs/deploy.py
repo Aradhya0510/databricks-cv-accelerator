@@ -59,14 +59,6 @@ def main():
         args.model_uri = args.model_uri or manifest.get("model_uri")
         print(f"Deploying the model from training run {args.run_id}")
 
-    # Registration logs the PyFunc wrapper as a new MLflow model, which has to
-    # land in an experiment.  A notebook has one implicitly, a job task does not,
-    # so without this registration fails from a job with the unhelpful
-    # "Missing required field: experiment_id".
-    import mlflow
-
-    mlflow.set_experiment(config.mlflow.experiment_name)
-
     model_name = args.model_name or config.serving.registered_model_name
     endpoint_name = args.endpoint_name or config.serving.endpoint_name
     workload_size = args.workload_size or config.serving.workload_size

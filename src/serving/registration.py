@@ -5,8 +5,9 @@ from __future__ import annotations
 import os
 import shutil
 import tempfile
+from contextlib import contextmanager
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, Iterator, List, Optional
 
 import mlflow
 from mlflow.models import infer_signature
@@ -21,6 +22,29 @@ from .artifacts import resolve_model_dir
 # ``pip_requirements`` cannot express it.  Resolved from ``__file__`` because job
 # entry points do not run from the repo root.
 _SRC_ROOT = Path(__file__).resolve().parents[1]
+
+
+@contextmanager
+def _training_run(run_id: str) -> Iterator[None]:
+    """Make *run_id* the active run while the PyFunc is logged.
+
+    A LoggedModel records the run that is active when it is logged, and the
+    registered UC version takes its lineage from that.  Logged outside the
+    training run, the served model had no link back to the run that trained
+    it.
+
+    MLflow refuses to resume a run while a different experiment is active, and
+    AI Runtime puts training runs in its own experiment, so this switches the
+    active experiment to the training run's.
+    """
+    active = mlflow.active_run()
+    if active is not None and active.info.run_id == run_id:
+        yield
+        return
+    experiment_id = mlflow.MlflowClient().get_run(run_id).info.experiment_id
+    mlflow.set_experiment(experiment_id=experiment_id)
+    with mlflow.start_run(run_id=run_id, nested=active is not None):
+        yield
 
 
 def _set_uc_registry() -> None:
@@ -186,15 +210,16 @@ def register_model(
         "numpy>=1.24",
     ]
 
-    model_info = mlflow.pyfunc.log_model(
-        name=artifact_name,
-        python_model=pyfunc_model,
-        artifacts={"model_dir": model_dir},
-        pip_requirements=pip_requirements,
-        code_paths=[str(_SRC_ROOT)],
-        signature=signature,
-        input_example=input_example,
-    )
+    with _training_run(run_id):
+        model_info = mlflow.pyfunc.log_model(
+            name=artifact_name,
+            python_model=pyfunc_model,
+            artifacts={"model_dir": model_dir},
+            pip_requirements=pip_requirements,
+            code_paths=[str(_SRC_ROOT)],
+            signature=signature,
+            input_example=input_example,
+        )
 
     pyfunc_model_uri = model_info.model_uri
 
