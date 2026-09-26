@@ -207,6 +207,24 @@ def test_the_ai_runtime_mlflow_run_is_reused(tmp_path, monkeypatch):
     assert calls == {"experiment": "/Users/me/exp", "start": {"run_name": "mine"}}
 
 
+def test_only_distributed_runs_take_the_config_run_name(tmp_path, monkeypatch):
+    """@distributed names its run randomly; CLI and bundle runs keep their name."""
+    engine = _engine(tmp_path)
+    import mlflow
+
+    tags = {}
+    monkeypatch.setattr(mlflow, "start_run", lambda **kw: kw)
+    monkeypatch.setattr(mlflow, "set_tag", lambda k, v: tags.__setitem__(k, v))
+
+    monkeypatch.setenv("MLFLOW_RUN_ID", "platform-run")
+    engine._start_mlflow_run()
+    assert tags == {}
+
+    monkeypatch.setenv("MLFLOW_RUN_ID", "platform-run")
+    engine._start_mlflow_run(name_platform_run=True)
+    assert tags == {"mlflow.runName": "mine"}
+
+
 def test_resume_latest_starts_fresh_then_resumes(tmp_path):
     ckpts = tmp_path / "ckpts"
     engine = _engine(

@@ -90,8 +90,15 @@ class TrainingEngine:
     # ------------------------------------------------------------------
     # Core training (one process, one device)
     # ------------------------------------------------------------------
-    def _train_fn(self) -> Dict[str, Any]:
-        """Core training logic for a single process."""
+    def _train_fn(self, name_platform_run: bool = False) -> Dict[str, Any]:
+        """Core training logic for a single process.
+
+        Args:
+            name_platform_run: Apply ``mlflow.run_name`` to a run AI Runtime
+                created.  Only ``@distributed`` needs this — it names runs
+                randomly — whereas CLI and bundle runs are named by their own
+                job definition.
+        """
         import mlflow
         from transformers import set_seed
 
@@ -169,7 +176,7 @@ class TrainingEngine:
         # (it checks mlflow.active_run() and sets _auto_end_run=False).
         # This prevents the duplicate-run problem where metrics and model
         # artifacts end up in different runs.
-        run_ctx = self._start_mlflow_run() if is_writer else None
+        run_ctx = self._start_mlflow_run(name_platform_run) if is_writer else None
         status = "FAILED"
         try:
             if is_writer:
@@ -255,7 +262,7 @@ class TrainingEngine:
 
         return metrics
 
-    def _start_mlflow_run(self):
+    def _start_mlflow_run(self, name_platform_run: bool = False):
         """Open the run this process logs to.
 
         ``databricks air run``, ``ai_runtime_task`` and ``@distributed`` each
@@ -271,7 +278,10 @@ class TrainingEngine:
         platform_run_id = os.environ.pop("MLFLOW_RUN_ID", None)
         if platform_run_id:
             print(f"Logging to the AI Runtime MLflow run {platform_run_id}")
-            return mlflow.start_run(run_id=platform_run_id)
+            run = mlflow.start_run(run_id=platform_run_id)
+            if name_platform_run and self.config.mlflow.run_name:
+                mlflow.set_tag("mlflow.runName", self.config.mlflow.run_name)
+            return run
 
         mlflow.set_experiment(self.config.mlflow.experiment_name)
         return mlflow.start_run(run_name=self.config.mlflow.run_name)
@@ -320,7 +330,7 @@ class TrainingEngine:
             from src.config.schema import PipelineConfig
             from src.engine.engine import TrainingEngine
 
-            return TrainingEngine(PipelineConfig(**config_dict))._train_fn()
+            return TrainingEngine(PipelineConfig(**config_dict))._train_fn(name_platform_run=True)
 
         # The decorator's 3-hour default would kill most real fine-tuning runs.
         results = distributed(gpus=num_gpus, timeout=None)(train_fn).distributed()
