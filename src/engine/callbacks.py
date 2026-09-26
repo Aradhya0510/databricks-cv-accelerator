@@ -27,6 +27,10 @@ class VolumeCheckpointCallback(TrainerCallback):
     * **Retention is mirrored.**  ``save_total_limit`` prunes the local
       directory but says nothing about the Volume, so the mirror used to grow
       without bound — tens of GB per epoch for a large model.
+    * **A checkpoint appears whole or not at all.**  Each copy lands in a
+      ``.partial`` directory and is renamed into place, so a run killed
+      mid-copy never leaves a truncated ``checkpoint-N`` for
+      :func:`find_latest_checkpoint` to resume from.
     """
 
     def __init__(self, volume_dir: str, save_total_limit: Optional[int] = None):
@@ -50,10 +54,13 @@ class VolumeCheckpointCallback(TrainerCallback):
             return
 
         dest = os.path.join(self.volume_dir, f"checkpoint-{state.global_step}")
+        partial = f"{dest}.partial"
         try:
-            if os.path.exists(dest):
-                shutil.rmtree(dest)
-            shutil.copytree(ckpt_dir, dest)
+            for stale in (partial, dest):
+                if os.path.exists(stale):
+                    shutil.rmtree(stale)
+            shutil.copytree(ckpt_dir, partial)
+            os.rename(partial, dest)
             print(f"Copied checkpoint to volume: {dest}")
         except Exception as e:
             print(f"Warning: failed to copy checkpoint to volume: {e}")
@@ -79,6 +86,25 @@ class VolumeCheckpointCallback(TrainerCallback):
                 print(f"Pruned old volume checkpoint: {name}")
         except Exception as e:
             print(f"Warning: failed to prune volume checkpoints: {e}")
+
+
+def find_latest_checkpoint(checkpoint_dir: Optional[str]) -> Optional[str]:
+    """Return the newest complete ``checkpoint-N`` under *checkpoint_dir*, if any.
+
+    Complete means HF Trainer's ``trainer_state.json`` is present; resuming
+    from a directory without it fails deep inside ``Trainer.train``.
+    """
+    if not checkpoint_dir or not os.path.isdir(checkpoint_dir):
+        return None
+
+    candidates = []
+    for name in os.listdir(checkpoint_dir):
+        match = _CHECKPOINT_RE.match(name)
+        path = os.path.join(checkpoint_dir, name)
+        if match and os.path.isfile(os.path.join(path, "trainer_state.json")):
+            candidates.append((int(match.group(1)), path))
+
+    return max(candidates)[1] if candidates else None
 
 
 class EarlyStoppingCallback(_HFEarlyStoppingCallback):

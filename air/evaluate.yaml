@@ -1,0 +1,37 @@
+# Evaluate the model from the last training run on AI Runtime:
+#
+#   databricks air run -f air/evaluate.yaml --watch
+#
+# The run is found through the manifest training writes to the config's
+# output.results_dir, so that must be a UC Volume path.
+
+experiment_name: cv-accelerator
+mlflow_run_name: detr-evaluate
+
+environment:
+  version: databricks_ai_v6
+  # Must match requirements_runtime.txt.
+  dependencies:
+    - pycocotools>=2.0.6
+    - timm
+    - albumentations>=1.4
+
+compute:
+  accelerator_type: GPU_1xA10
+  num_accelerators: 1
+
+code_source:
+  type: snapshot
+  snapshot:
+    root_path: ..
+    include_paths:
+      - src
+      - jobs
+      - configs
+
+env_variables:
+  CV_CONFIG_PATH: configs/detection_detr_config.yaml
+
+command: bash $CODE_SOURCE_PATH/jobs/air/evaluate.sh
+
+max_retries: 0

@@ -128,6 +128,12 @@ class DataConfig(BaseModel):
     augment: Union[bool, Dict[str, Any]] = True
     augmentations: Optional[Dict[str, Any]] = None
 
+    # Copy /Volumes inputs to local disk once before training.  Image datasets
+    # are many small files re-read every epoch, the access pattern UC Volumes
+    # serve worst; see src/utils/environment.py.
+    stage_to_local: bool = True
+    local_cache_dir: str = "/tmp/cv_data"
+
     @field_validator("batch_size", "num_workers", mode="before")
     @classmethod
     def _coerce_int(cls, v: Any) -> int:
@@ -152,6 +158,14 @@ class TrainingConfig(BaseModel):
     # Mixed precision.  ``auto`` picks bf16 when the GPU supports it, else fp16,
     # else fp32 — V100 and T4 do not support bf16 and used to fail outright.
     precision: str = "auto"
+
+    # ``"latest"`` resumes from the newest complete checkpoint in
+    # ``volume_checkpoint_dir`` and starts fresh when there is none, so the
+    # first attempt of an AI Runtime task trains normally and its retries pick
+    # up where it stopped.  Any other value is a checkpoint path.  Use a fresh
+    # ``volume_checkpoint_dir`` per training run, or "latest" will resume
+    # someone else's.
+    resume_from_checkpoint: Optional[str] = None
 
     model_config = {"extra": "allow"}
 
@@ -183,6 +197,16 @@ class TrainingConfig(BaseModel):
         if isinstance(v, str):
             return v.lower() in ("true", "1", "yes")
         return bool(v)
+
+    @model_validator(mode="after")
+    def _check_resume_source(self) -> "TrainingConfig":
+        if self.resume_from_checkpoint == "latest" and not self.volume_checkpoint_dir:
+            raise ValueError(
+                "resume_from_checkpoint: latest needs volume_checkpoint_dir — "
+                "local checkpoints do not survive the AI Runtime node, so there "
+                "is nothing to resume from."
+            )
+        return self
 
 
 class MLflowConfig(BaseModel):

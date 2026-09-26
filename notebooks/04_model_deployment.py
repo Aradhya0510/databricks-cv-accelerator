@@ -16,6 +16,23 @@
 # COMMAND ----------
 
 # MAGIC %md
+# MAGIC ## 0. Environment
+# MAGIC
+# MAGIC Run from a Git folder clone of this repo, attached to **AI Runtime**
+# MAGIC (serverless GPU) with the **AI v6** base environment, which already ships
+# MAGIC torch, transformers v5 and MLflow. This installs the few packages it lacks.
+
+# COMMAND ----------
+
+# MAGIC %pip install -q -r ../requirements_runtime.txt
+
+# COMMAND ----------
+
+dbutils.library.restartPython()
+
+# COMMAND ----------
+
+# MAGIC %md
 # MAGIC ## 1. Configuration
 
 # COMMAND ----------
@@ -23,32 +40,51 @@
 import sys, os, base64
 from pathlib import Path
 
-sys.path.append('/Workspace/Repos/your-repo/databricks-cv-accelerator/src')
-sys.path.append('/Workspace/Repos/your-repo/databricks-cv-accelerator')
+# The notebook runs from notebooks/ in the Git folder; only the repo root goes
+# on the path, so `src` imports resolve the same way the job entry points do.
+REPO_ROOT = os.path.dirname(os.getcwd())
+if REPO_ROOT not in sys.path:
+    sys.path.insert(0, REPO_ROOT)
 
 from src.config.schema import load_config
 
-# --- Paths (customise for your workspace) ---
-CATALOG = "your_catalog"
-SCHEMA = "your_schema"
-VOLUME = "your_volume"
-PROJECT_PATH = "cv_detr_training"
-
-BASE_VOLUME_PATH = f"/Volumes/{CATALOG}/{SCHEMA}/{VOLUME}/{PROJECT_PATH}"
-CONFIG_PATH = f"{BASE_VOLUME_PATH}/configs/detection_yolos_config.yaml"
+# Pipeline config: a Volume path, or a path relative to the repo root.
+dbutils.widgets.text("config_path", "", "Config YAML")
+CONFIG_PATH = dbutils.widgets.get("config_path")
+if not CONFIG_PATH:
+    raise ValueError("Set the config_path widget to your pipeline config YAML.")
+if not os.path.isabs(CONFIG_PATH):
+    CONFIG_PATH = os.path.join(REPO_ROOT, CONFIG_PATH)
 
 config = load_config(CONFIG_PATH)
 
-# --- Deployment settings ---
-RUN_ID = "YOUR_MLFLOW_RUN_ID"  # From training notebook / MLflow UI
-REGISTERED_MODEL_NAME = f"{CATALOG}.{SCHEMA}.yolos_detection"
-ENDPOINT_NAME = "yolos-detection-endpoint"
+# --- Deployment settings (widgets override the config's serving section) ---
+dbutils.widgets.text("run_id", "", "MLflow run ID (default: last training run)")
+dbutils.widgets.text("model_name", "", "UC model (default: serving.registered_model_name)")
+dbutils.widgets.text("endpoint_name", "", "Endpoint (default: serving.endpoint_name)")
+dbutils.widgets.text("test_image", "", "Test image (default: first val image)")
 
-# Path to a test image for validation
-TEST_IMAGE_PATH = f"{BASE_VOLUME_PATH}/data/val2017/000000000139.jpg"  # Example
+RUN_ID = dbutils.widgets.get("run_id") or None
+MODEL_URI = None
+if not RUN_ID:
+    from src.utils.manifest import read_run_manifest
+
+    manifest = read_run_manifest(config.output.results_dir)
+    RUN_ID, MODEL_URI = manifest["run_id"], manifest.get("model_uri")
+
+REGISTERED_MODEL_NAME = dbutils.widgets.get("model_name") or config.serving.registered_model_name
+ENDPOINT_NAME = dbutils.widgets.get("endpoint_name") or config.serving.endpoint_name
+if not (REGISTERED_MODEL_NAME and ENDPOINT_NAME):
+    raise ValueError("Set serving.registered_model_name and serving.endpoint_name, or the widgets.")
+
+TEST_IMAGE_PATH = dbutils.widgets.get("test_image") or os.path.join(
+    config.data.val_data_path,
+    sorted(f for f in os.listdir(config.data.val_data_path) if f.lower().endswith((".jpg", ".jpeg", ".png")))[0],
+)
 
 print(f"Model:     {config.model.model_name}")
 print(f"Run ID:    {RUN_ID}")
+print(f"Image:     {TEST_IMAGE_PATH}")
 print(f"UC Model:  {REGISTERED_MODEL_NAME}")
 print(f"Endpoint:  {ENDPOINT_NAME}")
 
@@ -59,26 +95,12 @@ print(f"Endpoint:  {ENDPOINT_NAME}")
 
 # COMMAND ----------
 
+from src.serving.artifacts import resolve_model_dir
 from src.serving.pyfunc import DetectionPyFuncModel
-from src.utils.hf import MODEL_DTYPE, load_image_processor
-from transformers import AutoModelForObjectDetection
-from PIL import Image
 import mlflow
-import tempfile
 
-# Download model from MLflow — resolve via logged_model_uri (MLflow 3) or
-# fall back to the deprecated runs:/ URI for backward compatibility.
-_client = mlflow.MlflowClient()
-_run = _client.get_run(RUN_ID)
-_stored_uri = _run.data.params.get("logged_model_uri")
-_download_uri = _stored_uri if _stored_uri else f"runs:/{RUN_ID}/model"
-artifact_path = mlflow.artifacts.download_artifacts(artifact_uri=_download_uri)
-
-tmpdir = tempfile.mkdtemp()
-model = AutoModelForObjectDetection.from_pretrained(artifact_path, dtype=MODEL_DTYPE)
-processor = load_image_processor(artifact_path)
-model.save_pretrained(tmpdir)
-processor.save_pretrained(tmpdir)
+# The same flat model + processor directory registration will package.
+model_dir = resolve_model_dir(run_id=RUN_ID, model_uri=MODEL_URI)
 
 # Simulate PyFunc load_context
 pyfunc = DetectionPyFuncModel()
@@ -87,7 +109,7 @@ class _MockContext:
     def __init__(self, model_dir):
         self.artifacts = {"model_dir": model_dir}
 
-pyfunc.load_context(_MockContext(tmpdir))
+pyfunc.load_context(_MockContext(model_dir))
 
 # Test with a real image
 with open(TEST_IMAGE_PATH, "rb") as f:
@@ -113,8 +135,12 @@ from src.serving.registration import register_model
 
 reg_result = register_model(
     run_id=RUN_ID,
+    model_uri=MODEL_URI,
     registered_model_name=REGISTERED_MODEL_NAME,
-    aliases=["champion", "latest"],
+    task_type=config.model.task_type,
+    # Not "latest": Unity Catalog reserves it and registration fails after the
+    # version is created.
+    aliases=["champion"],
     tags={
         "framework": "hf_trainer",
         "task": "detection",

@@ -12,6 +12,23 @@
 # COMMAND ----------
 
 # MAGIC %md
+# MAGIC ## 0. Environment
+# MAGIC
+# MAGIC Run from a Git folder clone of this repo, attached to **AI Runtime**
+# MAGIC (serverless GPU) with the **AI v6** base environment, which already ships
+# MAGIC torch, transformers v5 and MLflow. This installs the few packages it lacks.
+
+# COMMAND ----------
+
+# MAGIC %pip install -q -r ../requirements_runtime.txt
+
+# COMMAND ----------
+
+dbutils.library.restartPython()
+
+# COMMAND ----------
+
+# MAGIC %md
 # MAGIC ## 1. Configuration
 
 # COMMAND ----------
@@ -19,15 +36,31 @@
 import sys, os
 from pathlib import Path
 
-sys.path.append('/Workspace/Repos/your-repo/databricks-cv-accelerator/src')
-sys.path.append('/Workspace/Repos/your-repo/databricks-cv-accelerator')
+# The notebook runs from notebooks/ in the Git folder; only the repo root goes
+# on the path, so `src` imports resolve the same way the job entry points do.
+REPO_ROOT = os.path.dirname(os.getcwd())
+if REPO_ROOT not in sys.path:
+    sys.path.insert(0, REPO_ROOT)
 
 from src.monitoring import EndpointMonitor
 
-ENDPOINT_NAME = "yolos-detection-endpoint"  # Your endpoint name
-LOOKBACK_HOURS = 24
+dbutils.widgets.text("endpoint_name", "", "Serving endpoint")
+dbutils.widgets.text("config_path", "", "Config YAML (optional: alert thresholds)")
+dbutils.widgets.text("lookback_hours", "24", "Lookback (hours)")
 
-monitor = EndpointMonitor(ENDPOINT_NAME)
+ENDPOINT_NAME = dbutils.widgets.get("endpoint_name")
+if not ENDPOINT_NAME:
+    raise ValueError("Set the endpoint_name widget.")
+LOOKBACK_HOURS = int(dbutils.widgets.get("lookback_hours"))
+
+thresholds = None
+if dbutils.widgets.get("config_path"):
+    from src.config.schema import load_config
+
+    _cfg_path = dbutils.widgets.get("config_path")
+    thresholds = load_config(_cfg_path if os.path.isabs(_cfg_path) else os.path.join(REPO_ROOT, _cfg_path)).monitoring
+
+monitor = EndpointMonitor(ENDPOINT_NAME, thresholds=thresholds)
 print(f"Monitoring endpoint: {ENDPOINT_NAME}")
 
 # COMMAND ----------

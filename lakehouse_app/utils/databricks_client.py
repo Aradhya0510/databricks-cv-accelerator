@@ -5,11 +5,13 @@ Handles job submission, monitoring, and MLflow interactions
 
 import io
 import os
+import shlex
+import tarfile
 import time
 from typing import Dict, Any, Optional, List
 from datetime import datetime
 from databricks.sdk import WorkspaceClient
-from databricks.sdk.service import jobs, compute
+from databricks.sdk.service.workspace import ImportFormat
 import mlflow
 from mlflow.tracking import MlflowClient
 
@@ -31,87 +33,132 @@ class DatabricksJobClient:
         job_name: str,
         config_path: str,
         project_path: str,
-        num_gpus: Optional[int] = None,
-        cluster_config: Optional[Dict[str, Any]] = None,
-        existing_cluster_id: Optional[str] = None,
+        experiment_name: str,
+        accelerator_type: str = "GPU_1xA10",
+        accelerator_count: int = 1,
         email_notifications: Optional[List[str]] = None,
     ) -> str:
         """
-        Create a training job using the HF Trainer entry point.
+        Create an AI Runtime training job running the HF Trainer entry point.
 
         Args:
             job_name: Name for the job
-            config_path: Path to configuration YAML (workspace or volume path)
+            config_path: Path to configuration YAML (a /Volumes path, so the job can read it)
             project_path: Workspace path to the project root
                 (e.g. /Workspace/Users/user@databricks.com/databricks-cv-accelerator)
-            num_gpus: Number of GPUs (auto-detected on cluster if omitted)
-            cluster_config: New cluster config dict (ignored if existing_cluster_id set)
-            existing_cluster_id: Use an already-running GPU cluster
+            experiment_name: The config's mlflow.experiment_name. AI Runtime
+                creates the run itself, so it is placed in this experiment for
+                the dashboard to find.
+            accelerator_type: GPU_1xA10, GPU_1xH100, GPU_8xH100 or GPU_8xB300
+            accelerator_count: Total GPUs; a multiple of the per-node count
             email_notifications: Optional list of emails for notifications
 
         Returns:
             Job ID
         """
-        # Build CLI parameters
-        python_params = ["--config_path", config_path]
-        if num_gpus is not None:
-            python_params.extend(["--num_gpus", str(num_gpus)])
-
-        # Cluster setup — prefer existing, fall back to new
-        cluster_kwargs = {}
-        if existing_cluster_id:
-            cluster_kwargs["existing_cluster_id"] = existing_cluster_id
-        else:
-            if cluster_config is None:
-                cluster_config = {
-                    "spark_version": "17.3.x-gpu-ml-scala2.13",
-                    "node_type_id": "g5.4xlarge",
-                    "num_workers": 0,
-                    "data_security_mode": "SINGLE_USER",
-                }
-            dsm = cluster_config.pop("data_security_mode", None)
-            if isinstance(dsm, str):
-                dsm = compute.DataSecurityMode(dsm)
-            spec = compute.ClusterSpec(**cluster_config)
-            if dsm is not None:
-                spec.data_security_mode = dsm
-            cluster_kwargs["new_cluster"] = spec
-
-        # Job task configuration
-        task = jobs.Task(
-            task_key="train_model",
-            description="Fine-tune CV model with HF Trainer",
-            **cluster_kwargs,
-            python_wheel_task=None,
-            spark_python_task=jobs.SparkPythonTask(
-                python_file=f"{project_path}/jobs/train.py",
-                parameters=python_params,
-            ),
-            libraries=[
-                compute.Library(pypi=compute.PythonPyPiLibrary(package="pycocotools>=2.0.6")),
-                compute.Library(pypi=compute.PythonPyPiLibrary(package="timm")),
-            ],
-            timeout_seconds=0,  # No timeout
+        # An ai_runtime_task runs a script and cannot pass it arguments, so the
+        # config path is baked into a per-job script next to the project.
+        jobs_dir = f"{project_path}/.air_jobs"
+        command_path = f"{jobs_dir}/{job_name}.sh"
+        script = (
+            "#!/usr/bin/env bash\n"
+            "set -euo pipefail\n"
+            'cd "$CODE_SOURCE_PATH"\n'
+            f"exec python jobs/train.py --config_path {shlex.quote(config_path)}\n"
         )
-        
-        # Email notifications
-        notifications = None
+        self.workspace_client.workspace.mkdirs(jobs_dir)
+        self.workspace_client.workspace.upload(
+            command_path, io.BytesIO(script.encode()), format=ImportFormat.AUTO, overwrite=True,
+        )
+        code_path = self._package_project(project_path, f"{jobs_dir}/{job_name}.tgz")
+
+        ai_runtime_task: Dict[str, Any] = {
+            "code_source_path": code_path,
+            "deployments": [{
+                "name": "train",
+                "command_path": command_path,
+                "compute": {
+                    "accelerator_type": accelerator_type,
+                    "accelerator_count": accelerator_count,
+                },
+            }],
+        }
+        ai_runtime_task.update(self._ai_runtime_experiment(experiment_name))
+
+        body: Dict[str, Any] = {
+            "name": job_name,
+            "max_concurrent_runs": 1,
+            "tasks": [{
+                "task_key": "train_model",
+                "description": "Fine-tune CV model with HF Trainer on AI Runtime",
+                "environment_key": "gpu",
+                "ai_runtime_task": ai_runtime_task,
+            }],
+            "environments": [{
+                "environment_key": "gpu",
+                "spec": {
+                    "base_environment": "databricks_ai_v6",
+                    "dependencies": [f"-r {project_path}/requirements_runtime.txt"],
+                },
+            }],
+        }
         if email_notifications:
-            notifications = jobs.JobEmailNotifications(
-                on_success=email_notifications,
-                on_failure=email_notifications,
-            )
-        
-        # Create job
-        created_job = self.workspace_client.jobs.create(
-            name=job_name,
-            tasks=[task],
-            email_notifications=notifications,
-            timeout_seconds=0,
-            max_concurrent_runs=1,
-        )
-        
-        return str(created_job.job_id)
+            body["email_notifications"] = {
+                "on_success": email_notifications,
+                "on_failure": email_notifications,
+            }
+
+        # Raw REST rather than SDK dataclasses: the SDK preinstalled in the Apps
+        # runtime can predate ai_runtime_task.
+        created = self.workspace_client.api_client.do("POST", "/api/2.2/jobs/create", body=body)
+        return str(created["job_id"])
+
+    # What a training node needs from the project folder.
+    _CODE_ENTRIES = ("src", "jobs", "configs", "requirements_runtime.txt")
+
+    def _package_project(self, project_path: str, tarball_path: str) -> str:
+        """Tar the project's code into *tarball_path* and return that path.
+
+        ai_runtime_task's code_source_path must be a tarball — a folder fails
+        with "Tarball not found".  Everything goes under one top-level
+        directory because AI Runtime sets $CODE_SOURCE_PATH to the archive's
+        first top-level entry, which then is the project root.
+        """
+        ws = self.workspace_client.workspace
+        buf = io.BytesIO()
+        with tarfile.open(fileobj=buf, mode="w:gz") as tar:
+            for entry in self._CODE_ENTRIES:
+                root = f"{project_path}/{entry}"
+                try:
+                    info = ws.get_status(root)
+                except Exception:
+                    continue
+                objects = [info] if info.object_type.value == "FILE" else ws.list(root, recursive=True)
+                for obj in objects:
+                    if obj.object_type.value != "FILE" or "__pycache__" in obj.path:
+                        continue
+                    data = ws.download(obj.path).read()
+                    member = tarfile.TarInfo("project" + obj.path[len(project_path):])
+                    member.size = len(data)
+                    tar.addfile(member, io.BytesIO(data))
+        buf.seek(0)
+        ws.upload(tarball_path, buf, format=ImportFormat.AUTO, overwrite=True)
+        return tarball_path
+
+    @staticmethod
+    def _ai_runtime_experiment(experiment_name: str) -> Dict[str, str]:
+        """Map an MLflow experiment path onto ai_runtime_task's name + directory.
+
+        ``/Users/me@x.com/cv`` becomes experiment ``cv`` under
+        ``/Workspace/Users/me@x.com``, which is the same experiment.
+        """
+        experiment_name = experiment_name.rstrip("/")
+        if not experiment_name.startswith("/"):
+            return {"experiment": experiment_name}
+        directory, name = experiment_name.rsplit("/", 1)
+        if not directory.startswith("/Workspace"):
+            directory = f"/Workspace{directory}"
+        return {"experiment": name, "mlflow_experiment_directory": directory}
     
     def run_job(self, job_id: str, parameters: Optional[Dict[str, str]] = None) -> str:
         """
@@ -453,55 +500,6 @@ class DatabricksJobClient:
                 "error": str(e),
             }
     
-    def submit_python_job(
-        self,
-        job_name: str,
-        python_file: str,
-        parameters: List[str],
-        cluster_config: Optional[Dict[str, Any]] = None,
-    ) -> Dict[str, str]:
-        """
-        Create and immediately run a one-off Python job.
-
-        Args:
-            job_name: Name for the job
-            python_file: Workspace path to the Python file
-            parameters: CLI parameters list
-            cluster_config: Optional cluster config (defaults to a small single-node)
-
-        Returns:
-            Dict with job_id and run_id
-        """
-        if cluster_config is None:
-            cluster_config = {
-                "spark_version": "17.3.x-gpu-ml-scala2.13",
-                "node_type_id": "g5.4xlarge",
-                "num_workers": 0,
-                "data_security_mode": "SINGLE_USER",
-            }
-
-        task = jobs.Task(
-            task_key="run",
-            spark_python_task=jobs.SparkPythonTask(
-                python_file=python_file,
-                parameters=parameters,
-            ),
-            new_cluster=compute.ClusterSpec(**cluster_config),
-            libraries=[
-                compute.Library(pypi=compute.PythonPyPiLibrary(package="pycocotools>=2.0.6")),
-                compute.Library(pypi=compute.PythonPyPiLibrary(package="timm")),
-            ],
-        )
-
-        created_job = self.workspace_client.jobs.create(
-            name=job_name,
-            tasks=[task],
-            max_concurrent_runs=1,
-        )
-        run = self.workspace_client.jobs.run_now(job_id=created_job.job_id)
-
-        return {"job_id": str(created_job.job_id), "run_id": str(run.run_id)}
-
     def query_endpoint(
         self,
         endpoint_name: str,
@@ -531,29 +529,6 @@ class DatabricksJobClient:
         except Exception as e:
             return {"error": str(e)}
     
-    def list_clusters(self) -> List[Dict[str, Any]]:
-        """
-        List available clusters.
-        
-        Returns:
-            List of cluster dictionaries
-        """
-        try:
-            clusters = self.workspace_client.clusters.list()
-            return [
-                {
-                    "cluster_id": cluster.cluster_id,
-                    "cluster_name": cluster.cluster_name,
-                    "state": self._clean_enum(cluster.state),
-                    "node_type_id": cluster.node_type_id,
-                    "num_workers": cluster.num_workers,
-                }
-                for cluster in clusters
-            ]
-        except Exception as e:
-            print(f"Error listing clusters: {e}")
-            return []
-
     # ------------------------------------------------------------------ #
     #  Unity Catalog Volume helpers (for Databricks App runtime)          #
     # ------------------------------------------------------------------ #

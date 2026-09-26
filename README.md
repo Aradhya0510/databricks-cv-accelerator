@@ -10,8 +10,8 @@ Fine-tuning CV models on Databricks involves gluing together data loading, Huggi
 - **COCO as the standard data framework.** MS COCO (`pycocotools`) is the unified annotation layer. A single `instances_*.json` can drive both detection and segmentation. The shared `COCODataSource` class wraps `pycocotools.COCO` with task-specific accessors — bounding boxes for detection, `annToMask()` for instance masks, flattened class maps for semantic segmentation. COCO panoptic and ADE20K-style masks are supported as alternatives.
 - **Model adapters as config, not class hierarchies.** Each model family's quirks — pixel mask requirements, box format, output attributes, model API type — are captured in a lightweight dataclass (`DetectionFamilyConfig`, `SegmentationFamilyConfig`). A `detect_*_family()` function selects the right config by substring matching on the model name. Adding a new architecture means adding a dict entry — no new class, no inheritance.
 - **Task-agnostic.** Detection, classification, and segmentation work today. Add new tasks by implementing a single class. The engine, evaluation, serving, and monitoring layers all adapt automatically.
-- **Databricks-native.** Unity Catalog Volumes for data, MLflow for tracking, Model Serving for deployment, system tables for monitoring. Everything wired together.
-- **Multi-GPU out of the box.** Pass `--num_gpus 4` and training runs one process per GPU under real DDP, launched via `TorchDistributor` in local mode — no manual `torchrun`.
+- **Built for Databricks AI Runtime.** Trains on serverless GPUs (A10, H100, 8xH100, 8xB300) with no clusters to manage. Unity Catalog Volumes hold the data, MLflow tracks runs, Model Serving deploys, and system tables feed monitoring.
+- **Multi-GPU out of the box.** On an 8-GPU node training runs one process per GPU under real DDP — relaunched under `torchrun` from a job, or through `serverless_gpu`'s `@distributed` from a notebook. Multi-node works the same way.
 - **Full lifecycle.** Train, evaluate (mAP/accuracy + error analysis + latency benchmarks), register to Unity Catalog, deploy to Model Serving, and monitor — all from the same framework.
 
 ## What You Can Do
@@ -57,8 +57,9 @@ src/
 ├── registry.py                   # TaskRegistry (@register decorator)
 ├── engine/
 │   ├── engine.py                 # TrainingEngine: config → train → metrics
+│   ├── launch.py                 # torchrun relaunch from AI Runtime's node variables
 │   ├── trainer.py                # CVTrainer (HF Trainer + task hooks)
-│   └── callbacks.py              # Checkpoint + early stopping callbacks
+│   └── callbacks.py              # Volume checkpoints, resume, early stopping
 ├── tasks/
 │   ├── detection/                # DetectionTask, COCO dataset, config-driven adapters
 │   ├── classification/           # ClassificationTask, ImageFolder dataset
@@ -74,13 +75,18 @@ src/
 └── utils/
     ├── coco.py                   # COCODataSource: shared pycocotools wrapper for all tasks
     ├── coco_eval.py              # COCOeval wrappers for standardized COCO metrics
-    └── environment.py            # Databricks environment detection, GPU helpers
+    ├── environment.py            # Process topology, GPU count, /Volumes → local staging
+    └── manifest.py               # Run manifest: training → evaluate/deploy hand-off
 
 jobs/
-├── train.py                      # Training CLI
+├── train.py                      # Training CLI (fans out one process per GPU)
 ├── evaluate.py                   # Evaluation CLI
 ├── deploy.py                     # Registration + deployment CLI
-└── monitor.py                    # Monitoring report CLI
+├── monitor.py                    # Monitoring report CLI
+└── air/                          # Node-level command scripts for AI Runtime tasks
+
+air/                              # `databricks air run` workload configs
+databricks.yml                    # Bundle: AI Runtime train/eval + serverless deploy/monitor
 
 notebooks/
 ├── 01_data_exploration.py        # EDA: stats, class distribution, quality checks
@@ -103,18 +109,22 @@ git clone <repo-url> && cd databricks-cv-accelerator
 
 # 2. Pick a config, update paths
 cp configs/classification_vit_config.yaml configs/my_config.yaml
-# Edit data paths, MLflow experiment, checkpoint dirs
+# Edit data paths (UC Volumes), output.results_dir (a Volume), checkpoint dirs
 
-# 3. Train
-python jobs/train.py --config_path configs/my_config.yaml
+# 3. Train on AI Runtime serverless GPUs, from your laptop
+databricks air run -f air/train.yaml \
+    --override env_variables.CV_CONFIG_PATH=configs/my_config.yaml --watch
 
-# 4. Evaluate
-python jobs/evaluate.py --config_path configs/my_config.yaml --checkpoint_path /path/to/model
+# 4. Evaluate the model that run produced
+databricks air run -f air/evaluate.yaml \
+    --override env_variables.CV_CONFIG_PATH=configs/my_config.yaml --watch
 
-# 5. Deploy
-python jobs/deploy.py --config_path configs/my_config.yaml --run_id <mlflow_run_id> \
+# 5. Register and deploy it
+python jobs/deploy.py --config_path configs/my_config.yaml \
     --model_name catalog.schema.my_model --endpoint_name my-endpoint
 ```
+
+Or run the whole pipeline as a scheduled job with `databricks bundle deploy && databricks bundle run cv_training_pipeline`.
 
 ## Extending the Framework
 
@@ -253,34 +263,47 @@ DETA is not supported: it was deprecated upstream and removed in transformers v5
 | BEiT | `microsoft/beit-base-finetuned-ade-640-640` | Semantic | — |
 | DPT | `Intel/dpt-large-ade` | Semantic | — |
 
-## Multi-GPU
+## Running on AI Runtime
 
-Real DDP needs **one process per GPU**. Running the training script as a plain
-`python` process and letting HF Trainer see several GPUs gives you
-`nn.DataParallel` instead — a single process driving every GPU, which is
-slower and interprets `per_device_train_batch_size` as the *total* batch rather
-than the per-GPU batch. So multi-GPU always goes through `TorchDistributor`:
+The framework targets [Databricks AI Runtime](https://docs.databricks.com/aws/en/machine-learning/ai-runtime/)
+with the **Databricks AI environment v6** (`databricks_ai_v6`: Python 3.12,
+torch 2.11, transformers 5, MLflow 3). The only extra packages are the three in
+`requirements_runtime.txt`, which every job definition installs.
 
-| `--distributed` | What it does | When |
+| Where | How | Multi-GPU |
 |---|---|---|
-| `auto` (default) | One process per visible GPU on this node | Normal use |
-| `single` | Forces one process, pinned to one GPU | Debugging |
-| `local` | Single-node multi-process DDP | Explicit form of `auto` |
-| `multinode` | Spreads processes across Spark workers | Cluster has workers |
+| Laptop → GPU | `databricks air run -f air/train.yaml` | `jobs/train.py` relaunches under `torchrun` |
+| Scheduled job | `databricks.yml` (`ai_runtime_task`) | same |
+| Notebook | attach to AI Runtime, `TrainingEngine(config).train()` | `serverless_gpu` `@distributed` |
 
-```bash
-# 4x A10G on a single node — one process per GPU
-python jobs/train.py --config_path configs/my_config.yaml --num_gpus 4
+**One process per GPU.** Real DDP needs one process per GPU; a single process
+that sees several gets `nn.DataParallel`, which is slower and treats
+`batch_size` as the total rather than per-GPU batch. `jobs/train.py` therefore
+checks how many processes the node needs (every GPU on it, times `NUM_NODES`)
+and, if more than one, relaunches itself under `torchrun` — standalone on one
+node, c10d rendezvous on AI Runtime's `MASTER_ADDR`/`MASTER_PORT` across nodes.
+Pass `--num_gpus 1` to debug in a single process.
 
-# Single process, for debugging
-python jobs/train.py --config_path configs/my_config.yaml --distributed single
+**Data.** `/Volumes` inputs are copied to local disk once per node, in
+parallel, before training (`data.stage_to_local`, on by default). Image
+datasets are many small files re-read every epoch, the pattern UC Volumes serve
+worst.
 
-# Multi-node, across Spark workers
-python jobs/train.py --config_path configs/my_config.yaml --distributed multinode
-```
+**MLflow.** AI Runtime creates the MLflow run for CLI, bundle and
+`@distributed` runs and hands it over as `MLFLOW_RUN_ID`; training logs into
+that run, so its experiment (`experiment_name` in `air/*.yaml`, `experiment` in
+the bundle) is where results land.
 
-Note that `multinode` requires a cluster that actually has worker nodes; on a
-single-node GPU cluster it has nothing to distribute to.
+**Long runs and retries.** Jobs run for at most 14 days (CLI) or 2 days
+(notebook), GPUs are on demand, and AI Runtime retries failed CLI runs. Set
+`training.volume_checkpoint_dir` to a fresh Volume path and
+`training.resume_from_checkpoint: latest`: the first attempt trains from
+scratch and every retry resumes from the newest complete checkpoint.
+
+**Pipeline hand-off.** AI Runtime tasks cannot pass job task values, so training
+writes `run_manifest.json` (run ID and model URI) to `output.results_dir`.
+`jobs/evaluate.py` and `jobs/deploy.py` read it when no model is given; make
+`results_dir` a Volume path so every task sees it.
 
 ## Testing
 

@@ -1,22 +1,25 @@
 """TrainingEngine — unified API that wires task, model, data, and trainer.
 
-Single-node multi-GPU goes through ``TorchDistributor(local_mode=True)``, which
-launches one process per GPU on the driver so HF Trainer runs real DDP.  Plain
-``python jobs/train.py`` without a launcher would give DataParallel instead —
-one process driving every GPU — which is both slower and has different
-effective-batch semantics than the config implies.
+Runs on Databricks AI Runtime.  How the training processes come to exist
+depends on where :meth:`TrainingEngine.train` is called from:
 
-Multi-node uses ``TorchDistributor(local_mode=False)`` to spread processes
-across Spark workers.
+* **Inside a launched worker** (``LOCAL_RANK`` set by ``torchrun`` or
+  ``@distributed``): train in this process on its own GPU.
+* **One GPU**: train in this process.
+* **Several GPUs, from a notebook**: fan out with ``serverless_gpu``'s
+  ``@distributed``, one process per GPU.
+
+Scripts do not take the last path: ``jobs/train.py`` relaunches itself under
+``torchrun`` before it gets here, see :mod:`src.engine.launch`.
 """
 
 from __future__ import annotations
 
 import math
 import os
-from typing import Any, Dict, Literal, Optional
+from pathlib import Path
+from typing import Any, Dict, Optional
 
-import torch
 from transformers import TrainingArguments
 
 from ..config.schema import PipelineConfig
@@ -24,13 +27,16 @@ from ..registry import TaskRegistry
 from ..serving.artifacts import LOGGED_MODEL_PARAM, log_model_artifacts
 from ..utils.environment import (
     get_gpu_count,
+    is_distributed_worker,
     is_rank_zero,
     resolve_precision,
-    setup_nccl_env,
     stage_data_to_local,
 )
-from .callbacks import EarlyStoppingCallback, VolumeCheckpointCallback
+from .callbacks import EarlyStoppingCallback, VolumeCheckpointCallback, find_latest_checkpoint
+from ..utils.manifest import write_run_manifest
 from .trainer import CVTrainer
+
+_PROJECT_ROOT = str(Path(__file__).resolve().parents[2])
 
 
 class TrainingEngine:
@@ -42,50 +48,57 @@ class TrainingEngine:
     # ------------------------------------------------------------------
     # Public API
     # ------------------------------------------------------------------
-    def train(
-        self,
-        num_gpus: Optional[int] = None,
-        distributed_mode: Literal["auto", "single", "local", "multinode"] = "auto",
-    ) -> Dict[str, Any]:
+    def train(self, num_gpus: Optional[int] = None) -> Dict[str, Any]:
         """Run training.
 
         Args:
-            num_gpus: Number of GPUs to use.  Auto-detected when ``None``.
-            distributed_mode:
-                ``"auto"`` (default) — single process on one GPU, or
-                    ``TorchDistributor(local_mode=True)`` when several GPUs are
-                    visible on this node.
-                ``"single"`` — force one process, even with several GPUs.
-                ``"local"`` — force single-node multi-process DDP.
-                ``"multinode"`` — distribute across Spark workers.
+            num_gpus: GPUs to train on.  Defaults to every GPU on the node.
         """
+        if is_distributed_worker():
+            return self._train_fn()
+
         if num_gpus is None:
             num_gpus = get_gpu_count()
         num_gpus = max(num_gpus, 1)
 
-        # Already inside a launched worker: just train, one process one GPU.
-        if os.environ.get("WORLD_SIZE") and os.environ.get("RANK") is not None:
-            return self._train_fn(num_gpus=1)
+        self.stage_data()
 
-        if distributed_mode == "auto":
-            distributed_mode = "local" if num_gpus > 1 else "single"
-
-        if distributed_mode == "single":
-            if num_gpus > 1:
+        if num_gpus == 1:
+            if get_gpu_count() > 1:
                 # Pin to one GPU so HF Trainer cannot silently pick DataParallel.
                 os.environ.setdefault("CUDA_VISIBLE_DEVICES", "0")
-            return self._train_fn(num_gpus=1)
+            return self._train_fn()
 
-        # Multi-process paths need the data on local disk: /Volumes is a FUSE
-        # mount the worker processes cannot all read efficiently.
-        self._stage_volumes_data()
-        return self._train_distributed(num_gpus, local_mode=(distributed_mode == "local"))
+        return self._train_serverless_gpu(num_gpus)
+
+    def stage_data(self) -> None:
+        """Point the data paths at local copies of any ``/Volumes`` inputs.
+
+        Call once per node, before worker processes start.
+        """
+        data = self.config.data
+        if not data.stage_to_local:
+            return
+        for field in (
+            "train_data_path", "val_data_path", "test_data_path",
+            "train_annotation_file", "val_annotation_file", "test_annotation_file",
+        ):
+            path = getattr(data, field)
+            if path:
+                setattr(data, field, stage_data_to_local(path, data.local_cache_dir))
 
     # ------------------------------------------------------------------
     # Core training (one process, one device)
     # ------------------------------------------------------------------
-    def _train_fn(self, num_gpus: int = 1) -> Dict[str, Any]:
-        """Core training logic for a single process."""
+    def _train_fn(self, name_platform_run: bool = False) -> Dict[str, Any]:
+        """Core training logic for a single process.
+
+        Args:
+            name_platform_run: Apply ``mlflow.run_name`` to a run AI Runtime
+                created.  Only ``@distributed`` needs this — it names runs
+                randomly — whereas CLI and bundle runs are named by their own
+                job definition.
+        """
         import mlflow
         from transformers import set_seed
 
@@ -109,10 +122,7 @@ class TrainingEngine:
         train_ds = task.get_train_dataset(config)
         val_ds = task.get_val_dataset(config)
 
-        # --- NCCL env for Databricks networking ---
         world_size = int(os.environ.get("WORLD_SIZE", "1"))
-        if world_size > 1:
-            setup_nccl_env()
 
         # --- optimizer + scheduler ---
         # Under DDP each rank sees 1/world_size of the data, so the number of
@@ -159,14 +169,15 @@ class TrainingEngine:
             dataloader_persistent_workers=config.data.num_workers > 0,
         )
 
+        resume_from = self._resolve_resume_checkpoint()
+
         # --- MLflow: single run for the entire lifecycle ---
         # Opening the run here ensures HF Trainer's MLflowCallback reuses it
         # (it checks mlflow.active_run() and sets _auto_end_run=False).
         # This prevents the duplicate-run problem where metrics and model
         # artifacts end up in different runs.
-        mlflow.set_experiment(config.mlflow.experiment_name)
-
-        run_ctx = mlflow.start_run(run_name=config.mlflow.run_name) if is_writer else None
+        run_ctx = self._start_mlflow_run(name_platform_run) if is_writer else None
+        status = "FAILED"
         try:
             if is_writer:
                 if config.mlflow.tags:
@@ -178,11 +189,12 @@ class TrainingEngine:
                     "max_epochs": config.training.max_epochs,
                     "batch_size": config.data.batch_size,
                     "learning_rate": config.model.learning_rate,
-                    "num_gpus": num_gpus,
                     "world_size": world_size,
                     "seed": config.training.seed,
                     "precision": precision,
                 })
+                if resume_from:
+                    mlflow.set_tag("resumed_from_checkpoint", resume_from)
 
             # --- callbacks ---
             callbacks = []
@@ -213,7 +225,7 @@ class TrainingEngine:
                 trainer.eval_fn = task.get_eval_fn(config.model)
 
             # --- train ---
-            trainer.train()
+            trainer.train(resume_from_checkpoint=resume_from)
 
             # --- final eval ---
             metrics = trainer.evaluate()
@@ -221,6 +233,7 @@ class TrainingEngine:
             # --- log final model + processor (rank 0, inside the same run) ---
             # Not wrapped in a try/except: a run that trained but persisted no
             # model has failed, and should say so rather than exiting cleanly.
+            model_uri = None
             if is_writer and config.mlflow.log_model:
                 model_uri = log_model_artifacts(
                     trainer.model,
@@ -231,60 +244,96 @@ class TrainingEngine:
             if is_writer and config.training.volume_checkpoint_dir:
                 mlflow.log_param("checkpoint_dir", config.training.volume_checkpoint_dir)
 
+            if is_writer:
+                run = mlflow.active_run()
+                path = write_run_manifest(
+                    config.output.results_dir,
+                    run_id=run.info.run_id,
+                    experiment_id=run.info.experiment_id,
+                    model_uri=model_uri,
+                    task_type=config.model.task_type,
+                )
+                print(f"Run manifest written to {path}")
+
+            status = "FINISHED"
         finally:
             if run_ctx is not None:
-                mlflow.end_run()
+                mlflow.end_run(status=status)
 
         return metrics
 
-    # ------------------------------------------------------------------
-    # TorchDistributor paths
-    # ------------------------------------------------------------------
-    def _train_distributed(self, num_gpus: int, local_mode: bool) -> Dict[str, Any]:
-        """Launch one process per GPU via TorchDistributor.
+    def _start_mlflow_run(self, name_platform_run: bool = False):
+        """Open the run this process logs to.
 
-        ``local_mode=True`` keeps every process on the driver node, which is
-        what a single-node multi-GPU cluster needs.  ``local_mode=False``
-        spreads them over Spark workers for multi-node runs.
+        ``databricks air run``, ``ai_runtime_task`` and ``@distributed`` each
+        create the MLflow run themselves and hand it over as ``MLFLOW_RUN_ID``.
+        Logging anywhere else would split one training job across two runs, so
+        that run wins over ``mlflow.experiment_name`` in the config.
         """
+        import mlflow
+
+        # Popped, not read: HF Trainer's MLflowCallback calls start_run whenever
+        # MLFLOW_RUN_ID is set, even with that run already active, and MLflow
+        # raises. With it gone the callback just reuses the active run.
+        platform_run_id = os.environ.pop("MLFLOW_RUN_ID", None)
+        if platform_run_id:
+            print(f"Logging to the AI Runtime MLflow run {platform_run_id}")
+            run = mlflow.start_run(run_id=platform_run_id)
+            if name_platform_run and self.config.mlflow.run_name:
+                mlflow.set_tag("mlflow.runName", self.config.mlflow.run_name)
+            return run
+
+        mlflow.set_experiment(self.config.mlflow.experiment_name)
+        return mlflow.start_run(run_name=self.config.mlflow.run_name)
+
+    def _resolve_resume_checkpoint(self) -> Optional[str]:
+        requested = self.config.training.resume_from_checkpoint
+        if requested != "latest":
+            return requested
+
+        latest = find_latest_checkpoint(self.config.training.volume_checkpoint_dir)
+        print(f"Resuming from {latest}" if latest else "No checkpoint to resume from; starting fresh")
+        return latest
+
+    # ------------------------------------------------------------------
+    # Notebook multi-GPU
+    # ------------------------------------------------------------------
+    def _train_serverless_gpu(self, num_gpus: int) -> Dict[str, Any]:
+        """Run one training process per GPU with ``serverless_gpu``'s ``@distributed``."""
+        try:
+            from serverless_gpu import distributed
+        except ImportError:
+            raise RuntimeError(
+                f"Training on {num_gpus} GPUs needs one process per GPU. From a "
+                f"notebook, attach it to AI Runtime so serverless_gpu is "
+                f"available; from a script, run jobs/train.py, which relaunches "
+                f"itself under torchrun."
+            ) from None
+
+        import mlflow
+
+        # @distributed creates the run; this is the only way to choose where.
+        mlflow.set_experiment(self.config.mlflow.experiment_name)
+
         config_dict = self.config.model_dump()
+        project_root = _PROJECT_ROOT
 
+        # Defined here rather than at module level so cloudpickle ships it by
+        # value: the workers can only import ``src`` once this body has put the
+        # project root on sys.path.
         def train_fn():
-            import os
+            import sys
 
-            os.environ.setdefault("NCCL_SOCKET_IFNAME", "eth0")
-            os.environ.setdefault("NCCL_IB_DISABLE", "1")
-            os.environ.setdefault("NCCL_P2P_LEVEL", "NVL")
-            os.environ.setdefault("NCCL_SHM_DISABLE", "1")
+            if project_root not in sys.path:
+                sys.path.insert(0, project_root)
 
             from src.config.schema import PipelineConfig
             from src.engine.engine import TrainingEngine
 
-            config = PipelineConfig(**config_dict)
-            engine = TrainingEngine(config)
-            return engine._train_fn(num_gpus=1)  # each worker process uses 1 GPU
+            return TrainingEngine(PipelineConfig(**config_dict))._train_fn(name_platform_run=True)
 
-        from pyspark.ml.torch.distributor import TorchDistributor
-
-        return TorchDistributor(
-            num_processes=num_gpus,
-            local_mode=local_mode,
-            use_gpu=True,
-        ).run(train_fn)
-
-    # ------------------------------------------------------------------
-    # Helpers
-    # ------------------------------------------------------------------
-    def _stage_volumes_data(self) -> None:
-        """Stage /Volumes/ paths to local disk so worker processes can read them."""
-        cfg = self.config
-        cfg.data.train_data_path = stage_data_to_local(cfg.data.train_data_path)
-        cfg.data.val_data_path = stage_data_to_local(cfg.data.val_data_path)
-        if cfg.data.train_annotation_file:
-            cfg.data.train_annotation_file = stage_data_to_local(cfg.data.train_annotation_file)
-        if cfg.data.val_annotation_file:
-            cfg.data.val_annotation_file = stage_data_to_local(cfg.data.val_annotation_file)
-        if cfg.data.test_data_path:
-            cfg.data.test_data_path = stage_data_to_local(cfg.data.test_data_path)
-        if cfg.data.test_annotation_file:
-            cfg.data.test_annotation_file = stage_data_to_local(cfg.data.test_annotation_file)
+        # The decorator's 3-hour default would kill most real fine-tuning runs.
+        results = distributed(gpus=num_gpus, timeout=None)(train_fn).distributed()
+        if isinstance(results, (list, tuple)):
+            return next((r for r in results if r is not None), {})
+        return results

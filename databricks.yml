@@ -1,19 +1,35 @@
-# Databricks Asset Bundle for the CV accelerator.
+# Declarative Automation Bundle for the CV accelerator on Databricks AI Runtime.
 #
 # Deploy:   databricks bundle deploy --target dev
 # Run:      databricks bundle run cv_training_pipeline --target dev
 #
-# The four jobs/ entry points become one task graph: train -> evaluate ->
-# register+deploy, with monitoring on its own schedule. Cluster specs live
-# here rather than being rebuilt by hand in the UI for every run.
+# Needs Databricks CLI 1.6.0 or newer (ai_runtime_task) and a workspace with
+# the AI Runtime preview enabled. There are no clusters: training and
+# evaluation run as ai_runtime_tasks on serverless GPUs, and registration,
+# deployment and monitoring run on serverless CPU.
+#
+# The config for the GPU tasks is chosen in jobs/air/pipeline.env, because an
+# ai_runtime_task cannot pass arguments to its command. The serverless tasks
+# take it from `config_path` below — keep the two in step. The config's
+# output.results_dir must be a UC Volume path: training writes the run
+# manifest there, and that is how evaluate and deploy find the model.
 
 bundle:
   name: databricks-cv-accelerator
 
 variables:
   config_path:
-    description: Pipeline config, relative to the deployed bundle root.
+    description: Pipeline config for the serverless tasks. Must match jobs/air/pipeline.env.
     default: configs/detection_detr_config.yaml
+  experiment_name:
+    description: MLflow experiment the AI Runtime tasks log to, under the deploying user's home.
+    default: cv-accelerator
+  accelerator_type:
+    description: AI Runtime accelerator for training (GPU_1xA10, GPU_1xH100, GPU_8xH100, GPU_8xB300).
+    default: GPU_8xH100
+  accelerator_count:
+    description: Total GPUs for training; a multiple of the per-node count, beyond which it goes multi-node.
+    default: 8
   catalog:
     description: Unity Catalog catalog for the registered model.
     default: main
@@ -26,66 +42,62 @@ variables:
   endpoint_name:
     description: Model Serving endpoint name.
     default: detr-detection-endpoint
-  gpu_node_type:
-    description: GPU instance type for training. g5.12xlarge gives 4x A10G.
-    default: g5.12xlarge
-  num_gpus:
-    description: GPUs available on the driver; one training process per GPU.
-    default: 4
   monitoring_pause_status:
     description: Whether the monitoring schedule is active (PAUSED|UNPAUSED).
     default: PAUSED
 
-# Reused by every task so the runtime and libraries stay in one place.
-# Single-node with several GPUs: TorchDistributor(local_mode=True) launches
-# one process per GPU on the driver, so no workers are needed.
+# The code AI Runtime extracts to $CODE_SOURCE_PATH on every node.
+artifacts:
+  code:
+    type: tgz
+    path: .
+    include:
+      - src
+      - jobs
+      - configs
+    files:
+      - source: ./dist/code.tgz
+
 resources:
   jobs:
     cv_training_pipeline:
       name: "[${bundle.target}] CV training pipeline"
 
-      job_clusters:
-        - job_cluster_key: gpu_cluster
-          new_cluster:
-            spark_version: "17.3.x-gpu-ml-scala2.13"
-            node_type_id: ${var.gpu_node_type}
-            num_workers: 0
-            data_security_mode: SINGLE_USER
-            custom_tags:
-              ResourceClass: SingleNode
-            spark_conf:
-              spark.master: "local[*, 4]"
-              spark.databricks.cluster.profile: singleNode
-
       tasks:
         - task_key: train
-          job_cluster_key: gpu_cluster
-          spark_python_task:
-            python_file: jobs/train.py
-            parameters:
-              - "--config_path"
-              - "${var.config_path}"
-              - "--num_gpus"
-              - "${var.num_gpus}"
-          libraries:
-            - requirements: requirements_runtime.txt
+          environment_key: gpu
+          ai_runtime_task:
+            experiment: ${var.experiment_name}
+            mlflow_run: ${bundle.target}-train
+            code_source_path: ./dist/code.tgz
+            deployments:
+              - name: train
+                command_path: ./jobs/air/train.sh
+                compute:
+                  accelerator_type: ${var.accelerator_type}
+                  accelerator_count: ${var.accelerator_count}
 
         - task_key: evaluate
           depends_on:
             - task_key: train
-          job_cluster_key: gpu_cluster
-          spark_python_task:
-            python_file: jobs/evaluate.py
-            parameters:
-              - "--config_path"
-              - "${var.config_path}"
-          libraries:
-            - requirements: requirements_runtime.txt
+          environment_key: gpu
+          ai_runtime_task:
+            experiment: ${var.experiment_name}
+            mlflow_run: ${bundle.target}-evaluate
+            code_source_path: ./dist/code.tgz
+            deployments:
+              - name: evaluate
+                command_path: ./jobs/air/evaluate.sh
+                compute:
+                  accelerator_type: GPU_1xA10
+                  accelerator_count: 1
 
+        # Registration reloads the model to wrap it as a PyFunc, and then waits
+        # for the endpoint to come up; neither needs a GPU.
         - task_key: register_and_deploy
           depends_on:
             - task_key: evaluate
-          job_cluster_key: gpu_cluster
+          environment_key: serving
           spark_python_task:
             python_file: jobs/deploy.py
             parameters:
@@ -95,14 +107,29 @@ resources:
               - "${var.catalog}.${var.schema}.${var.model_name}"
               - "--endpoint_name"
               - "${var.endpoint_name}"
-          libraries:
-            - requirements: requirements_runtime.txt
+
+      environments:
+        - environment_key: gpu
+          spec:
+            base_environment: databricks_ai_v6
+            # Must match requirements_runtime.txt.
+            dependencies:
+              - pycocotools>=2.0.6
+              - timm
+              - albumentations>=1.4
+        - environment_key: serving
+          spec:
+            environment_version: "4"
+            dependencies:
+              - torch
+              - torchvision
+              - transformers>=5.0
+              - mlflow>=3.7
 
     cv_endpoint_monitoring:
       name: "[${bundle.target}] CV endpoint monitoring"
 
-      # Monitoring only queries system tables and the serving API, so it runs
-      # on a small serverless-friendly cluster rather than the GPU one.
+      # Monitoring only queries system tables and the serving API.
       schedule:
         quartz_cron_expression: "0 0 * * * ?"
         timezone_id: UTC
@@ -110,16 +137,7 @@ resources:
 
       tasks:
         - task_key: monitor
-          new_cluster:
-            spark_version: "17.3.x-cpu-ml-scala2.13"
-            node_type_id: i3.xlarge
-            num_workers: 0
-            data_security_mode: SINGLE_USER
-            custom_tags:
-              ResourceClass: SingleNode
-            spark_conf:
-              spark.master: "local[*]"
-              spark.databricks.cluster.profile: singleNode
+          environment_key: monitoring
           spark_python_task:
             python_file: jobs/monitor.py
             parameters:
@@ -131,14 +149,19 @@ resources:
               # notification is the alert.
               - "--fail_on_breach"
 
+      environments:
+        - environment_key: monitoring
+          spec:
+            environment_version: "4"
+
 targets:
   dev:
     mode: development
     default: true
     variables:
       monitoring_pause_status: PAUSED
-      num_gpus: 1
-      gpu_node_type: g5.xlarge
+      accelerator_type: GPU_1xA10
+      accelerator_count: 1
 
   staging:
     mode: production

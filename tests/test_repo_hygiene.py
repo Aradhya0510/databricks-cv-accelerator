@@ -38,7 +38,7 @@ JOB_FILES = sorted((REPO / "jobs").glob("*.py"))
 
 @pytest.mark.parametrize("path", JOB_FILES, ids=lambda p: p.name)
 def test_job_entry_points_have_no_import_side_effects(path):
-    """Importing a job module must not install packages or hit the network.
+    """Importing a job module must not spawn processes or hit the network.
 
     The entry points used to shell out to pip at module scope, before
     argparse and once per process under any multi-process launch.
@@ -52,12 +52,10 @@ def test_job_entry_points_have_no_import_side_effects(path):
             continue
 
         dumped = ast.dump(node)
-        assert "check_call" not in dumped, (
-            f"{path.name} runs a subprocess at import time"
-        )
-        assert "ensure_runtime_requirements" not in dumped, (
-            f"{path.name} installs requirements at import time"
-        )
+        for call in ("check_call", "run_torchrun", "subprocess"):
+            assert call not in dumped, (
+                f"{path.name} runs a subprocess at import time"
+            )
 
 
 @pytest.mark.parametrize("path", JOB_FILES, ids=lambda p: p.name)

@@ -20,7 +20,8 @@ jobs:
 
       - uses: actions/setup-python@v5
         with:
-          python-version: "3.11"
+          # Matches the AI Runtime databricks_ai_v6 environment.
+          python-version: "3.12"
           cache: pip
 
       - name: Install

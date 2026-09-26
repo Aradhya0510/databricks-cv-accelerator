@@ -10,6 +10,23 @@
 # COMMAND ----------
 
 # MAGIC %md
+# MAGIC ## 0. Environment
+# MAGIC
+# MAGIC Run from a Git folder clone of this repo, attached to **AI Runtime**
+# MAGIC (serverless GPU) with the **AI v6** base environment, which already ships
+# MAGIC torch, transformers v5 and MLflow. This installs the few packages it lacks.
+
+# COMMAND ----------
+
+# MAGIC %pip install -q -r ../requirements_runtime.txt
+
+# COMMAND ----------
+
+dbutils.library.restartPython()
+
+# COMMAND ----------
+
+# MAGIC %md
 # MAGIC ## 1. Configuration
 
 # COMMAND ----------
@@ -17,19 +34,21 @@
 import sys, os
 from pathlib import Path
 
-sys.path.append('/Workspace/Repos/your-repo/databricks-cv-accelerator/src')
-sys.path.append('/Workspace/Repos/your-repo/databricks-cv-accelerator')
+# The notebook runs from notebooks/ in the Git folder; only the repo root goes
+# on the path, so `src` imports resolve the same way the job entry points do.
+REPO_ROOT = os.path.dirname(os.getcwd())
+if REPO_ROOT not in sys.path:
+    sys.path.insert(0, REPO_ROOT)
 
 from src.config.schema import load_config
 
-# --- Paths (customise for your workspace) ---
-CATALOG = "your_catalog"
-SCHEMA = "your_schema"
-VOLUME = "your_volume"
-PROJECT_PATH = "cv_detr_training"
-
-BASE_VOLUME_PATH = f"/Volumes/{CATALOG}/{SCHEMA}/{VOLUME}/{PROJECT_PATH}"
-CONFIG_PATH = f"{BASE_VOLUME_PATH}/configs/detection_yolos_config.yaml"
+# Pipeline config: a Volume path, or a path relative to the repo root.
+dbutils.widgets.text("config_path", "", "Config YAML")
+CONFIG_PATH = dbutils.widgets.get("config_path")
+if not CONFIG_PATH:
+    raise ValueError("Set the config_path widget to your pipeline config YAML.")
+if not os.path.isabs(CONFIG_PATH):
+    CONFIG_PATH = os.path.join(REPO_ROOT, CONFIG_PATH)
 
 config = load_config(CONFIG_PATH)
 
