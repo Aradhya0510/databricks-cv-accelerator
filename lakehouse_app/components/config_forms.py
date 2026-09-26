@@ -262,7 +262,7 @@ class ConfigFormBuilder:
             help="Number of best models to keep",
         )
 
-        st.info("Multi-GPU DDP is automatic when running on a multi-GPU Jobs cluster")
+        st.info("Multi-GPU DDP is automatic on the 8-GPU AI Runtime accelerators")
         config["use_gpu"] = st.checkbox(
             "Use GPU",
             value=default_values.get("use_gpu", True),

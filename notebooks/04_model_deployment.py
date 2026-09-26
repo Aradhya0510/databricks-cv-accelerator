@@ -16,6 +16,23 @@
 # COMMAND ----------
 
 # MAGIC %md
+# MAGIC ## 0. Environment
+# MAGIC
+# MAGIC Run from a Git folder clone of this repo, attached to **AI Runtime**
+# MAGIC (serverless GPU) with the **AI v6** base environment, which already ships
+# MAGIC torch, transformers v5 and MLflow. This installs the few packages it lacks.
+
+# COMMAND ----------
+
+# MAGIC %pip install -q -r ../requirements_runtime.txt
+
+# COMMAND ----------
+
+dbutils.library.restartPython()
+
+# COMMAND ----------
+
+# MAGIC %md
 # MAGIC ## 1. Configuration
 
 # COMMAND ----------
@@ -23,8 +40,11 @@
 import sys, os, base64
 from pathlib import Path
 
-sys.path.append('/Workspace/Repos/your-repo/databricks-cv-accelerator/src')
-sys.path.append('/Workspace/Repos/your-repo/databricks-cv-accelerator')
+# The notebook runs from notebooks/ in the Git folder; only the repo root goes
+# on the path, so `src` imports resolve the same way the job entry points do.
+REPO_ROOT = os.path.dirname(os.getcwd())
+if REPO_ROOT not in sys.path:
+    sys.path.insert(0, REPO_ROOT)
 
 from src.config.schema import load_config
 

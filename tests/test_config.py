@@ -118,3 +118,23 @@ def test_round_trips_through_dict(tmp_path):
     again = PipelineConfig(**cfg.to_dict())
     assert again.model.model_name == cfg.model.model_name
     assert again.training.max_epochs == cfg.training.max_epochs
+
+
+def test_round_trips_through_yaml(tmp_path):
+    """jobs/train.py hands torchrun workers a re-serialised config."""
+    cfg = load_config(_write(tmp_path, data={"image_size": [512, 512]}))
+    dumped = tmp_path / "resolved.yaml"
+    dumped.write_text(yaml.safe_dump(cfg.model_dump(mode="json")))
+
+    assert load_config(dumped) == cfg
+
+
+def test_resume_latest_needs_a_volume_checkpoint_dir(tmp_path):
+    with pytest.raises(ValidationError, match="volume_checkpoint_dir"):
+        load_config(_write(tmp_path, training={"resume_from_checkpoint": "latest"}))
+
+    cfg = load_config(_write(tmp_path, training={
+        "resume_from_checkpoint": "latest",
+        "volume_checkpoint_dir": "/Volumes/c/s/v/ckpt",
+    }))
+    assert cfg.training.resume_from_checkpoint == "latest"

@@ -1,0 +1,47 @@
+# Fine-tune on AI Runtime from your laptop:
+#
+#   databricks air run -f air/train.yaml --watch
+#
+# Scale to a full H100 node, or pick another config, without editing this file:
+#
+#   databricks air run -f air/train.yaml \
+#     --override compute.accelerator_type=GPU_8xH100 \
+#     --override compute.num_accelerators=8 \
+#     --override env_variables.CV_CONFIG_PATH=configs/detection_rtdetr_config.yaml
+#
+# AI Runtime creates the MLflow run named here and training logs into it, so
+# the config's mlflow.experiment_name does not apply to CLI runs.
+# Full field reference: `databricks air run -h config`.
+
+experiment_name: cv-accelerator
+mlflow_run_name: detr-finetune
+
+environment:
+  version: databricks_ai_v6
+  # Must match requirements_runtime.txt.
+  dependencies:
+    - pycocotools>=2.0.6
+    - timm
+    - albumentations>=1.4
+
+compute:
+  accelerator_type: GPU_1xA10
+  num_accelerators: 1
+
+code_source:
+  type: snapshot
+  snapshot:
+    root_path: ..
+    include_paths:
+      - src
+      - jobs
+      - configs
+
+env_variables:
+  CV_CONFIG_PATH: configs/detection_detr_config.yaml
+
+command: bash $CODE_SOURCE_PATH/jobs/air/train.sh
+
+# Retries only resume, rather than restart, when the config sets
+# training.resume_from_checkpoint: latest with a volume_checkpoint_dir.
+max_retries: 2

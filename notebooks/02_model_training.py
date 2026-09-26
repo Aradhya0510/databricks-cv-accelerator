@@ -1,27 +1,38 @@
 # Databricks notebook source
 # MAGIC %md
-# MAGIC # 02. Model Training (HF Trainer + TorchDistributor)
+# MAGIC # 02. Model Training (HF Trainer on AI Runtime)
 # MAGIC
-# MAGIC This notebook trains an object detection model using the new HF Trainer backend.
-# MAGIC It replaces PyTorch Lightning with `transformers.Trainer` and uses
-# MAGIC `TorchDistributor` for multi-GPU DDP when needed.
+# MAGIC Trains an object detection model with `transformers.Trainer` on Databricks
+# MAGIC AI Runtime. Attach to a **1xA10** or **1xH100** accelerator to train on one GPU,
+# MAGIC or to **8xH100** / **8xB300** to train with DDP across all eight.
 # MAGIC
 # MAGIC ## Overview
 # MAGIC
 # MAGIC 1. Load a validated Pydantic config from YAML
 # MAGIC 2. Create a `TrainingEngine` (one-liner)
-# MAGIC 3. Call `engine.train()` — handles single/multi-GPU automatically
+# MAGIC 3. Call `engine.train()` — one GPU in this process, several through `@distributed`
 # MAGIC 4. Review MLflow metrics
 # MAGIC
 # MAGIC ---
 
 # COMMAND ----------
 
-# (Databricks only) Install requirements and restart Python if running interactively
-# %pip install -r "../requirements.txt"
-# dbutils.library.restartPython()
+# MAGIC %md
+# MAGIC ## 0. Environment
+# MAGIC
+# MAGIC Run from a Git folder clone of this repo, attached to **AI Runtime**
+# MAGIC (serverless GPU) with the **AI v6** base environment, which already ships
+# MAGIC torch, transformers v5 and MLflow. This installs the few packages it lacks.
+
 # COMMAND ----------
 
+# MAGIC %pip install -q -r ../requirements_runtime.txt
+
+# COMMAND ----------
+
+dbutils.library.restartPython()
+
+# COMMAND ----------
 
 # MAGIC %md
 # MAGIC ## 1. Configuration
@@ -34,8 +45,11 @@ import torch
 from pathlib import Path
 
 # Add the src directory to Python path
-sys.path.append('/Workspace/Repos/your-repo/databricks-cv-accelerator/src')
-sys.path.append('/Workspace/Repos/your-repo/databricks-cv-accelerator')
+# The notebook runs from notebooks/ in the Git folder; only the repo root goes
+# on the path, so `src` imports resolve the same way the job entry points do.
+REPO_ROOT = os.path.dirname(os.getcwd())
+if REPO_ROOT not in sys.path:
+    sys.path.insert(0, REPO_ROOT)
 
 from src.config.schema import load_config
 from src.engine import TrainingEngine
@@ -71,7 +85,9 @@ if torch.cuda.is_available():
 
 engine = TrainingEngine(config)
 
-# Train — auto-detects GPU count, uses TorchDistributor for multi-GPU
+# Train on every GPU of the attached accelerator. On 8xH100 this runs one
+# process per GPU through serverless_gpu's @distributed; pass num_gpus=1 to
+# debug on a single GPU first.
 metrics = engine.train()
 
 # COMMAND ----------
@@ -109,10 +125,11 @@ print("Check MLflow UI for detailed metrics, curves, and model artifacts.")
 # MAGIC - Each task provides its own loss and eval hooks to the generic `CVTrainer`
 # MAGIC - `report_to="mlflow"` logs all metrics to MLflow automatically
 # MAGIC
-# MAGIC **Multi-GPU via TorchDistributor:**
-# MAGIC - When >1 GPU detected, `TrainingEngine` uses `TorchDistributor` for DDP
-# MAGIC - Data is staged from `/Volumes/` to `/tmp/` before forking workers
-# MAGIC - NCCL env vars are set automatically for Databricks networking
+# MAGIC **Multi-GPU via `@distributed`:**
+# MAGIC - With more than one GPU attached, `TrainingEngine` launches one DDP process per GPU with `serverless_gpu`'s `@distributed`
+# MAGIC - `/Volumes/` inputs are copied to local disk once, in parallel, before the workers start (`data.stage_to_local`)
+# MAGIC - The MLflow run is created by `@distributed` in `mlflow.experiment_name` from the config
+# MAGIC - Notebook sessions end after two days; for longer runs submit `air/train.yaml` with `databricks air run` and set `training.resume_from_checkpoint: latest`
 # MAGIC
 # MAGIC **Monitoring metrics:**
 # MAGIC - `eval_map`: Mean Average Precision (primary metric)

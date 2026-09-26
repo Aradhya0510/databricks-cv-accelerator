@@ -7,28 +7,24 @@ is needed.
 """
 
 from .environment import (
-    ensure_runtime_requirements,
     get_gpu_count,
-    is_databricks,
-    is_databricks_job,
-    is_databricks_notebook,
+    gpus_per_node,
+    is_distributed_worker,
     is_rank_zero,
+    num_nodes,
     resolve_precision,
-    setup_nccl_env,
     stage_data_to_local,
     volumes_staging_path,
 )
 from .labels import apply_label_names, label_names_from_config
 
 __all__ = [
-    "ensure_runtime_requirements",
     "get_gpu_count",
-    "is_databricks",
-    "is_databricks_job",
-    "is_databricks_notebook",
+    "gpus_per_node",
+    "is_distributed_worker",
     "is_rank_zero",
+    "num_nodes",
     "resolve_precision",
-    "setup_nccl_env",
     "stage_data_to_local",
     "volumes_staging_path",
     "apply_label_names",

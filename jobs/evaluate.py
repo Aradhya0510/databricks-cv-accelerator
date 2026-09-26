@@ -1,38 +1,32 @@
 """Evaluate a trained CV model: mAP metrics, error analysis, benchmarks.
 
 Usage:
+    python jobs/evaluate.py --config_path configs/detection_yolos_config.yaml
     python jobs/evaluate.py --config_path configs/detection_yolos_config.yaml --checkpoint_path /path/to/model
     python jobs/evaluate.py --config_path configs/detection_yolos_config.yaml --run_id abc123
     python jobs/evaluate.py --config_path configs/detection_yolos_config.yaml --checkpoint_path /path/to/model --max_batches 50
+
+With no model source given, evaluates the model from the last training run,
+read from the run manifest in ``output.results_dir``.
 """
 
 from __future__ import annotations
 
 import argparse
-import os
 import sys
 from pathlib import Path
 
-# Support running this file straight from a repo checkout (Databricks Repos,
-# ``python jobs/evaluate.py``) as well as from an installed package.  Only the
-# project root goes on the path — adding ``src/`` too would make both
+# Support running this file straight from a checkout (a Git folder, the
+# AI Runtime code snapshot at $CODE_SOURCE_PATH, ``python jobs/evaluate.py``).
+# Only the project root goes on the path — adding ``src/`` too would make both
 # ``import config`` and ``import src.config`` resolve, to two different module
-# objects.  Runtime dependencies are installed from main(), not at import time.
-try:
-    _this_file = Path(__file__).resolve()
-except NameError:  # Databricks spark_python_task exec() context
-    _this_file = Path(sys.argv[0]).resolve() if sys.argv else Path(os.getcwd())
-
-_PROJECT_ROOT = _this_file.parent.parent
+# objects.
+_PROJECT_ROOT = Path(__file__).resolve().parent.parent
 if str(_PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(_PROJECT_ROOT))
 
 
 def main():
-    from src.utils.environment import ensure_runtime_requirements
-
-    ensure_runtime_requirements(_PROJECT_ROOT / "requirements_runtime.txt")
-
     parser = argparse.ArgumentParser(description="Evaluate a trained CV model")
     parser.add_argument("--config_path", type=str, required=True, help="Path to YAML config file")
     parser.add_argument("--run_id", type=str, default=None, help="MLflow run ID to load model from")
@@ -46,6 +40,15 @@ def main():
     from src.evaluation import EvaluationEngine
 
     config = load_config(args.config_path)
+
+    if not (args.run_id or args.model_uri or args.checkpoint_path):
+        from src.utils.manifest import read_run_manifest
+
+        manifest = read_run_manifest(config.output.results_dir)
+        args.run_id = manifest["run_id"]
+        args.model_uri = manifest.get("model_uri")
+        print(f"Evaluating the model from training run {args.run_id}")
+
     if args.output_dir:
         config.output.results_dir = args.output_dir
 

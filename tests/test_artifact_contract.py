@@ -143,8 +143,6 @@ def test_the_flavor_requirements_are_actually_forwarded(monkeypatch, tiny_classi
     model, processor = tiny_classifier
     captured = {}
 
-    # Keep ``name`` in the signature: _log_transformers_flavor inspects it to
-    # tell MLflow 3 (``name``) from MLflow 2 (``artifact_path``).
     def fake_log_model(
         *, transformers_model=None, task=None, name=None, pip_requirements=None,
     ):
@@ -159,6 +157,7 @@ def test_the_flavor_requirements_are_actually_forwarded(monkeypatch, tiny_classi
     _log_transformers_flavor(model, processor, "image-classification", "model")
 
     assert captured["pip_requirements"] == _FLAVOR_PIP_REQUIREMENTS
+    assert captured["name"] == "model"
 
 
 def test_registration_rejects_an_artifact_with_no_processor(tmp_path):

@@ -12,11 +12,10 @@ import os
 import sys
 from pathlib import Path
 
-# Support running this file straight from a repo checkout (Databricks Repos,
-# ``python jobs/monitor.py``) as well as from an installed package.  Only the
-# project root goes on the path — adding ``src/`` too would make both
-# ``import config`` and ``import src.config`` resolve, to two different module
-# objects.  Runtime dependencies are installed from main(), not at import time.
+# Support running this file straight from a checkout (a Git folder, a bundle
+# deployment, ``python jobs/monitor.py``).  Only the project root goes on the
+# path — adding ``src/`` too would make both ``import config`` and
+# ``import src.config`` resolve, to two different module objects.
 try:
     _this_file = Path(__file__).resolve()
 except NameError:  # Databricks spark_python_task exec() context

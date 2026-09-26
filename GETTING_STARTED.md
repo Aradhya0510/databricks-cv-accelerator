@@ -8,17 +8,18 @@ This guide walks through setting up the Databricks CV Accelerator — from data 
 
 | Requirement | Details |
 |---|---|
-| Databricks workspace | Unity Catalog enabled |
-| Compute | GPU cluster — single A10G for dev, 4x A10G for production training |
-| Runtime | Databricks Runtime ML **16.4+** |
+| Databricks workspace | Unity Catalog enabled, AI Runtime preview enabled, in an AI Runtime region |
+| Compute | AI Runtime serverless GPUs — `GPU_1xA10` for dev, `GPU_8xH100` for production training |
+| Environment | Databricks AI environment **v6** (`databricks_ai_v6`) |
+| CLI | Databricks CLI 1.6.0+ (`databricks air`, `ai_runtime_task` in bundles) |
 | Data | Images uploaded to a UC Volume |
 
 ### Python Dependencies
 
-On Databricks ML Runtime, most dependencies are pre-installed. The exception is
-`transformers`: this framework targets v5, and DBR ML still ships 4.x, so the
-cluster upgrades it from `requirements_runtime.txt` (declare that file as a
-cluster library on job clusters, or let the `jobs/*.py` entry points install it).
+The Databricks AI environment v6 ships torch, torchvision, transformers 5,
+MLflow and the rest of the stack. The three packages it lacks are listed in
+`requirements_runtime.txt`; `air/*.yaml` and `databricks.yml` install them, and
+the notebooks `%pip install` them.
 
 If running locally:
 
@@ -184,40 +185,64 @@ output:
 | `training.monitor_metric` | `val_map` for detection, `val_accuracy` for classification |
 | `training.monitor_mode` | `max` for mAP/accuracy, `min` for loss |
 | `training.volume_checkpoint_dir` | Optional. Syncs checkpoints to a Volume for persistence. |
+| `training.resume_from_checkpoint` | Optional. `latest` resumes retries from `volume_checkpoint_dir`. |
+| `output.results_dir` | A Volume path, so evaluate/deploy can find the run manifest. |
 
 ---
 
 ## Step 3: Train
 
-### Option A — Job Script (recommended for production)
+### Option A — `databricks air run` (from your laptop)
 
 ```bash
-# Single GPU
-python jobs/train.py --config_path configs/my_config.yaml
+# One A10 (the default in air/train.yaml)
+databricks air run -f air/train.yaml \
+    --override env_variables.CV_CONFIG_PATH=configs/my_config.yaml --watch
 
-# Multi-GPU (auto-detected or explicit)
-python jobs/train.py --config_path configs/my_config.yaml --num_gpus 4
+# A full H100 node: jobs/train.py runs one DDP process per GPU
+databricks air run -f air/train.yaml \
+    --override env_variables.CV_CONFIG_PATH=configs/my_config.yaml \
+    --override compute.accelerator_type=GPU_8xH100 \
+    --override compute.num_accelerators=8
 ```
+
+The CLI snapshots `src/`, `jobs/` and `configs/`, so the config must be inside
+the repo (or reference a `/Volumes` path). Inspect with `databricks air logs <run-id>`.
 
 ### Option B — Notebook (interactive development)
 
-Open `notebooks/02_model_training.py` in Databricks. Update the config path and run all cells.
+Clone the repo as a Git folder, open `notebooks/02_model_training.py`, attach it
+to AI Runtime with the AI v6 environment, update the config path and run all
+cells. On an 8xH100 attachment `engine.train()` uses all eight GPUs.
 
-### Option C — Databricks Job (scheduled / CI)
+### Option C — Bundle (scheduled / CI)
 
-1. Go to **Workflows > Create Job**
-2. Set task type to **Python script**, path to `jobs/train.py`
-3. Parameters: `--config_path /Workspace/Users/you/databricks-cv-accelerator/configs/my_config.yaml`
-4. Select a GPU cluster (e.g. `g5.12xlarge` with 4x A10G)
-5. Run
+Set the config in `jobs/air/pipeline.env` and `config_path` in
+`databricks.yml`, then:
 
-All metrics are logged to MLflow automatically. The model artifact is saved at the end of training.
+```bash
+databricks bundle deploy --target dev
+databricks bundle run cv_training_pipeline --target dev
+```
+
+This runs train → evaluate on AI Runtime and register → deploy on serverless CPU.
+
+All metrics are logged to MLflow automatically, in the experiment AI Runtime
+creates for the run. The model artifact is saved at the end of training.
 
 ---
 
 ## Step 4: Evaluate
 
-Run standalone evaluation to get metrics, error analysis, and latency benchmarks:
+Run standalone evaluation to get metrics, error analysis, and latency benchmarks.
+With no model given, it evaluates the last training run's model from the run
+manifest (`databricks air run -f air/evaluate.yaml` does exactly this):
+
+```bash
+python jobs/evaluate.py --config_path configs/my_config.yaml
+```
+
+Or point it at a specific checkpoint:
 
 ```bash
 python jobs/evaluate.py \
@@ -377,7 +402,11 @@ training:
 
 ### Resume from Checkpoint
 
-HF Trainer auto-resumes from `checkpoint_dir` if a checkpoint exists. To start fresh, clear the directory.
+Set `training.resume_from_checkpoint: latest` (with `volume_checkpoint_dir`) and
+training resumes from the newest complete checkpoint on the Volume, or starts
+fresh when there is none — so retried AI Runtime runs pick up where they
+stopped. A path resumes from that checkpoint instead. Use a new
+`volume_checkpoint_dir` for each training run.
 
 ---
 
@@ -388,6 +417,8 @@ HF Trainer auto-resumes from `checkpoint_dir` if a checkpoint exists. To start f
 | `CUDA out of memory` | Reduce `batch_size` in config, or use a larger GPU |
 | `KeyError: 'classification'` | Ensure `src/tasks/classification` is imported — check `src/engine/engine.py` |
 | `NCCL timeout` on multi-GPU | This is normal on first run while NCCL initializes. Increase timeout or retry. |
-| `No module named 'pycocotools'` | `pip install pycocotools` — required for detection only |
-| Checkpoint dir already has data | HF Trainer will resume from existing checkpoints. Delete the dir to start fresh. |
-| MLflow experiment not found | The experiment is auto-created. Check that `mlflow.experiment_name` starts with `/Users/your_email` |
+| `No module named 'pycocotools'` | The job environment is missing `requirements_runtime.txt`; in a notebook, run the `%pip install` cell |
+| `transformers >= 5` error | The task is not on the AI v6 environment — set `databricks_ai_v6` |
+| `No run manifest` | `output.results_dir` must be a Volume path shared by the training and evaluate/deploy tasks |
+| Retry resumed an old run | `resume_from_checkpoint: latest` found checkpoints from a previous run; use a fresh `volume_checkpoint_dir` |
+| Metrics not in `mlflow.experiment_name` | AI Runtime runs log to their own experiment (`experiment_name` in `air/*.yaml`, `experiment` in the bundle) |

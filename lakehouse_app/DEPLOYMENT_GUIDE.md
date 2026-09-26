@@ -7,8 +7,8 @@ This guide walks you through deploying the Computer Vision Training Pipeline as 
 ### 1. Databricks Workspace Requirements
 - Databricks workspace with Lakehouse Apps enabled
 - Unity Catalog enabled
-- Access to GPU clusters
-- Permissions to create apps, clusters, and jobs
+- AI Runtime (serverless GPU) preview enabled
+- Permissions to create apps and jobs
 
 ### 2. Unity Catalog Setup
 - Catalog, schema, and volume for data storage
@@ -130,7 +130,7 @@ gatherUsageStats = false
 - CREATE apps
 - READ/WRITE to Unity Catalog
 - CREATE/RUN jobs
-- CREATE/MANAGE clusters
+- WRITE to the project folder (the app writes a small launch script per job under `.air_jobs/`)
 
 **Unity Catalog Permissions:**
 ```sql
@@ -156,13 +156,13 @@ The app uses Databricks authentication automatically:
 - No GPU needed for the app interface
 
 **For Training Jobs:**
-- GPU clusters (g5.4xlarge or larger)
-- Configured per job in the app
+- AI Runtime serverless GPUs (GPU_1xA10, GPU_1xH100, GPU_8xH100, GPU_8xB300)
+- Chosen per job in the app
 
 ### Cost Optimization
 
 1. **Enable scale-to-zero** for serving endpoints
-2. **Use job clusters** instead of all-purpose clusters for training
+2. **Start on GPU_1xA10** and move to 8xH100 only once the config is validated
 3. **Set timeouts** for long-running jobs
 4. **Monitor resource usage** in the History page
 
@@ -245,7 +245,7 @@ databricks apps logs cv-training-pipeline
    - Medium: 4 cores, 16 GB RAM
    - Large: 8 cores, 32 GB RAM
 
-2. **Use shared clusters** for training jobs
+2. **Expect capacity waits** — AI Runtime GPUs are on demand and can be constrained in your region
 
 3. **Implement queuing** for job submissions
 
