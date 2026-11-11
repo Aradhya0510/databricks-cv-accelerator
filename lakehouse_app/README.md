@@ -20,7 +20,7 @@ This Lakehouse App provides an intuitive web interface for the entire computer v
 ### Prerequisites
 
 - Databricks workspace with Unity Catalog enabled
-- Access to GPU clusters (for training)
+- AI Runtime (serverless GPU) enabled, for training
 - Unity Catalog volumes set up for data storage
 
 ### Installation
@@ -86,7 +86,7 @@ This Lakehouse App provides an intuitive web interface for the entire computer v
 
 **Launch and monitor training jobs:**
 - One-click job submission
-- Cluster configuration (GPU selection)
+- AI Runtime accelerator selection (A10, H100, 8xH100, 8xB300)
 - Real-time training monitoring
 - Live metrics visualization (loss, accuracy, mAP)
 - Training progress tracking
@@ -322,8 +322,8 @@ The app seamlessly integrates with your existing CV framework:
 - Solution: Create or load a configuration in the Config Setup page
 
 **2. "Job submission failed"**
-- Check source path is correct
-- Verify cluster configuration
+- Check the project path is correct
+- Verify the AI Runtime preview is enabled for the workspace
 - Ensure GPU quota is available
 
 **3. "Cannot access data path"**

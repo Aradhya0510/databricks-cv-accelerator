@@ -12,6 +12,23 @@
 # COMMAND ----------
 
 # MAGIC %md
+# MAGIC ## 0. Environment
+# MAGIC
+# MAGIC Run from a Git folder clone of this repo, attached to **AI Runtime**
+# MAGIC (serverless GPU) with the **AI v6** base environment, which already ships
+# MAGIC torch, transformers v5 and MLflow. This installs the few packages it lacks.
+
+# COMMAND ----------
+
+# MAGIC %pip install -q -r ../requirements_runtime.txt
+
+# COMMAND ----------
+
+dbutils.library.restartPython()
+
+# COMMAND ----------
+
+# MAGIC %md
 # MAGIC ## 1. Configuration
 
 # COMMAND ----------
@@ -19,29 +36,43 @@
 import sys, os
 from pathlib import Path
 
-sys.path.append('/Workspace/Repos/your-repo/databricks-cv-accelerator/src')
-sys.path.append('/Workspace/Repos/your-repo/databricks-cv-accelerator')
+# The notebook runs from notebooks/ in the Git folder; only the repo root goes
+# on the path, so `src` imports resolve the same way the job entry points do.
+REPO_ROOT = os.path.dirname(os.getcwd())
+if REPO_ROOT not in sys.path:
+    sys.path.insert(0, REPO_ROOT)
 
 from src.config.schema import load_config
 from src.evaluation import EvaluationEngine
 
-# --- Paths (customise for your workspace) ---
-CATALOG = "your_catalog"
-SCHEMA = "your_schema"
-VOLUME = "your_volume"
-PROJECT_PATH = "cv_detr_training"
-
-BASE_VOLUME_PATH = f"/Volumes/{CATALOG}/{SCHEMA}/{VOLUME}/{PROJECT_PATH}"
-CONFIG_PATH = f"{BASE_VOLUME_PATH}/configs/detection_yolos_config.yaml"
+# Pipeline config: a Volume path, or a path relative to the repo root.
+dbutils.widgets.text("config_path", "", "Config YAML")
+CONFIG_PATH = dbutils.widgets.get("config_path")
+if not CONFIG_PATH:
+    raise ValueError("Set the config_path widget to your pipeline config YAML.")
+if not os.path.isabs(CONFIG_PATH):
+    CONFIG_PATH = os.path.join(REPO_ROOT, CONFIG_PATH)
 
 config = load_config(CONFIG_PATH)
 
-# Choose ONE model source — MLflow run_id OR local checkpoint path
-RUN_ID = None  # e.g., "abc123def456"
-CHECKPOINT_PATH = None  # e.g., "/Volumes/.../checkpoints/best_model"
+# Model source: a local checkpoint, an MLflow run, or — by default — the last
+# training run, read from the run manifest in output.results_dir.
+dbutils.widgets.text("run_id", "", "MLflow run ID (default: last training run)")
+dbutils.widgets.text("checkpoint_path", "", "Checkpoint directory (overrides run)")
+CHECKPOINT_PATH = dbutils.widgets.get("checkpoint_path") or None
+RUN_ID = dbutils.widgets.get("run_id") or None
+MODEL_URI = None
+if not (CHECKPOINT_PATH or RUN_ID):
+    from src.utils.manifest import read_run_manifest
+
+    manifest = read_run_manifest(config.output.results_dir)
+    RUN_ID, MODEL_URI = manifest["run_id"], manifest.get("model_uri")
+if CHECKPOINT_PATH:
+    RUN_ID = MODEL_URI = None
 
 engine = EvaluationEngine(config)
 
+print(f"Model source: {CHECKPOINT_PATH or MODEL_URI or RUN_ID}")
 print(f"Model:       {config.model.model_name}")
 print(f"Val data:    {config.data.val_data_path}")
 print(f"Results dir: {config.output.results_dir}")
@@ -56,6 +87,7 @@ print(f"Results dir: {config.output.results_dir}")
 metrics = engine.evaluate(
     model_path=CHECKPOINT_PATH,
     run_id=RUN_ID,
+    model_uri=MODEL_URI,
 )
 
 import pandas as pd
@@ -101,6 +133,7 @@ else:
 errors = engine.error_analysis(
     model_path=CHECKPOINT_PATH,
     run_id=RUN_ID,
+    model_uri=MODEL_URI,
     max_batches=100,
 )
 
@@ -148,6 +181,7 @@ print(f"Recall:    {recall:.3f}")
 bench = engine.benchmark(
     model_path=CHECKPOINT_PATH,
     run_id=RUN_ID,
+    model_uri=MODEL_URI,
     num_warmup=10,
     num_batches=100,
 )
@@ -168,23 +202,14 @@ if "gpu_memory_mb" in bench:
 # COMMAND ----------
 
 # MAGIC %md
-# MAGIC ## 6. Save Results to Volume
+# MAGIC ## 6. Results
 # MAGIC
-# MAGIC All results are automatically saved to `config.output.results_dir` as JSON.
-# MAGIC Copy to a Volume for persistence if running on ephemeral compute.
+# MAGIC `EvaluationEngine` writes every result above as JSON to `config.output.results_dir`.
+# MAGIC Make that a Volume path so results outlive the serverless session.
 
 # COMMAND ----------
 
-import shutil
-
 results_dir = config.output.results_dir
-volume_results = f"{BASE_VOLUME_PATH}/results/evaluation"
-os.makedirs(volume_results, exist_ok=True)
-
 for fname in ["evaluation_metrics.json", "error_analysis.json", "benchmark.json"]:
-    src = os.path.join(results_dir, fname)
-    if os.path.exists(src):
-        shutil.copy2(src, os.path.join(volume_results, fname))
-        print(f"Copied {fname} → {volume_results}/")
-
-print(f"\nResults saved to: {volume_results}")
+    path = os.path.join(results_dir, fname)
+    print(f"{'✅' if os.path.exists(path) else '⚠️ missing'}  {path}")

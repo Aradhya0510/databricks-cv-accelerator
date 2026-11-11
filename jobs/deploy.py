@@ -4,8 +4,11 @@ Usage:
     python jobs/deploy.py --config_path configs/detection_yolos_config.yaml --run_id abc123 \
         --model_name catalog.schema.yolos_detection --endpoint_name yolos-detection-endpoint
 
-    python jobs/deploy.py --config_path configs/detection_yolos_config.yaml --run_id abc123 \
+    python jobs/deploy.py --config_path configs/detection_yolos_config.yaml \
         --model_name catalog.schema.yolos_detection --skip_test
+
+Without --run_id, deploys the model from the last training run, read from the
+run manifest in ``output.results_dir``.
 """
 
 from __future__ import annotations
@@ -15,11 +18,10 @@ import os
 import sys
 from pathlib import Path
 
-# Support running this file straight from a repo checkout (Databricks Repos,
-# ``python jobs/deploy.py``) as well as from an installed package.  Only the
-# project root goes on the path — adding ``src/`` too would make both
-# ``import config`` and ``import src.config`` resolve, to two different module
-# objects.  Runtime dependencies are installed from main(), not at import time.
+# Support running this file straight from a checkout (a Git folder, a bundle
+# deployment, ``python jobs/deploy.py``).  Only the project root goes on the
+# path — adding ``src/`` too would make both ``import config`` and
+# ``import src.config`` resolve, to two different module objects.
 try:
     _this_file = Path(__file__).resolve()
 except NameError:  # Databricks spark_python_task exec() context
@@ -31,13 +33,10 @@ if str(_PROJECT_ROOT) not in sys.path:
 
 
 def main():
-    from src.utils.environment import ensure_runtime_requirements
-
-    ensure_runtime_requirements(_PROJECT_ROOT / "requirements_runtime.txt")
-
     parser = argparse.ArgumentParser(description="Register and deploy a CV model")
     parser.add_argument("--config_path", type=str, required=True, help="Path to YAML config file")
-    parser.add_argument("--run_id", type=str, required=True, help="MLflow run ID")
+    parser.add_argument("--run_id", type=str, default=None,
+                        help="MLflow run ID (default: the last training run, from the run manifest)")
     parser.add_argument("--model_uri", type=str, default=None, help="MLflow model URI (preferred over --run_id for artifact resolution)")
     parser.add_argument("--model_name", type=str, default=None, help="Unity Catalog model name (catalog.schema.model)")
     parser.add_argument("--endpoint_name", type=str, default=None, help="Serving endpoint name")
@@ -52,13 +51,13 @@ def main():
 
     config = load_config(args.config_path)
 
-    # Registration logs the PyFunc wrapper as a new MLflow model, which has to
-    # land in an experiment.  A notebook has one implicitly, a job task does not,
-    # so without this registration fails from a job with the unhelpful
-    # "Missing required field: experiment_id".
-    import mlflow
+    if not args.run_id:
+        from src.utils.manifest import read_run_manifest
 
-    mlflow.set_experiment(config.mlflow.experiment_name)
+        manifest = read_run_manifest(config.output.results_dir)
+        args.run_id = manifest["run_id"]
+        args.model_uri = args.model_uri or manifest.get("model_uri")
+        print(f"Deploying the model from training run {args.run_id}")
 
     model_name = args.model_name or config.serving.registered_model_name
     endpoint_name = args.endpoint_name or config.serving.endpoint_name

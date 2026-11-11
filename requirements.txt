@@ -5,26 +5,24 @@
 #
 # This file is kept for compatibility with existing docs/CI that reference it.
 
-# Core runtime deps (also installed on the cluster by jobs/*.py entry points):
+# Packages AI Runtime's databricks_ai_v6 environment does not ship:
 -r requirements_runtime.txt
+
+# Provided by databricks_ai_v6 on AI Runtime; needed explicitly off-platform.
+torch>=2.4
+torchvision>=0.19
+transformers>=5.0
+huggingface_hub>=1.0
+torchmetrics>=1.0
+mlflow>=3.7
 
 # --- Testing ---
 pytest>=7.3.1
 pytest-cov>=4.1.0
 # The artifact-contract tests back MLflow with a throwaway sqlite store, and
-# MLflow runs its schema migrations through alembic. DBR ML does not ship it, so
-# without this the tests error out on the cluster rather than running.
+# MLflow runs its schema migrations through alembic.
 alembic
 
 # --- Documentation ---
 sphinx>=6.1.3
 sphinx-rtd-theme>=1.2.0
-
-# Note: The following are provided by the DBR ML runtime and are not pinned here:
-# - torch, torchvision
-# - numpy, pandas, pillow, requests
-# - pyyaml, tqdm, opencv-python
-# - mlflow, databricks-sdk
-#
-# transformers is the exception: DBR ML ships 4.x and this framework targets v5,
-# so it is pinned in requirements_runtime.txt and upgraded on the cluster.

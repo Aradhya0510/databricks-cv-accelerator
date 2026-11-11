@@ -107,23 +107,13 @@ def log_model_artifacts(
 
 
 def _log_transformers_flavor(model, processor, pipeline_task: str, artifact_name: str):
-    """Log via ``mlflow.transformers``, handling the MLflow 2 / 3 kwarg rename."""
-    import inspect
-
-    payload = {"model": model, "image_processor": processor}
-    kwargs = {
-        "transformers_model": payload,
-        "task": pipeline_task,
-        "pip_requirements": _FLAVOR_PIP_REQUIREMENTS,
-    }
-
-    # MLflow 3 renamed ``artifact_path`` to ``name``.
-    if "name" in inspect.signature(mlflow.transformers.log_model).parameters:
-        kwargs["name"] = artifact_name
-    else:
-        kwargs["artifact_path"] = artifact_name
-
-    return mlflow.transformers.log_model(**kwargs)
+    """Log via ``mlflow.transformers`` as an MLflow 3 LoggedModel."""
+    return mlflow.transformers.log_model(
+        transformers_model={"model": model, "image_processor": processor},
+        task=pipeline_task,
+        name=artifact_name,
+        pip_requirements=_FLAVOR_PIP_REQUIREMENTS,
+    )
 
 
 def _log_flat_directory(model, processor, artifact_name: str) -> str:

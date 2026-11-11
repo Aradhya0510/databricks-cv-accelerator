@@ -65,16 +65,25 @@ with tab_launch:
             help="Workspace path containing jobs/ and src/",
         )
 
-    section_title("Compute")
+    section_title("AI Runtime Compute")
+    # Accelerator → GPUs per node. Only the 8-GPU nodes scale out to several nodes.
+    accelerators = {"GPU_1xA10": 1, "GPU_1xH100": 1, "GPU_8xH100": 8, "GPU_8xB300": 8}
     c1, c2 = st.columns(2)
     with c1:
-        node_type = st.selectbox(
-            "Node Type",
-            ["g5.4xlarge (1 GPU)", "g5.8xlarge (1 GPU)", "g5.12xlarge (4 GPU)", "g5.24xlarge (4 GPU)"],
+        accelerator_type = st.selectbox(
+            "Accelerator",
+            list(accelerators),
+            help="Serverless GPUs. 8xH100 / 8xB300 train with DDP across all eight.",
         )
-        node_type_id = node_type.split(" ")[0]
     with c2:
-        num_workers = st.number_input("Workers (0 = single-node)", 0, 10, 0)
+        num_nodes = st.number_input(
+            "Nodes", 1, 8, 1,
+            disabled=accelerators[accelerator_type] == 1,
+            help="Multi-node training is available on the 8-GPU accelerators.",
+        )
+    if accelerators[accelerator_type] == 1:
+        num_nodes = 1
+    accelerator_count = accelerators[accelerator_type] * int(num_nodes)
 
     with st.expander("Email Notifications"):
         emails_raw = st.text_input("Addresses (comma-separated)", "")
@@ -88,40 +97,28 @@ with tab_launch:
                 st.error("Save your configuration first.")
             elif "<username>" in project_path:
                 st.error("Update the project path with your actual username.")
+            elif not config.get("data", {}).get("train_data_path", "").startswith("/Volumes"):
+                st.error("AI Runtime jobs read data and configs from Unity Catalog Volumes; "
+                         "set train_data_path to a /Volumes path.")
             else:
                 with st.status("Creating job and uploading config...", expanded=True) as status:
                     client = DatabricksJobClient()
                     cfg_filename = Path(config_path).name if config_path else f"{job_name}.yaml"
-                    data_cfg = config.get("data", {})
-                    tp = data_cfg.get("train_data_path", "")
-                    if tp.startswith("/Volumes"):
-                        parts = tp.strip("/").split("/")
-                        vol_base = "/".join(parts[:4])
-                        vol_cfg_dir = f"/{vol_base}/configs"
-                    else:
-                        vol_cfg_dir = "/tmp/configs"
-                    remote_cfg = f"{vol_cfg_dir}/{cfg_filename}"
+                    # The config goes next to the data, in the same Volume.
+                    parts = config["data"]["train_data_path"].strip("/").split("/")
+                    remote_cfg = f"/{'/'.join(parts[:4])}/configs/{cfg_filename}"
                     cfg_bytes = yaml.dump(config, default_flow_style=False, sort_keys=False).encode()
                     import io as _io
 
-                    if remote_cfg.startswith("/Volumes"):
-                        client.workspace_client.files.upload(remote_cfg, _io.BytesIO(cfg_bytes), overwrite=True)
-                    else:
-                        Path(vol_cfg_dir).mkdir(parents=True, exist_ok=True)
-                        with open(remote_cfg, "wb") as f:
-                            f.write(cfg_bytes)
+                    client.workspace_client.files.upload(remote_cfg, _io.BytesIO(cfg_bytes), overwrite=True)
 
-                    cluster_config = {
-                        "spark_version": "17.3.x-gpu-ml-scala2.13",
-                        "node_type_id": node_type_id,
-                        "num_workers": num_workers,
-                        "data_security_mode": "SINGLE_USER",
-                    }
                     job_id = client.create_training_job(
                         job_name=job_name,
                         config_path=remote_cfg,
                         project_path=project_path,
-                        cluster_config=cluster_config,
+                        experiment_name=config.get("mlflow", {}).get("experiment_name", "cv-accelerator"),
+                        accelerator_type=accelerator_type,
+                        accelerator_count=accelerator_count,
                         email_notifications=emails or None,
                     )
                     run_id = client.run_job(job_id)

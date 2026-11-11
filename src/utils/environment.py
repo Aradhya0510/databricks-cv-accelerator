@@ -1,39 +1,43 @@
-"""Environment detection and GPU helpers for Databricks training."""
+"""Process, GPU and data-locality helpers for training on Databricks AI Runtime."""
 
 from __future__ import annotations
 
 import os
 import shutil
 import subprocess
-import sys
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
-from typing import Optional
 
 
 # ---------------------------------------------------------------------------
-# Environment detection
+# Process topology
 # ---------------------------------------------------------------------------
 
-def is_databricks_job() -> bool:
-    """True when running inside a Databricks *Jobs* environment (non-interactive)."""
-    return os.getenv("DATABRICKS_JOB_RUN_ID") is not None
+def is_distributed_worker() -> bool:
+    """True inside a process started by a distributed launcher.
+
+    ``torchrun`` and ``serverless_gpu``'s ``@distributed`` both set
+    ``LOCAL_RANK`` per process.  ``WORLD_SIZE`` is not a usable signal: AI
+    Runtime sets it on every node of a multi-node task *before* any launcher
+    runs, so a node-level script would mistake itself for a worker.
+    """
+    return "LOCAL_RANK" in os.environ
 
 
-def is_databricks_notebook() -> bool:
-    """True when running inside a Databricks *notebook* (interactive)."""
-    return (
-        os.getenv("DATABRICKS_RUNTIME_VERSION") is not None
-        and not is_databricks_job()
-    )
+def is_rank_zero() -> bool:
+    """True when this process is global rank 0 (or not running distributed).
+
+    Uses ``RANK`` rather than ``LOCAL_RANK`` so that in multi-node runs exactly
+    one process across the whole job — not one per node — is treated as the
+    writer of MLflow runs, checkpoints and reports.
+    """
+    return int(os.environ.get("RANK", "0")) == 0
 
 
-def is_databricks() -> bool:
-    return os.getenv("DATABRICKS_RUNTIME_VERSION") is not None
+def num_nodes() -> int:
+    """Nodes in this AI Runtime task; AI Runtime sets ``NUM_NODES`` on multi-node runs."""
+    return int(os.environ.get("NUM_NODES", "1"))
 
-
-# ---------------------------------------------------------------------------
-# GPU helpers
-# ---------------------------------------------------------------------------
 
 def get_gpu_count() -> int:
     """Return number of NVIDIA GPUs via nvidia-smi (avoids importing torch/CUDA init)."""
@@ -52,24 +56,34 @@ def get_gpu_count() -> int:
     return 0
 
 
-# ---------------------------------------------------------------------------
-# NCCL / distributed setup
-# ---------------------------------------------------------------------------
+def gpus_per_node() -> int:
+    """GPUs this node should run one process each on.
 
-def setup_nccl_env() -> None:
-    """Set NCCL environment variables suitable for single-node Databricks DDP."""
-    os.environ.setdefault("NCCL_DEBUG", "WARN")
-    os.environ.setdefault("NCCL_SOCKET_IFNAME", "eth0")
-    os.environ.setdefault("NCCL_IB_DISABLE", "1")
-    os.environ.setdefault("NCCL_P2P_LEVEL", "NVL")
-    os.environ.setdefault("NCCL_SHM_DISABLE", "1")
+    Prefers ``LOCAL_WORLD_SIZE``, which AI Runtime sets from the accelerator
+    type on multi-node tasks, and falls back to counting devices.
+    """
+    local = os.environ.get("LOCAL_WORLD_SIZE")
+    if local:
+        return int(local)
+    return get_gpu_count()
 
 
 # ---------------------------------------------------------------------------
-# Data staging for /Volumes/ → /tmp/ (DDP workers can't access FUSE)
+# Data staging: /Volumes → local disk
 # ---------------------------------------------------------------------------
+#
+# UC Volumes are readable from every process on AI Runtime, but they are tuned
+# for large sequential reads.  Image datasets are the opposite — tens of
+# thousands of small files, re-read every epoch — so they are copied once to
+# local disk with a parallel copy, which is what the AI Runtime data-loading
+# guidance recommends for small-file workloads.
 
 _VOLUMES_ROOT = "/Volumes"
+
+# Written last into a staged directory; its absence means the copy is partial.
+_STAGED_MARKER = ".cv_staging_complete"
+
+_COPY_CONCURRENCY = 64
 
 
 def volumes_staging_path(volumes_path: str, local_root: str) -> str:
@@ -88,14 +102,15 @@ def volumes_staging_path(volumes_path: str, local_root: str) -> str:
     return os.path.join(local_root, relative)
 
 
-def stage_data_to_local(
-    volumes_path: str,
-    local_root: str = "/tmp/staged_data",
-) -> str:
-    """Copy a /Volumes/ directory tree to a local path for DDP worker access.
+def stage_data_to_local(volumes_path: str, local_root: str = "/tmp/cv_data") -> str:
+    """Copy a ``/Volumes/`` file or directory tree to local disk, once.
 
-    If *volumes_path* does not start with ``/Volumes/`` the path is returned
-    unchanged (nothing to stage).
+    Paths outside ``/Volumes/`` are returned unchanged.  A directory counts as
+    staged only once its completion marker exists, so a copy interrupted by a
+    preempted or timed-out run is redone rather than trained on half-empty.
+
+    Must be called from one process per node — the launcher, before any
+    workers exist — never concurrently from every rank.
 
     Returns:
         The local path that should replace the original volumes path.
@@ -104,61 +119,40 @@ def stage_data_to_local(
         return volumes_path
 
     local_path = volumes_staging_path(volumes_path, local_root)
-
-    if os.path.exists(local_path):
-        return local_path
-
     # ``_VOLUMES_ROOT`` is indirected so tests can rebase the source tree.
     src = Path(_VOLUMES_ROOT) / volumes_path.removeprefix("/Volumes/").rstrip("/")
 
-    os.makedirs(os.path.dirname(local_path), exist_ok=True)
-
     if src.is_file():
-        shutil.copy2(str(src), local_path)
-    else:
-        shutil.copytree(str(src), local_path)
+        if not os.path.isfile(local_path):
+            os.makedirs(os.path.dirname(local_path), exist_ok=True)
+            partial = f"{local_path}.partial"
+            shutil.copyfile(src, partial)
+            os.replace(partial, local_path)
+            print(f"Staged {volumes_path} → {local_path}")
+        return local_path
 
+    if os.path.isfile(os.path.join(local_path, _STAGED_MARKER)):
+        return local_path
+
+    if os.path.exists(local_path):
+        shutil.rmtree(local_path)
+    _parallel_copy_tree(src, Path(local_path))
+    Path(local_path, _STAGED_MARKER).touch()
     print(f"Staged {volumes_path} → {local_path}")
     return local_path
 
 
-# ---------------------------------------------------------------------------
-# Runtime dependency installation
-# ---------------------------------------------------------------------------
+def _parallel_copy_tree(src: Path, dest: Path) -> None:
+    files = [p for p in src.rglob("*") if p.is_file()]
+    for directory in {dest / f.parent.relative_to(src) for f in files} | {dest}:
+        directory.mkdir(parents=True, exist_ok=True)
 
-def is_rank_zero() -> bool:
-    """True when this process is global rank 0 (or not running distributed).
+    def _copy(f: Path) -> None:
+        shutil.copyfile(f, dest / f.relative_to(src))
 
-    Uses ``RANK`` rather than ``LOCAL_RANK`` so that in multi-node runs exactly
-    one process across the whole job — not one per node — is treated as the
-    writer of MLflow runs, checkpoints and reports.
-    """
-    return int(os.environ.get("RANK", "0")) == 0
-
-
-def ensure_runtime_requirements(requirements_file: str | Path) -> None:
-    """Install ``requirements_file`` if it exists, once, on rank 0 only.
-
-    Databricks job clusters should normally declare these as cluster libraries;
-    this is the fallback for running the entry points directly from a checkout.
-    Set ``CV_SKIP_RUNTIME_INSTALL=1`` to opt out entirely.
-
-    Called explicitly from ``main()`` in the job entry points — never at import
-    time, so importing a job module has no side effects.
-    """
-    if os.environ.get("CV_SKIP_RUNTIME_INSTALL"):
-        return
-    if not is_rank_zero():
-        return
-
-    path = Path(requirements_file)
-    if not path.exists():
-        return
-
-    subprocess.check_call(
-        [sys.executable, "-m", "pip", "install", "-q", "-r", str(path)],
-        stdout=subprocess.DEVNULL,
-    )
+    with ThreadPoolExecutor(max_workers=_COPY_CONCURRENCY) as pool:
+        # list() re-raises the first copy error instead of dropping it.
+        list(pool.map(_copy, files))
 
 
 # ---------------------------------------------------------------------------
@@ -168,9 +162,8 @@ def ensure_runtime_requirements(requirements_file: str | Path) -> None:
 def resolve_precision(requested: str = "auto") -> str:
     """Resolve a precision setting against the hardware actually present.
 
-    ``bf16`` needs Ampere or newer; V100 and T4 are still common on Databricks
-    GPU pools and used to fail outright at TrainingArguments construction
-    because bf16 was hardcoded to ``torch.cuda.is_available()``.
+    Every AI Runtime accelerator (A10, H100, B300) supports bf16, but the
+    check stays so CPU runs and local development resolve sensibly.
 
     Returns one of ``"bf16"``, ``"fp16"`` or ``"fp32"``.
     """

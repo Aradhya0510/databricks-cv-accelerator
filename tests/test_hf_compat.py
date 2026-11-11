@@ -27,8 +27,8 @@ from src.utils.hf import (  # noqa: E402
 
 @pytest.mark.parametrize("version", ["4.51.3", "4.44.0", "3.0.2"])
 def test_pre_v5_is_rejected_with_an_actionable_message(version):
-    """The DBR ML runtime ships 4.x, so this is the misconfiguration to catch."""
-    with pytest.raises(RuntimeError, match="requirements_runtime.txt"):
+    """An environment that resolved 4.x must point at the AI environment."""
+    with pytest.raises(RuntimeError, match="databricks_ai_v6"):
         require_transformers_v5(version)
 
 

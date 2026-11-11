@@ -15,8 +15,9 @@ inherited from the library:
 
 ``backend``
     v5 replaced the slow/fast image-processor split with named backends and
-    defaults to torchvision whenever torchvision is installed, which on DBR ML
-    it always is.  The torchvision and PIL backends resize differently, so
+    defaults to torchvision whenever torchvision is installed, which in the
+    AI Runtime AI environment it always is.  The torchvision and PIL backends
+    resize differently, so
     leaving the choice implicit means a library upgrade can move eval metrics
     with no change to this repo.  Pinning it makes preprocessing reproducible
     and keeps training and serving on the same path.
@@ -34,10 +35,11 @@ _REQUIRED_MAJOR = 5
 def require_transformers_v5(version: str | None = None) -> None:
     """Fail fast when the environment predates the v5 APIs used here.
 
-    Databricks Runtime ML still ships transformers 4.x, so a cluster that never
-    installed ``requirements_runtime.txt`` would otherwise fail much later and
-    much less legibly — a ``TypeError`` about an unexpected ``backend`` keyword
-    deep inside ``from_pretrained``.
+    The AI Runtime AI environment ships v5, but an older environment version,
+    the Standard environment with a hand-picked stack, or a serving image can
+    still resolve 4.x — which would otherwise fail much later and much less
+    legibly, as a ``TypeError`` about an unexpected ``backend`` keyword deep
+    inside ``from_pretrained``.
 
     Args:
         version: The version to check. Reads the installed one when omitted;
@@ -57,10 +59,9 @@ def require_transformers_v5(version: str | None = None) -> None:
     if major < _REQUIRED_MAJOR:
         raise RuntimeError(
             f"This framework requires transformers >= {_REQUIRED_MAJOR}, but "
-            f"found {version}. Databricks Runtime ML still ships 4.x, so the "
-            f"pinned runtime dependencies must be installed on the cluster: "
-            f"`pip install -r requirements_runtime.txt`, or declare them as "
-            f"cluster libraries in the job definition."
+            f"found {version}. On AI Runtime, use the Databricks AI environment "
+            f"(databricks_ai_v6), which ships v5; elsewhere, "
+            f"`pip install 'transformers>={_REQUIRED_MAJOR}'`."
         )
 
 

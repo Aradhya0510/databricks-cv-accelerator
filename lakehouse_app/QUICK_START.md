@@ -93,13 +93,12 @@ Make sure you have:
 
 3. **Configure the job:**
    - **Job Name:** `my_first_cv_training`
-   - **Source Path:** `/Workspace/Repos/<username>/databricks-cv-accelerator/src`
+   - **Project Path:** `/Workspace/Users/<username>/databricks-cv-accelerator`
    - ⚠️ Replace `<username>` with your actual username!
 
-4. **Select compute:**
-   - Uncheck "Use Serverless Compute" (for GPU training)
-   - **Node Type:** g5.4xlarge (1 GPU, good for getting started)
-   - **Workers:** 0 (single-node training)
+4. **Select AI Runtime compute:**
+   - **Accelerator:** GPU_1xA10 (good for getting started)
+   - **Nodes:** 1
 
 5. **Launch:**
    - Click "🚀 Launch Training Job"
@@ -220,9 +219,8 @@ Now that you're familiar with the basics:
 ### Scale Up
 
 1. **Distributed training:**
-   - Use multi-GPU (g5.12xlarge with 4 GPUs)
-   - Enable distributed training in config
-   - Increase batch size accordingly
+   - Pick GPU_8xH100 (8 GPUs, DDP is automatic); add nodes to scale further
+   - `batch_size` is per GPU, so the effective batch grows with the GPU count
 
 2. **Batch inference:**
    - Use the "⚙️ Batch Inference" tab
@@ -271,9 +269,9 @@ Now that you're familiar with the basics:
 
 | Model Size | Batch Size | Learning Rate | Epochs | GPU          |
 |-----------|-----------|---------------|--------|--------------|
-| Small     | 32        | 2e-4          | 100    | g5.4xlarge   |
-| Medium    | 16        | 1e-4          | 100    | g5.4xlarge   |
-| Large     | 8         | 5e-5          | 150    | g5.12xlarge  |
+| Small     | 32        | 2e-4          | 100    | GPU_1xA10    |
+| Medium    | 16        | 1e-4          | 100    | GPU_1xH100   |
+| Large     | 8         | 5e-5          | 150    | GPU_8xH100   |
 
 ### Typical Training Times
 

@@ -33,7 +33,9 @@ def deploy_endpoint(
         scale_to_zero_enabled=scale_to_zero,
     )
 
-    config = EndpointCoreConfigInput(served_entities=[served_entity])
+    # ``name`` is a required argument in the Databricks SDK that ships with
+    # the AI Runtime environments; older releases accept it as optional.
+    config = EndpointCoreConfigInput(name=endpoint_name, served_entities=[served_entity])
 
     # Try to create; if already exists, update
     try:

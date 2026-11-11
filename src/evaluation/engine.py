@@ -40,27 +40,14 @@ class EvaluationEngine:
         """Load a model from a local path, model URI, or MLflow run.
 
         Preferred resolution order: *model_uri* → *run_id* → *model_path*.
+        MLflow sources resolve to a flat directory the same way registration
+        does, rather than through ``mlflow.transformers.load_model``, which
+        returns a pipeline instead of the model.
         """
-        if model_uri is not None:
-            import mlflow
+        if model_uri is not None or run_id is not None:
+            from ..serving.artifacts import resolve_model_dir
 
-            return mlflow.transformers.load_model(model_uri)
-
-        if run_id is not None:
-            import mlflow
-
-            # Try model URI stored as a run param (MLflow 3 path)
-            try:
-                client = mlflow.MlflowClient()
-                run = client.get_run(run_id)
-                stored_uri = run.data.params.get("logged_model_uri")
-                if stored_uri:
-                    return mlflow.transformers.load_model(stored_uri)
-            except Exception:
-                pass
-
-            # Fallback: runs:/ URI (deprecated in MLflow 3 but still functional)
-            return mlflow.transformers.load_model(f"runs:/{run_id}/model")
+            model_path = resolve_model_dir(run_id=run_id, model_uri=model_uri)
 
         if model_path is not None:
             from src.utils.hf import MODEL_DTYPE
